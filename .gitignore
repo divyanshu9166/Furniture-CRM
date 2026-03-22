@@ -36,6 +36,35 @@ yarn-error.log*
 # vercel
 .vercel
 
+# MCP config (contains API keys)
+.mcp.json
+
+# Google Stitch local config
+.stitch/
+
+# test/debug files
+kimi_out.txt
+kimi_out_safe.json
+out_models.txt
+test_kimi.js
+test_kimi_2.js
+test_kimi_3.js
+test_kimi_3.txt
+test_kimi_out.txt
+test_models.mjs
+test_stab.js
+ping_kimi.js
+check_nvidia_health.mjs
+models.json
+nvidiamodels.json
+res.json
+res2.json
+dummy.jpg
+dummy2.jpg
+out.webp
+duck.html
+build_doc.html
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
