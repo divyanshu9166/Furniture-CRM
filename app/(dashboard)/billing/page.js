@@ -14,10 +14,11 @@ import {
   SplitSquareHorizontal, Eye, XCircle,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import {
   getInvoices, createInvoice, recordPayment,
   cancelInvoice, createCreditNote, finalizeHeldInvoice,
-  searchContacts, getInvoiceStats,
+  searchContacts, getInvoiceStats, getCustomerProfile,
 } from '@/app/actions/invoices';
 import { getProducts } from '@/app/actions/products';
 import { getStaff } from '@/app/actions/staff';
@@ -100,6 +101,8 @@ export default function BillingPage() {
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
+  const [customerProfile, setCustomerProfile] = useState(null);
+  const [customerProfileLoading, setCustomerProfileLoading] = useState(false);
   const [heldBills, setHeldBills] = useState([]);
   const productSearchRef = useRef(null);
   const customerSearchRef = useRef(null);
@@ -141,6 +144,8 @@ export default function BillingPage() {
 
   const handleCustomerSearch = useCallback(async (value, field) => {
     setPosCustomer(prev => ({ ...prev, [field]: value }));
+    setCustomerProfile(null);
+    setCustomerProfileLoading(false);
     if (value.length >= 2) {
       const res = await searchContacts(value);
       if (res.success && res.data.length > 0) {
@@ -149,16 +154,27 @@ export default function BillingPage() {
       } else {
         setCustomerSuggestions([]);
         setShowCustomerDropdown(false);
+        // Auto-lookup on exact 10-digit phone
+        if (field === 'phone' && value.replace(/\D/g, '').length === 10) {
+          setCustomerProfileLoading(true);
+          const profileRes = await getCustomerProfile(value);
+          setCustomerProfileLoading(false);
+          if (profileRes.success && profileRes.data) setCustomerProfile(profileRes.data);
+        }
       }
     } else {
       setShowCustomerDropdown(false);
     }
   }, []);
 
-  const selectCustomer = (contact) => {
+  const selectCustomer = async (contact) => {
     setPosCustomer({ name: contact.name, phone: contact.phone });
     setShowCustomerDropdown(false);
     setCustomerSuggestions([]);
+    setCustomerProfileLoading(true);
+    const profileRes = await getCustomerProfile(contact.phone, contact.id);
+    setCustomerProfileLoading(false);
+    if (profileRes.success) setCustomerProfile(profileRes.data);
   };
 
   // ─── COMPUTED VALUES ───────────────────────────────────
@@ -198,6 +214,7 @@ export default function BillingPage() {
   const posSgst = posTotalGst - posCgst;
   const posTotal = posAfterDiscount + posTotalGst;
   const posTotalPayments = posPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
 
   const filteredProducts = products.filter(p =>
@@ -239,6 +256,7 @@ export default function BillingPage() {
   const clearPOS = () => {
     setPosItems([]);
     setPosCustomer({ name: '', phone: '' });
+    setCustomerProfile(null);
     setPosDiscount(0);
     setPosDiscountType('flat');
     setPosPayments([{ amount: 0, method: 'Cash', reference: '' }]);
@@ -576,14 +594,14 @@ export default function BillingPage() {
           {/* Filters Bar */}
           <div className="glass-card p-4">
             <div className="flex flex-col gap-3">
-              {/* Row 1: Search + Payment Status */}
+              {/* Row 1: Search + Payment Status (Mobile Only) */}
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                   <input type="search" autoComplete="off" placeholder="Search by customer, phone, invoice ID, or salesperson..." value={search} onChange={e => setSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm focus:ring-2 focus:ring-accent/30 focus:border-accent/50 outline-none transition-all" />
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex sm:hidden overflow-x-auto pb-1 items-center gap-2">
                   <span className="text-[10px] uppercase tracking-wider text-muted font-semibold flex-shrink-0">Payment</span>
                   {['All', 'Paid', 'Partial', 'Pending'].map(s => (
                     <button key={s} onClick={() => setStatusFilter(s)}
@@ -594,8 +612,8 @@ export default function BillingPage() {
                 </div>
               </div>
               {/* Row 2: Invoice Status + Date Range + Sort */}
-              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col xl:flex-row gap-3 items-start xl:items-center justify-between">
+                <div className="flex overflow-x-auto pb-1 items-center gap-2 w-full xl:w-auto">
                   <span className="text-[10px] uppercase tracking-wider text-muted font-semibold flex-shrink-0">Status</span>
                   {['All', 'ACTIVE', 'CANCELLED', 'REFUNDED'].map(s => (
                     <button key={s} onClick={() => setInvoiceStatusFilter(s)}
@@ -604,20 +622,27 @@ export default function BillingPage() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-center gap-2 ml-auto">
-                  <Calendar className="w-3.5 h-3.5 text-muted" />
-                  <input type="date" value={dateRange.from} onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
-                    className="px-2.5 py-1.5 bg-surface border border-border rounded-lg text-xs focus:outline-none focus:border-accent/50" />
-                  <span className="text-xs text-muted">to</span>
-                  <input type="date" value={dateRange.to} onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
-                    className="px-2.5 py-1.5 bg-surface border border-border rounded-lg text-xs focus:outline-none focus:border-accent/50" />
-                  {(dateRange.from || dateRange.to) && (
-                    <button onClick={() => setDateRange({ from: '', to: '' })} className="p-1 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground transition-colors">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                <div className="flex flex-wrap items-center gap-2 justify-end w-full xl:w-auto">
+                  <div className="flex items-center bg-surface border border-border rounded-xl focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/30 transition-all overflow-hidden h-[34px] flex-shrink-0">
+                    <div className="pl-3 pr-2 flex items-center bg-surface-hover/50 h-full border-r border-border/50 text-muted">
+                      <Calendar className="w-3.5 h-3.5" />
+                    </div>
+                    <input type="date" title="Start Date" value={dateRange.from} onChange={e => setDateRange(prev => ({ ...prev, from: e.target.value }))}
+                      className="px-2 pr-1 py-1.5 bg-transparent text-xs text-foreground focus:outline-none min-w-[120px]" />
+                    <span className="text-[11px] font-medium text-muted px-1.5 bg-surface-hover/30 h-full flex items-center">to</span>
+                    <div className="pl-2 pr-2 flex items-center bg-surface-hover/50 h-full border-r border-l border-border/50 text-muted">
+                      <Calendar className="w-3.5 h-3.5" />
+                    </div>
+                    <input type="date" title="End Date" value={dateRange.to} onChange={e => setDateRange(prev => ({ ...prev, to: e.target.value }))}
+                      className="px-2 pr-1 py-1.5 bg-transparent text-xs text-foreground focus:outline-none min-w-[120px]" />
+                    {(dateRange.from || dateRange.to) && (
+                      <button onClick={() => setDateRange({ from: '', to: '' })} className="px-2.5 h-full flex items-center hover:bg-red-500/10 hover:text-red-700 text-muted transition-colors border-l border-border/50">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                   <select value={sortBy} onChange={e => setSortBy(e.target.value)}
-                    className="px-2.5 py-1.5 bg-surface border border-border rounded-lg text-xs focus:outline-none focus:border-accent/50">
+                    className="px-3 py-1.5 bg-surface border border-border rounded-xl text-xs focus:outline-none focus:border-accent/50 h-[34px] min-w-[130px]">
                     <option value="date-desc">Newest first</option>
                     <option value="date-asc">Oldest first</option>
                     <option value="total-desc">Highest amount</option>
@@ -625,6 +650,16 @@ export default function BillingPage() {
                     <option value="balance-desc">Most due</option>
                   </select>
                 </div>
+              </div>
+              {/* Row 3: Payment Status - Desktop Only */}
+              <div className="hidden sm:flex items-center gap-2 mt-1">
+                <span className="text-[10px] uppercase tracking-wider text-muted font-semibold flex-shrink-0">Payment</span>
+                {['All', 'Paid', 'Partial', 'Pending'].map(s => (
+                  <button key={s} onClick={() => setStatusFilter(s)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${statusFilter === s ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
+                    {s}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
@@ -635,7 +670,7 @@ export default function BillingPage() {
               <table className="crm-table">
                 <thead>
                   <tr>
-                    <th>Invoice</th>
+                    <th>Invoice ID</th>
                     <th>Customer</th>
                     <th>Items</th>
                     <th>Total</th>
@@ -972,6 +1007,16 @@ export default function BillingPage() {
                     ))}
                   </div>
                 )}
+
+                {/* Returning customer banner */}
+                <ReturningCustomerCard
+                  profile={customerProfile}
+                  loading={customerProfileLoading}
+                  onApplyDiscount={(value, type) => {
+                    setPosDiscount(value);
+                    setPosDiscountType(type === 'percent' ? 'percent' : 'flat');
+                  }}
+                />
               </div>
             </div>
 
@@ -1064,6 +1109,10 @@ export default function BillingPage() {
                           className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors">
                           Full ({formatCurrency(posTotal)})
                         </button>
+                        <button onClick={() => { paymentAutoFillRef.current = false; updatePaymentSplit(0, 'amount', Math.round(posTotal / 2)); }}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-surface-hover border border-border text-muted hover:text-foreground transition-colors">
+                          50% ({formatCurrency(Math.round(posTotal / 2))})
+                        </button>
                         {quickAmounts.filter(a => a <= posTotal && a !== posTotal).map(a => (
                           <button key={a} onClick={() => { paymentAutoFillRef.current = false; updatePaymentSplit(0, 'amount', a); }}
                             className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-surface-hover border border-border text-muted hover:text-foreground transition-colors">
@@ -1132,6 +1181,12 @@ export default function BillingPage() {
                   <div className="flex justify-between">
                     <span className="text-muted">Discount {posDiscountType === 'percent' ? `(${posDiscount}%)` : ''}</span>
                     <span className="text-success font-medium">-{formatFullCurrency(posDiscountAmount)}</span>
+                  </div>
+                )}
+                {posAdvancePaid > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted">Advance Paid</span>
+                    <span className="text-success font-medium">-{formatFullCurrency(posAdvancePaid)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-xs">

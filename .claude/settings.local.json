@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "mcp__plugin_vercel_vercel__deploy_to_vercel",
-      "Bash(vercel --version)"
+      "Bash(vercel --version)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(xargs grep:*)",
+      "Bash(ls -laR \"/c/Users/divya/Desktop/Furniture CRM/app/\\(dashboard\\)\")"
     ]
   }
 }

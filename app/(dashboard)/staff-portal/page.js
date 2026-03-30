@@ -9,10 +9,12 @@ import {
   Megaphone, AlertTriangle, Search,
   Warehouse, Timer, Home,
   Lock, User, Trash2,
+  ChevronLeft, ChevronRight, Fingerprint,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import Modal from '@/components/Modal';
-import { getStaff, clockIn as serverClockIn, clockOut as serverClockOut, staffStockUpdate } from '@/app/actions/staff';
+import { getStaff, clockIn as serverClockIn, clockOut as serverClockOut, staffStockUpdate, getMonthAttendance, verifyStaffPortalPassword } from '@/app/actions/staff';
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';
 import { moveSelfVisitToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
@@ -38,12 +40,14 @@ const stockActionColors = {
 
 export default function StaffPortalPage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [staff, setStaff] = useState([]);
   const [products, setProducts] = useState([]);
   const [staffLoading, setStaffLoading] = useState(true);
   const [loggedInStaff, setLoggedInStaff] = useState(null);
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [pin, setPin] = useState('');
+  const [accessKey, setAccessKey] = useState('');
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [tab, setTab] = useState('dashboard');
   const [isClockedIn, setIsClockedIn] = useState(true);
@@ -53,6 +57,14 @@ export default function StaffPortalPage() {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [clockInMsg, setClockInMsg] = useState('');
 
+  // Attendance month state
+  const [attendanceMonth, setAttendanceMonth] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() + 1 };
+  });
+  const [monthAttendance, setMonthAttendance] = useState([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+
   useEffect(() => {
     Promise.all([getStaff(), getProducts()]).then(([staffRes, productsRes]) => {
       if (staffRes.success) setStaff(staffRes.data);
@@ -60,6 +72,29 @@ export default function StaffPortalPage() {
       setStaffLoading(false);
     });
   }, []);
+
+  const applyStaffLogin = (found) => {
+    setLoggedInStaff(found);
+    setLoginError('');
+    const todayStr = new Date().toISOString().split('T')[0];
+    const today = found.attendance.find(a => a.date === todayStr);
+    if (today?.clockIn) {
+      setIsClockedIn(true);
+      setClockInTime(today.clockIn);
+    } else {
+      setIsClockedIn(false);
+    }
+    getStaffVisits(found.id).then(res => {
+      if (res.success) setAssignedVisits(res.data);
+    });
+  };
+
+  // Auto-login into the local portal context when authenticated staff user enters this page
+  useEffect(() => {
+    if (!session?.user?.staffId || loggedInStaff || staff.length === 0) return;
+    const found = staff.find(s => s.id === Number(session.user.staffId));
+    if (found) applyStaffLogin(found);
+  }, [session, staff, loggedInStaff]);
 
   // Re-fetch assigned visits when switching to assigned/dashboard tabs so manager updates are visible
   useEffect(() => {
@@ -70,6 +105,16 @@ export default function StaffPortalPage() {
       });
     }
   }, [tab, loggedInStaff]);
+
+  // Fetch month attendance when tab = 'attendance' or month changes
+  useEffect(() => {
+    if (!loggedInStaff || tab !== 'attendance') return;
+    setAttendanceLoading(true);
+    getMonthAttendance(loggedInStaff.id, attendanceMonth.year, attendanceMonth.month).then(res => {
+      if (res.success) setMonthAttendance(res.data);
+      setAttendanceLoading(false);
+    });
+  }, [tab, loggedInStaff, attendanceMonth]);
 
   // Re-fetch self visits from DB when switching to self tab
   useEffect(() => {
@@ -121,33 +166,45 @@ export default function StaffPortalPage() {
   const [selfVisits, setSelfVisits] = useState([]);
   const [deletingVisitId, setDeletingVisitId] = useState(null);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     const found = staff.find(s => String(s.id) === selectedStaffId);
     if (!found) {
       setLoginError('Please select a staff member');
       return;
     }
-    // Simple PIN: last 4 digits of phone
-    const expectedPin = (found.phone || '').replace(/\s/g, '').slice(-4);
-    if (pin !== expectedPin) {
-      setLoginError('Invalid PIN. Use last 4 digits of your phone number.');
+
+    const entered = accessKey.trim();
+    if (!entered) {
+      setLoginError('Please enter password or PIN');
       return;
     }
-    setLoggedInStaff(found);
-    setLoginError('');
-    const todayStr = new Date().toISOString().split('T')[0];
-    const today = found.attendance.find(a => a.date === todayStr);
-    if (today?.clockIn) {
-      setIsClockedIn(true);
-      setClockInTime(today.clockIn);
-    } else {
-      setIsClockedIn(false);
+
+    setLoginSubmitting(true);
+    try {
+      let authenticated = false;
+
+      // If login credentials exist, try password verification first.
+      if (found.hasLogin) {
+        const res = await verifyStaffPortalPassword(found.id, entered);
+        authenticated = !!res.success;
+      }
+
+      // PIN fallback: last 4 digits of phone number.
+      if (!authenticated) {
+        const expectedPin = (found.phone || '').replace(/\s/g, '').slice(-4);
+        authenticated = entered === expectedPin;
+      }
+
+      if (!authenticated) {
+        setLoginError('Invalid password or PIN');
+        return;
+      }
+
+      applyStaffLogin(found);
+    } finally {
+      setLoginSubmitting(false);
     }
-    // Load assigned visits from custom orders
-    getStaffVisits(found.id).then(res => {
-      if (res.success) setAssignedVisits(res.data);
-    });
   };
 
   const getGps = () => new Promise((resolve, reject) => {
@@ -212,7 +269,7 @@ export default function StaffPortalPage() {
   const handleLogout = () => {
     setLoggedInStaff(null);
     setSelectedStaffId('');
-    setPin('');
+    setAccessKey('');
     setTab('dashboard');
   };
 
@@ -445,7 +502,11 @@ export default function StaffPortalPage() {
                 <label className="block text-xs font-medium text-muted mb-1.5">Select Your Name</label>
                 <select
                   value={selectedStaffId}
-                  onChange={e => { setSelectedStaffId(e.target.value); setLoginError(''); }}
+                  onChange={e => {
+                    setSelectedStaffId(e.target.value);
+                    setAccessKey('');
+                    setLoginError('');
+                  }}
                   className="w-full px-4 py-3 bg-surface rounded-xl border border-border text-sm text-foreground"
                 >
                   <option value="">Choose staff member...</option>
@@ -455,18 +516,16 @@ export default function StaffPortalPage() {
                 </select>
               </div>
 
-              {/* PIN */}
               <div>
-                <label className="block text-xs font-medium text-muted mb-1.5">Enter PIN</label>
+                <label className="block text-xs font-medium text-muted mb-1.5">Enter Password or PIN</label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                   <input
                     type="password"
-                    maxLength={4}
-                    placeholder="4-digit PIN"
-                    value={pin}
-                    onChange={e => { setPin(e.target.value); setLoginError(''); }}
-                    className="w-full pl-10 pr-4 py-3 bg-surface rounded-xl border border-border text-sm tracking-[0.5em] text-center"
+                    placeholder="Password or PIN"
+                    value={accessKey}
+                    onChange={e => { setAccessKey(e.target.value); setLoginError(''); }}
+                    className="w-full pl-10 pr-4 py-3 bg-surface rounded-xl border border-border text-sm"
                   />
                 </div>
               </div>
@@ -477,12 +536,12 @@ export default function StaffPortalPage() {
                 </div>
               )}
 
-              <button type="submit" className="w-full py-3 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
-                <LogIn className="w-4 h-4" /> Login
+              <button type="submit" disabled={loginSubmitting} className="w-full py-3 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2">
+                <LogIn className="w-4 h-4" /> {loginSubmitting ? 'Checking...' : 'Login'}
               </button>
             </form>
 
-            <p className="text-[10px] text-muted text-center mt-6">PIN = Last 4 digits of your registered phone number</p>
+            <p className="text-[10px] text-muted text-center mt-6">Enter either assigned password or PIN (last 4 digits of registered phone).</p>
           </div>
         </div>
       </div>
@@ -555,12 +614,12 @@ export default function StaffPortalPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-1">
+      <div className="grid grid-cols-3 gap-1 sm:flex sm:flex-wrap">
         {portalTabs.map(t => {
           const Icon = t.icon;
           return (
-            <button key={t.key} onClick={() => setTab(t.key)} className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
-              <Icon className="w-3.5 h-3.5" /> {t.label}
+            <button key={t.key} onClick={() => setTab(t.key)} className={`flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${tab === t.key ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-border'}`}>
+              <Icon className="w-3.5 h-3.5 flex-shrink-0" /> <span className="truncate">{t.label}</span>
             </button>
           );
         })}
@@ -890,7 +949,7 @@ export default function StaffPortalPage() {
                     </button>
                     {(visit.status === 'Scheduled' || visit.status === 'In Progress') && (
                       <button disabled={visitSaving} onClick={() => handleVisitStatusChange(visit, 'Completed')} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors disabled:opacity-50">
-                        <CheckCircle2 className="w-3 h-3 inline mr-1" /> Mark Completed
+                        <CheckCircle2 className="w-3 h-3 inline mr-1" /> Visit Completed
                       </button>
                     )}
                     {visit.status === 'Scheduled' && (
@@ -1012,59 +1071,273 @@ export default function StaffPortalPage() {
       )}
 
       {/* ===== MY ATTENDANCE TAB ===== */}
-      {tab === 'attendance' && (
-        <div className="space-y-4">
-          <h3 className="text-base font-semibold text-foreground">My Attendance — Last 7 Days</h3>
+      {tab === 'attendance' && (() => {
+        const { year, month } = attendanceMonth;
+        const today = new Date();
+        const todayStr = today.toISOString().split('T')[0];
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const firstWeekday = new Date(year, month - 1, 1).getDay(); // 0=Sun
+        const monthLabel = new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+        const isCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
 
-          {/* Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <div className="glass-card p-4 flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-emerald-500/10"><CheckCircle2 className="w-5 h-5 text-emerald-700" /></div>
-              <div><p className="text-xs text-muted">Present</p><p className="text-lg font-bold text-emerald-700">{me.attendance.filter(a => a.status === 'Present').length}</p></div>
-            </div>
-            <div className="glass-card p-4 flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-red-500/10"><X className="w-5 h-5 text-red-700" /></div>
-              <div><p className="text-xs text-muted">Absent</p><p className="text-lg font-bold text-red-700">{me.attendance.filter(a => a.status === 'Absent').length}</p></div>
-            </div>
-            <div className="glass-card p-4 flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-amber-500/10"><Clock className="w-5 h-5 text-amber-700" /></div>
-              <div><p className="text-xs text-muted">Half Days</p><p className="text-lg font-bold text-amber-700">{me.attendance.filter(a => a.status === 'Half Day').length}</p></div>
-            </div>
-            <div className="glass-card p-4 flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-info-light"><Timer className="w-5 h-5 text-info" /></div>
-              <div><p className="text-xs text-muted">Avg Hours</p><p className="text-lg font-bold text-foreground">{(me.attendance.filter(a => a.hours > 0).reduce((s, a) => s + a.hours, 0) / Math.max(1, me.attendance.filter(a => a.hours > 0).length)).toFixed(1)}h</p></div>
-            </div>
-          </div>
+        const recordMap = {};
+        monthAttendance.forEach(a => { recordMap[a.date] = a; });
 
-          {/* Daily Log */}
-          <div className="glass-card p-5">
-            <div className="space-y-2">
-              {me.attendance.map((a, i) => (
-                <div key={i} className="flex items-center justify-between bg-surface rounded-xl p-4">
-                  <div className="flex items-center gap-3">
-                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold ${attendanceColors[a.status]}`}>
-                      {new Date(a.date).getDate()}
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{new Date(a.date).toLocaleDateString('en-IN', { weekday: 'long', month: 'short', day: 'numeric' })}</p>
-                      <span className={`text-[10px] font-medium px-2 py-0.5 rounded ${attendanceColors[a.status]}`}>{a.status}</span>
-                    </div>
+        const toDateStr = d => `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+        // Stats
+        const presentDays = monthAttendance.filter(a => a.status === 'Present').length;
+        const lateDays    = monthAttendance.filter(a => a.isLate).length;
+        const absentDays  = monthAttendance.filter(a => a.status === 'Absent').length;
+        const workedRecs  = monthAttendance.filter(a => a.hours > 0);
+        const totalHours  = workedRecs.reduce((s, a) => s + a.hours, 0);
+        const avgHours    = workedRecs.length > 0 ? (totalHours / workedRecs.length).toFixed(1) : '0.0';
+        // Attendance rate = present days / working days elapsed this month
+        const workingDaysElapsed = (() => {
+          let count = 0;
+          const cap = isCurrentMonth ? today.getDate() : daysInMonth;
+          for (let d = 1; d <= cap; d++) {
+            if (new Date(year, month - 1, d).getDay() !== 0) count++;
+          }
+          return count;
+        })();
+        const attendanceRate = workingDaysElapsed > 0 ? Math.round(((presentDays + lateDays) / workingDaysElapsed) * 100) : 0;
+
+        const prevMonth = () => setAttendanceMonth(p => {
+          const m = p.month === 1 ? 12 : p.month - 1;
+          const y = p.month === 1 ? p.year - 1 : p.year;
+          return { year: y, month: m };
+        });
+        const nextMonth = () => {
+          if (isCurrentMonth) return;
+          setAttendanceMonth(p => {
+            const m = p.month === 12 ? 1 : p.month + 1;
+            const y = p.month === 12 ? p.year + 1 : p.year;
+            return { year: y, month: m };
+          });
+        };
+
+        // Calendar dot helper
+        const getDotStyle = (d) => {
+          const ds = toDateStr(d);
+          const isFuture = ds > todayStr;
+          const isSun = new Date(year, month - 1, d).getDay() === 0;
+          const rec = recordMap[ds];
+          const isToday = ds === todayStr;
+          if (isFuture) return { dot: 'bg-transparent border border-border', text: 'text-zinc-600' };
+          if (isSun && !rec) return { dot: 'bg-zinc-700/20', text: 'text-zinc-600' };
+          if (!rec) return { dot: 'bg-zinc-600/30', text: 'text-muted' };
+          if (rec.isLate) return { dot: 'bg-amber-500', text: isToday ? 'text-accent font-bold' : 'text-foreground' };
+          if (rec.status === 'Present') return { dot: 'bg-emerald-500', text: isToday ? 'text-accent font-bold' : 'text-foreground' };
+          if (rec.status === 'Absent') return { dot: 'bg-red-500', text: isToday ? 'text-accent font-bold' : 'text-foreground' };
+          if (rec.status === 'Half Day') return { dot: 'bg-orange-400', text: isToday ? 'text-accent font-bold' : 'text-foreground' };
+          return { dot: 'bg-zinc-500/30', text: 'text-muted' };
+        };
+
+        // Build descending day list (past only)
+        const dayList = [];
+        for (let d = daysInMonth; d >= 1; d--) {
+          const ds = toDateStr(d);
+          if (ds > todayStr) continue;
+          const dateObj = new Date(year, month - 1, d);
+          const isSunday = dateObj.getDay() === 0;
+          const rec = recordMap[ds] || null;
+          dayList.push({ d, ds, dateObj, isSunday, rec });
+        }
+
+        return (
+          <div className="space-y-4">
+
+            {/* ── Header ── */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Fingerprint className="w-5 h-5 text-accent" />
+                <h3 className="text-base font-semibold text-foreground">Attendance</h3>
+              </div>
+              <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
+                <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-surface-hover transition-colors text-muted hover:text-foreground">
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <span className="text-sm font-medium text-foreground px-3 min-w-[130px] text-center">{monthLabel}</span>
+                <button onClick={nextMonth} disabled={isCurrentMonth} className="p-1.5 rounded-lg hover:bg-surface-hover transition-colors text-muted hover:text-foreground disabled:opacity-25 disabled:cursor-not-allowed">
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* ── Stat strip ── */}
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { label: 'Present', value: presentDays, sub: `${attendanceRate}% rate`, color: 'text-emerald-600', bg: 'bg-emerald-500/10', bar: 'bg-emerald-500' },
+                { label: 'Absent',  value: absentDays,  sub: `${workingDaysElapsed} work days`, color: 'text-red-600',     bg: 'bg-red-500/10',     bar: 'bg-red-500' },
+                { label: 'Late',    value: lateDays,    sub: 'arrivals',          color: 'text-amber-600', bg: 'bg-amber-500/10', bar: 'bg-amber-500' },
+                { label: 'Avg',     value: `${avgHours}h`, sub: `${totalHours.toFixed(1)}h total`, color: 'text-blue-600',    bg: 'bg-blue-500/10',  bar: 'bg-blue-500' },
+              ].map(s => (
+                <div key={s.label} className="glass-card p-4 flex flex-col gap-2">
+                  <div className={`w-8 h-8 rounded-xl ${s.bg} flex items-center justify-center`}>
+                    <div className={`w-2.5 h-2.5 rounded-full ${s.bar}`} />
                   </div>
-                  <div className="text-right text-xs">
-                    {a.clockIn ? (
-                      <div className="space-y-0.5">
-                        <p className="text-emerald-700 flex items-center gap-1 justify-end"><LogIn className="w-3 h-3" /> {a.clockIn}</p>
-                        {a.clockOut && <p className="text-red-700 flex items-center gap-1 justify-end"><LogOut className="w-3 h-3" /> {a.clockOut}</p>}
-                        {a.hours && <p className="text-muted font-medium">{a.hours} hours</p>}
-                      </div>
-                    ) : <p className="text-muted">—</p>}
+                  <div>
+                    <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
+                    <p className="text-[10px] text-muted leading-none">{s.label}</p>
+                    <p className="text-[10px] text-zinc-500 mt-0.5">{s.sub}</p>
                   </div>
                 </div>
               ))}
             </div>
+
+            {/* ── Attendance rate bar ── */}
+            <div className="glass-card px-5 py-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-medium text-foreground">Monthly Attendance Rate</span>
+                <span className={`text-sm font-bold ${attendanceRate >= 90 ? 'text-emerald-600' : attendanceRate >= 75 ? 'text-amber-600' : 'text-red-600'}`}>{attendanceRate}%</span>
+              </div>
+              <div className="h-2 bg-surface rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${attendanceRate >= 90 ? 'bg-emerald-500' : attendanceRate >= 75 ? 'bg-amber-500' : 'bg-red-500'}`}
+                  style={{ width: `${attendanceRate}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-1.5">
+                <span className="text-[10px] text-zinc-500">{presentDays + lateDays} days present out of {workingDaysElapsed} working days</span>
+                <span className="text-[10px] text-zinc-500">{attendanceRate >= 90 ? '🟢 Excellent' : attendanceRate >= 75 ? '🟡 Good' : '🔴 Needs improvement'}</span>
+              </div>
+            </div>
+
+            {/* ── Calendar heatmap ── */}
+            <div className="glass-card p-5">
+              <p className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Month Overview</p>
+              <div className="grid grid-cols-7 gap-y-2 gap-x-1 mb-2">
+                {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                  <div key={d} className="text-center text-[10px] text-zinc-500 font-medium">{d}</div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-y-2 gap-x-1">
+                {Array(firstWeekday).fill(null).map((_, i) => <div key={`pad-${i}`} />)}
+                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+                  const ds = toDateStr(d);
+                  const { dot, text } = getDotStyle(d);
+                  const isToday = ds === todayStr;
+                  return (
+                    <div key={d} className="flex flex-col items-center gap-1">
+                      <span className={`text-[10px] leading-none ${text}`}>{d}</span>
+                      <div className={`w-5 h-5 rounded-full ${dot} ${isToday ? 'ring-2 ring-accent ring-offset-1 ring-offset-[var(--color-background)]' : ''}`} />
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Legend */}
+              <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border flex-wrap">
+                {[
+                  { dot: 'bg-emerald-500', label: 'Present' },
+                  { dot: 'bg-amber-500',   label: 'Late' },
+                  { dot: 'bg-red-500',     label: 'Absent' },
+                  { dot: 'bg-orange-400',  label: 'Half Day' },
+                  { dot: 'bg-zinc-600/30', label: 'No record' },
+                ].map(l => (
+                  <div key={l.label} className="flex items-center gap-1.5">
+                    <div className={`w-2.5 h-2.5 rounded-full ${l.dot}`} />
+                    <span className="text-[10px] text-zinc-500">{l.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Day-by-day list ── */}
+            <div className="glass-card overflow-hidden">
+              <div className="px-5 py-3 border-b border-border flex items-center justify-between">
+                <p className="text-xs font-medium text-muted uppercase tracking-wider">Daily Log</p>
+                <p className="text-xs text-zinc-500">{dayList.length} days shown</p>
+              </div>
+              {attendanceLoading ? (
+                <div className="flex items-center justify-center py-12 gap-2 text-muted text-sm">
+                  <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+                  Loading...
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {dayList.map(({ d, ds, dateObj, isSunday, rec }) => {
+                    const isToday = ds === todayStr;
+                    const weekday = dateObj.toLocaleDateString('en-IN', { weekday: 'short' });
+                    const dateLabel = dateObj.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+
+                    // Determine status display
+                    let statusLabel, statusClass, dotClass;
+                    if (rec) {
+                      if (rec.status === 'Present' && !rec.isLate) {
+                        statusLabel = 'Present'; statusClass = 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20'; dotClass = 'bg-emerald-500';
+                      } else if (rec.isLate) {
+                        statusLabel = 'Late'; statusClass = 'bg-amber-500/10 text-amber-700 border-amber-500/20'; dotClass = 'bg-amber-500';
+                      } else if (rec.status === 'Absent') {
+                        statusLabel = 'Absent'; statusClass = 'bg-red-500/10 text-red-700 border-red-500/20'; dotClass = 'bg-red-500';
+                      } else if (rec.status === 'Half Day') {
+                        statusLabel = 'Half Day'; statusClass = 'bg-orange-500/10 text-orange-700 border-orange-500/20'; dotClass = 'bg-orange-400';
+                      } else {
+                        statusLabel = rec.status; statusClass = 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'; dotClass = 'bg-zinc-400';
+                      }
+                    } else if (isSunday) {
+                      statusLabel = 'Sunday'; statusClass = 'bg-zinc-500/5 text-zinc-500 border-zinc-500/10'; dotClass = 'bg-zinc-600/20';
+                    } else {
+                      statusLabel = 'No record'; statusClass = 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20'; dotClass = 'bg-zinc-600/30';
+                    }
+
+                    return (
+                      <div key={ds} className={`flex items-center gap-4 px-5 py-3.5 transition-colors ${isToday ? 'bg-accent/5' : isSunday && !rec ? 'opacity-40' : 'hover:bg-surface-hover'}`}>
+
+                        {/* Date column */}
+                        <div className="w-14 flex-shrink-0 text-center">
+                          <p className={`text-xl font-bold leading-none ${isToday ? 'text-accent' : 'text-foreground'}`}>{d}</p>
+                          <p className="text-[10px] text-muted mt-0.5">{weekday}</p>
+                          {isToday && <p className="text-[9px] text-accent font-medium mt-0.5">TODAY</p>}
+                        </div>
+
+                        {/* Dot indicator */}
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${dotClass}`} />
+
+                        {/* Status + times */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${statusClass}`}>{statusLabel}</span>
+                            <span className="text-[10px] text-zinc-500">{dateLabel}</span>
+                          </div>
+                          {rec?.clockIn && (
+                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                              <span className="flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                                <LogIn className="w-3 h-3" /> {rec.clockIn}
+                              </span>
+                              {rec.clockOut && (
+                                <span className="flex items-center gap-1 text-xs text-red-500 font-medium">
+                                  <LogOut className="w-3 h-3" /> {rec.clockOut}
+                                </span>
+                              )}
+                              {rec.clockInDist != null && (
+                                <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                                  <MapPin className="w-2.5 h-2.5" /> {rec.clockInDist}m
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Hours badge */}
+                        {rec?.hours > 0 ? (
+                          <div className="flex-shrink-0 text-right">
+                            <p className="text-base font-bold text-foreground">{rec.hours}<span className="text-xs font-normal text-muted">h</span></p>
+                            {rec.method === 'gps' && <p className="text-[9px] text-teal-600 font-medium">GPS ✓</p>}
+                          </div>
+                        ) : (
+                          <div className="flex-shrink-0 w-10" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ===== MY SALES TAB ===== */}
       {tab === 'sales' && (

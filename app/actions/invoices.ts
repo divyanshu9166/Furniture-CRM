@@ -383,6 +383,80 @@ export async function searchContacts(query: string) {
   }
 }
 
+// ─── GET CUSTOMER PROFILE (returning customer detection) ──
+
+export async function getCustomerProfile(phone: string, contactId?: number) {
+  const selectFields = {
+    id: true,
+    name: true,
+    phone: true,
+    email: true,
+    address: true,
+    invoices: {
+      where: { invoiceStatus: 'ACTIVE' as const },
+      select: { total: true, date: true },
+      orderBy: { date: 'desc' as const },
+    },
+    orders: {
+      select: { amount: true, date: true },
+      orderBy: { date: 'desc' as const },
+    },
+    customOrders: {
+      select: { quotedPrice: true, date: true },
+      orderBy: { date: 'desc' as const },
+    },
+  }
+
+  let contact
+
+  // If we have a direct contact ID (selected from autocomplete), use it — no ambiguity
+  if (contactId) {
+    contact = await prisma.contact.findUnique({ where: { id: contactId }, select: selectFields })
+  } else {
+    // Fallback: lookup by phone (last 10 digits) — used when phone is typed directly
+    const phoneSuffix = phone?.replace(/\D/g, '').slice(-10) || ''
+    if (phoneSuffix.length < 6) return { success: true, data: null }
+    contact = await prisma.contact.findFirst({
+      where: { phone: { contains: phoneSuffix } },
+      select: selectFields,
+    })
+  }
+
+  if (!contact) return { success: true, data: null }
+
+  const totalInvoiceValue = contact.invoices.reduce((s, i) => s + i.total, 0)
+  const totalOrderValue   = contact.orders.reduce((s, o) => s + o.amount, 0)
+  const totalCustomValue  = contact.customOrders.reduce((s, c) => s + (c.quotedPrice || 0), 0)
+
+  const allDates = [
+    ...contact.invoices.map(i => i.date),
+    ...contact.orders.map(o => o.date),
+    ...contact.customOrders.map(c => c.date),
+  ]
+  const lastPurchaseDate = allDates.length > 0
+    ? new Date(Math.max(...allDates.map(d => d.getTime())))
+    : null
+
+  return {
+    success: true,
+    data: {
+      id: contact.id,
+      name: contact.name,
+      phone: contact.phone,
+      email: contact.email,
+      address: contact.address,
+      invoiceCount: contact.invoices.length,
+      orderCount: contact.orders.length,
+      customOrderCount: contact.customOrders.length,
+      totalInvoiceValue,
+      totalOrderValue,
+      totalCustomValue,
+      lifetimeValue: totalInvoiceValue + totalOrderValue + totalCustomValue,
+      lastPurchaseDate: lastPurchaseDate?.toISOString() || null,
+    },
+  }
+}
+
 // ─── GET INVOICE STATS ─────────────────────────────────
 
 export async function getInvoiceStats() {

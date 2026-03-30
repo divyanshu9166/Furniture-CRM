@@ -2,8 +2,10 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
-import { createStaffSchema } from '@/lib/validations/staff'
-import { requireRole } from '@/lib/auth-helpers'
+import { createStaffSchema, updateStaffSchema } from '@/lib/validations/staff'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
+import bcrypt from 'bcryptjs'
+import type { UserRole } from '@prisma/client'
 
 export async function getStaff() {
   const staff = await prisma.staff.findMany({
@@ -12,6 +14,7 @@ export async function getStaff() {
       activities: { orderBy: { date: 'desc' }, take: 10 },
       fieldVisits: { orderBy: { date: 'desc' }, take: 5 },
       stockUpdates: { orderBy: { date: 'desc' }, take: 5 },
+      user: { select: { email: true, isActive: true } },
       _count: { select: { leads: true, invoices: true, customOrders: true } },
     },
     orderBy: { name: 'asc' },
@@ -25,6 +28,9 @@ export async function getStaff() {
       role: s.role,
       phone: s.phone,
       email: s.email,
+      loginUsername: s.user?.email || null,
+      hasLogin: !!s.user,
+      loginActive: s.user?.isActive ?? false,
       status: s.status,
       joinDate: s.joinDate.toISOString().split('T')[0],
       avatar: s.avatar,
@@ -87,22 +93,185 @@ export async function createStaff(data: unknown) {
   const parsed = createStaffSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const staff = await prisma.staff.create({
+  const loginUsername = parsed.data.loginUsername?.trim() || undefined
+  const loginPassword = parsed.data.loginPassword?.trim() || undefined
+
+  if ((loginUsername && !loginPassword) || (!loginUsername && loginPassword)) {
+    return { success: false, error: 'Provide both login username and password, or leave both empty' }
+  }
+
+  if (loginUsername) {
+    const existingUser = await prisma.user.findUnique({ where: { email: loginUsername } })
+    if (existingUser) return { success: false, error: 'Login username is already in use' }
+  }
+
+  const staff = await prisma.$transaction(async tx => {
+    const createdStaff = await tx.staff.create({
+      data: {
+        name: parsed.data.name,
+        role: parsed.data.role,
+        phone: parsed.data.phone,
+        email: parsed.data.email,
+        joinDate: new Date(parsed.data.joinDate),
+        avatar: parsed.data.name.split(' ').map(n => n[0]).join('').toUpperCase(),
+        stats: { leadsAssigned: 0, conversions: 0, revenue: 0, avgResponseTime: '0 min', todaySales: 0, todayRevenue: 0, rating: 0, conversionRate: 0 },
+        target: { monthly: 0, achieved: 0 },
+        commission: { rate: 0, earned: 0, pending: 0 },
+      },
+    })
+
+    if (loginUsername && loginPassword) {
+      const hashedPassword = await bcrypt.hash(loginPassword, 12)
+      await tx.user.create({
+        data: {
+          email: loginUsername,
+          name: parsed.data.name,
+          hashedPassword,
+          role: 'STAFF' as UserRole,
+          staffId: createdStaff.id,
+        },
+      })
+    }
+
+    return createdStaff
+  })
+
+  revalidatePath('/staff')
+  revalidatePath('/settings')
+  return { success: true, data: staff }
+}
+
+export async function assignStaffLogin(staffId: number, loginUsername: string, loginPassword: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+
+  const username = loginUsername.trim()
+  const password = loginPassword.trim()
+
+  if (!username) return { success: false, error: 'Login username is required' }
+  if (!password || password.length < 4) return { success: false, error: 'Password/PIN must be at least 4 characters' }
+
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    include: { user: { select: { id: true } } },
+  })
+  if (!staff) return { success: false, error: 'Staff not found' }
+  if (staff.user) return { success: false, error: 'This team member already has login credentials' }
+
+  const existingUser = await prisma.user.findUnique({ where: { email: username } })
+  if (existingUser) return { success: false, error: 'Login username is already in use' }
+
+  const hashedPassword = await bcrypt.hash(password, 12)
+
+  await prisma.user.create({
     data: {
-      name: parsed.data.name,
-      role: parsed.data.role,
-      phone: parsed.data.phone,
-      email: parsed.data.email,
-      joinDate: new Date(parsed.data.joinDate),
-      avatar: parsed.data.name.split(' ').map(n => n[0]).join('').toUpperCase(),
-      stats: { leadsAssigned: 0, conversions: 0, revenue: 0, avgResponseTime: '0 min', todaySales: 0, todayRevenue: 0, rating: 0, conversionRate: 0 },
-      target: { monthly: 0, achieved: 0 },
-      commission: { rate: 0, earned: 0, pending: 0 },
+      email: username,
+      name: staff.name,
+      hashedPassword,
+      role: 'STAFF' as UserRole,
+      staffId: staff.id,
     },
   })
 
   revalidatePath('/staff')
-  return { success: true, data: staff }
+  revalidatePath('/settings')
+
+  return { success: true }
+}
+
+export async function verifyStaffPortalPassword(staffId: number, password: string) {
+  try { await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
+
+  const pass = password.trim()
+  if (!pass) return { success: false, error: 'Password is required' }
+
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    include: { user: { select: { hashedPassword: true, isActive: true } } },
+  })
+
+  if (!staff || staff.status !== 'Active') return { success: false, error: 'Staff not active' }
+  if (!staff.user || !staff.user.isActive) return { success: false, error: 'Login is not assigned for this staff member' }
+
+  const valid = await bcrypt.compare(pass, staff.user.hashedPassword)
+  if (!valid) return { success: false, error: 'Invalid password' }
+
+  return { success: true }
+}
+
+export async function updateStaffMember(data: unknown) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+
+  const parsed = updateStaffSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  const existing = await prisma.staff.findUnique({
+    where: { id: parsed.data.id },
+    include: { user: { select: { id: true, email: true } } },
+  })
+  if (!existing) return { success: false, error: 'Staff not found' }
+
+  const loginUsername = parsed.data.loginUsername?.trim() || undefined
+  const loginPassword = parsed.data.loginPassword?.trim() || undefined
+
+  if (!existing.user && loginPassword && !loginUsername) {
+    return { success: false, error: 'Provide login username to create credentials' }
+  }
+
+  if (existing.user && !loginUsername && loginPassword) {
+    return { success: false, error: 'Provide login username when updating password' }
+  }
+
+  if (!existing.user && ((loginUsername && !loginPassword) || (!loginUsername && loginPassword))) {
+    return { success: false, error: 'Provide both login username and password to create login' }
+  }
+
+  if (loginUsername) {
+    const used = await prisma.user.findUnique({ where: { email: loginUsername } })
+    if (used && used.id !== existing.user?.id) {
+      return { success: false, error: 'Login username is already in use' }
+    }
+  }
+
+  await prisma.$transaction(async tx => {
+    await tx.staff.update({
+      where: { id: parsed.data.id },
+      data: {
+        name: parsed.data.name,
+        role: parsed.data.role,
+        phone: parsed.data.phone,
+        email: parsed.data.email,
+        status: parsed.data.status,
+        joinDate: new Date(parsed.data.joinDate),
+      },
+    })
+
+    if (existing.user) {
+      const userData: { name: string; email?: string; hashedPassword?: string } = {
+        name: parsed.data.name,
+      }
+
+      if (loginUsername) userData.email = loginUsername
+      if (loginPassword) userData.hashedPassword = await bcrypt.hash(loginPassword, 12)
+
+      await tx.user.update({ where: { id: existing.user.id }, data: userData })
+    } else if (loginUsername && loginPassword) {
+      await tx.user.create({
+        data: {
+          email: loginUsername,
+          name: parsed.data.name,
+          hashedPassword: await bcrypt.hash(loginPassword, 12),
+          role: 'STAFF' as UserRole,
+          staffId: parsed.data.id,
+        },
+      })
+    }
+  })
+
+  revalidatePath('/staff')
+  revalidatePath('/settings')
+  revalidatePath('/staff-portal')
+
+  return { success: true }
 }
 
 // Haversine distance in meters
@@ -120,22 +289,23 @@ export async function clockIn(staffId: number, gps?: { lat: number; lng: number 
   const now = new Date()
   const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
 
+  // Fetch settings once for both geofence and shift-time checks
+  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
+
   // Check geofence if GPS provided
   let distance: number | null = null
   let method = 'manual'
   if (gps) {
     method = 'gps'
-    const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
     if (settings?.storeLat && settings?.storeLng) {
       distance = Math.round(getDistance(gps.lat, gps.lng, settings.storeLat, settings.storeLng))
-      if (distance > settings.geofenceRadius) {
+      if (distance > (settings.geofenceRadius ?? 100)) {
         return { success: false, error: `You are ${distance}m away from the store. Must be within ${settings.geofenceRadius}m to clock in.` }
       }
     }
   }
 
   // Check if late
-  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
   const shiftStart = settings?.shiftStartTime || '09:30'
   const [shiftH, shiftM] = shiftStart.split(':').map(Number)
   const [nowH, nowM] = time.split(':').map(Number)
@@ -194,6 +364,31 @@ export async function clockOut(staffId: number, gps?: { lat: number; lng: number
   revalidatePath('/staff')
   revalidatePath('/staff-portal')
   return { success: true, data: attendance }
+}
+
+export async function getMonthAttendance(staffId: number, year: number, month: number) {
+  // month is 1-based (1 = January)
+  const startDate = new Date(year, month - 1, 1)
+  const endDate = new Date(year, month, 0, 23, 59, 59) // last day of month
+
+  const records = await prisma.attendance.findMany({
+    where: { staffId, date: { gte: startDate, lte: endDate } },
+    orderBy: { date: 'asc' },
+  })
+
+  return {
+    success: true,
+    data: records.map(a => ({
+      date: a.date.toISOString().split('T')[0],
+      clockIn: a.clockIn,
+      clockOut: a.clockOut,
+      hours: a.hours,
+      status: a.status,
+      isLate: a.isLate,
+      method: a.method,
+      clockInDist: a.clockInDist,
+    })),
+  }
 }
 
 export async function getAttendance(staffId: number, days: number = 30) {

@@ -8,18 +8,31 @@ import {
   ChevronRight, Hammer, Eye, X, Upload,
   MapPinned, Image, ShoppingBag,
   ClipboardList, ArrowUpDown, ChevronDown, Trash2,
+  Bell, MessageSquare, Mail, Send, CheckCheck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import {
   getCustomOrders, createCustomOrder, updateCustomOrderStatus,
   scheduleVisit, updateMeasurements, updateReferenceImages,
-  addTimelineEntry,
+  addTimelineEntry, sendProgressNotification,
 } from '@/app/actions/custom-orders';
 import { moveCustomOrderToDraft } from '@/app/actions/drafts';
 import { getStaff } from '@/app/actions/staff';
 import { getProducts } from '@/app/actions/products';
+import { getChannelConfigs } from '@/app/actions/channels';
+import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
+import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 
 const customOrderStatuses = ['All', 'Measurement Scheduled', 'Design Phase', 'In Production', 'Quality Check', 'Installation', 'Delivered'];
+
+const notificationTemplates = {
+  'Measurement Scheduled': (o) => `Hi ${o.customer}! Your custom furniture order ${o.id} has been confirmed. Our team will visit you at ${o.address} to take measurements. We'll keep you updated every step of the way! 🛋️`,
+  'Design Phase': (o) => `Hi ${o.customer}! Great news — your order ${o.id} (${o.type}) is now in the Design Phase. Our designers are working on your custom piece. We'll share updates soon! 🎨`,
+  'In Production': (o) => `Hi ${o.customer}! Your custom ${o.type} (Order ${o.id}) is now In Production. Our craftsmen are bringing your vision to life.${o.estimatedDelivery ? ` Estimated delivery: ${o.estimatedDelivery}.` : ''} Stay tuned! 🔨`,
+  'Quality Check': (o) => `Hi ${o.customer}! Almost there! Your order ${o.id} is currently undergoing Quality Check. We ensure every piece meets our highest standards before it reaches you. ✅`,
+  'Installation': (o) => `Hi ${o.customer}! Exciting news — your custom ${o.type} (Order ${o.id}) is ready for installation! Our team will contact you shortly to schedule a convenient time. 🚚`,
+  'Delivered': (o) => `Hi ${o.customer}! 🎉 Your custom ${o.type} (Order ${o.id}) has been delivered! Thank you for choosing us. We hope you love your new furniture. Please share your feedback anytime!`,
+};
 
 const statusConfig = {
   'Measurement Scheduled': { cls: 'bg-blue-500/10 text-blue-700 border-blue-500/20', icon: Ruler, step: 0 },
@@ -55,6 +68,15 @@ export default function CustomOrdersPage() {
 
   // Reference image upload
   const [uploadingRef, setUploadingRef] = useState(false);
+
+  // Notify customer modal
+  const [showNotify, setShowNotify] = useState(false);
+  const [notifyOrderId, setNotifyOrderId] = useState(null);
+  const [notifyMessage, setNotifyMessage] = useState('');
+  const [notifyChannels, setNotifyChannels] = useState({ whatsapp: true, email: false });
+  const [notifySending, setNotifySending] = useState(false);
+  const [notifyResult, setNotifyResult] = useState(null); // { success, errors }
+  const [waConfig, setWaConfig] = useState(null); // { configured, hasTemplate, templateName }
 
   const reload = useCallback(async () => {
     const res = await getCustomOrders();
@@ -194,6 +216,44 @@ export default function CustomOrdersPage() {
       await reload();
     }
     setSaving(false);
+  };
+
+  // ─── NOTIFY CUSTOMER HANDLER ──────────────────────────
+
+  const openNotifyModal = async (order) => {
+    const template = notificationTemplates[order.status];
+    setNotifyMessage(template ? template(order) : `Hi ${order.customer}! Your order ${order.id} status: ${order.status}.`);
+    setNotifyOrderId(order.dbId);
+    setNotifyResult(null);
+    setWaConfig(null);
+    setShowNotify(true);
+    // Check WhatsApp config
+    const configRes = await getChannelConfigs();
+    if (configRes.success) {
+      const wa = configRes.data.find(c => c.channel === 'WhatsApp');
+      setWaConfig({
+        configured: !!(wa?.enabled && wa?.config?.phoneNumberId && wa?.config?.apiToken),
+        hasTemplate: !!wa?.config?.templateName,
+        templateName: wa?.config?.templateName || null,
+      });
+    }
+  };
+
+  const handleSendNotification = async () => {
+    const channels = Object.entries(notifyChannels).filter(([, v]) => v).map(([k]) => k);
+    if (channels.length === 0) return;
+    setNotifySending(true);
+    setNotifyResult(null);
+    const res = await sendProgressNotification({ orderId: notifyOrderId, message: notifyMessage, channels });
+    setNotifyResult(res);
+    setNotifySending(false);
+    if (res.success) {
+      await reload();
+      if (selectedOrder?.dbId === notifyOrderId) {
+        const updated = (await getCustomOrders()).data?.find(o => o.dbId === notifyOrderId);
+        if (updated) setSelectedOrder(updated);
+      }
+    }
   };
 
   // ─── CREATE ORDER HANDLER ─────────────────────────────
@@ -464,6 +524,9 @@ export default function CustomOrdersPage() {
                 </button>
                 <button onClick={() => { setMeasurementOrderId(selectedOrder.dbId); setShowMeasurements(true); }} className="flex items-center gap-1.5 px-3 py-2 bg-surface hover:bg-surface-hover rounded-lg text-xs font-medium text-foreground border border-border transition-all">
                   <Ruler className="w-3.5 h-3.5 text-purple-700" /> Update Measurements
+                </button>
+                <button onClick={() => openNotifyModal(selectedOrder)} className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 hover:bg-emerald-500/15 rounded-lg text-xs font-medium text-emerald-700 border border-emerald-500/20 transition-all">
+                  <Bell className="w-3.5 h-3.5" /> Notify Customer
                 </button>
                 <label className="flex items-center gap-1.5 px-3 py-2 bg-surface hover:bg-surface-hover rounded-lg text-xs font-medium text-foreground border border-border transition-all cursor-pointer">
                   <Upload className="w-3.5 h-3.5 text-teal-700" /> {uploadingRef ? 'Uploading...' : 'Add Reference Image'}
@@ -746,6 +809,166 @@ export default function CustomOrdersPage() {
           );
         })()}
       </Modal>
+
+      {/* ═══════════════════════════════════════════════════
+          NOTIFY CUSTOMER MODAL
+          ═══════════════════════════════════════════════════ */}
+      <Modal isOpen={showNotify} onClose={() => { setShowNotify(false); setNotifyResult(null); }} title="Notify Customer" size="md">
+        {(() => {
+          const order = customOrders.find(o => o.dbId === notifyOrderId);
+          if (!order) return null;
+          const selectedCount = Object.values(notifyChannels).filter(Boolean).length;
+          return (
+            <div className="space-y-5">
+              {/* Order context */}
+              <div className="flex items-center gap-3 bg-surface rounded-xl p-3">
+                <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
+                  <Bell className="w-4 h-4 text-accent" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{order.customer}</p>
+                  <p className="text-xs text-muted">{order.id} · {order.status}</p>
+                </div>
+                <div className="ml-auto text-right flex-shrink-0">
+                  <p className="text-xs text-muted flex items-center gap-1"><Phone className="w-3 h-3" /> {order.phone}</p>
+                </div>
+              </div>
+
+              {/* Channel selection */}
+              <div>
+                <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Send via</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannels(p => ({ ...p, whatsapp: !p.whatsapp }))}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all flex-1 justify-center ${notifyChannels.whatsapp ? 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30' : 'bg-surface text-muted border-border hover:border-foreground/20'}`}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    WhatsApp
+                    {notifyChannels.whatsapp && <CheckCheck className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotifyChannels(p => ({ ...p, email: !p.email }))}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium border transition-all flex-1 justify-center ${notifyChannels.email ? 'bg-blue-500/10 text-blue-700 border-blue-500/30' : 'bg-surface text-muted border-border hover:border-foreground/20'}`}
+                  >
+                    <Mail className="w-4 h-4" />
+                    Email
+                    {notifyChannels.email && <CheckCheck className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {/* WhatsApp config status */}
+                {notifyChannels.whatsapp && (
+                  <div className="mt-2">
+                    {waConfig === null ? (
+                      <p className="text-xs text-muted">Checking WhatsApp config…</p>
+                    ) : !waConfig.configured ? (
+                      <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-500/10 rounded-lg px-3 py-2 mt-1">
+                        <span className="mt-0.5">⚠️</span>
+                        <span>WhatsApp not configured. Go to <strong>Settings → Channels → WhatsApp</strong> and add your Phone Number ID and API Token.</span>
+                      </div>
+                    ) : waConfig.hasTemplate ? (
+                      <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-500/10 rounded-lg px-3 py-2 mt-1">
+                        <CheckCheck className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span>Using approved template: <strong>{waConfig.templateName}</strong></span>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-500/10 rounded-lg px-3 py-2 mt-1">
+                        <span className="mt-0.5">⚠️</span>
+                        <span>No template set. Message will send as free text — only works if the customer messaged you in the last 24h. Add an approved template in <strong>Settings → Channels → WhatsApp</strong> for reliable outbound delivery.</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Template variable preview — shown when template is configured */}
+              {notifyChannels.whatsapp && waConfig?.hasTemplate && (
+                <div className="bg-surface rounded-xl p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-muted uppercase tracking-wide mb-2">Template variables being sent</p>
+                  {[
+                    { var: '{{1}}', label: 'Customer Name', value: order.contact?.name || order.customer },
+                    { var: '{{2}}', label: 'Order ID', value: order.id },
+                    { var: '{{3}}', label: 'Status', value: order.status },
+                    { var: '{{4}}', label: 'Custom Message', value: notifyMessage.length > 60 ? notifyMessage.slice(0, 60) + '…' : notifyMessage },
+                  ].map(row => (
+                    <div key={row.var} className="flex items-center gap-3 text-xs">
+                      <span className="font-mono text-accent w-8 flex-shrink-0">{row.var}</span>
+                      <span className="text-muted w-24 flex-shrink-0">{row.label}</span>
+                      <span className="text-foreground truncate">{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Quick template buttons */}
+              <div>
+                <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Quick Templates</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.keys(notificationTemplates).map(status => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setNotifyMessage(notificationTemplates[status](order))}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all border ${order.status === status ? 'bg-accent text-white border-accent' : 'bg-surface text-muted border-border hover:text-foreground hover:border-foreground/20'}`}
+                    >
+                      {status}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Message editor */}
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5 uppercase tracking-wide">Message</label>
+                <textarea
+                  rows={5}
+                  value={notifyMessage}
+                  onChange={e => setNotifyMessage(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl text-sm resize-none border border-border bg-surface focus:outline-none focus:border-accent transition-colors"
+                  placeholder="Type your message to the customer..."
+                />
+                <p className="text-[10px] text-muted mt-1 text-right">{notifyMessage.length} characters</p>
+              </div>
+
+              {/* Result feedback */}
+              {notifyResult && (
+                <div className={`rounded-xl px-4 py-3 text-sm ${notifyResult.success ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' : 'bg-red-500/10 text-red-700 border border-red-500/20'}`}>
+                  {notifyResult.success ? (
+                    <p className="font-medium flex items-center gap-2"><CheckCheck className="w-4 h-4" /> Notification sent successfully!</p>
+                  ) : (
+                    <p className="font-medium">Failed: {notifyResult.error}</p>
+                  )}
+                  {notifyResult.errors?.length > 0 && (
+                    <ul className="mt-1 text-xs list-disc list-inside opacity-80">
+                      {notifyResult.errors.map((e, i) => <li key={i}>{e}</li>)}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-1">
+                <button type="button" onClick={() => { setShowNotify(false); setNotifyResult(null); }} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
+                  {notifyResult?.success ? 'Close' : 'Cancel'}
+                </button>
+                {!notifyResult?.success && (
+                  <button
+                    type="button"
+                    onClick={handleSendNotification}
+                    disabled={notifySending || selectedCount === 0 || !notifyMessage.trim()}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                  >
+                    <Send className="w-4 h-4" />
+                    {notifySending ? 'Sending...' : `Send${selectedCount > 0 ? ` via ${Object.entries(notifyChannels).filter(([,v])=>v).map(([k])=>k.charAt(0).toUpperCase()+k.slice(1)).join(' & ')}` : ''}`}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
     </div>
   );
 }
@@ -762,6 +985,12 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
   const [refImages, setRefImages] = useState([]); // [{ file, preview }]
   const [uploadingImages, setUploadingImages] = useState(false);
   const refFileInputRef = useRef(null);
+  // Customer lookup
+  const [newOrderCustomer, setNewOrderCustomer] = useState({ name: '', phone: '' });
+  const [newOrderSuggestions, setNewOrderSuggestions] = useState([]);
+  const [showNewOrderDropdown, setShowNewOrderDropdown] = useState(false);
+  const [newOrderProfile, setNewOrderProfile] = useState(null);
+  const [newOrderProfileLoading, setNewOrderProfileLoading] = useState(false);
 
   const handleRefImageAdd = (e) => {
     const files = Array.from(e.target.files || []);
@@ -809,19 +1038,75 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
     ).slice(0, 10);
   }, [productSearch, products]);
 
+  const handleNewOrderCustomerSearch = async (value, field) => {
+    setNewOrderCustomer(prev => ({ ...prev, [field]: value }));
+    setNewOrderProfile(null);
+    setNewOrderProfileLoading(false);
+    if (value.length >= 2) {
+      const res = await searchContacts(value);
+      if (res.success && res.data.length > 0) {
+        setNewOrderSuggestions(res.data);
+        setShowNewOrderDropdown(true);
+      } else {
+        setNewOrderSuggestions([]);
+        setShowNewOrderDropdown(false);
+        if (field === 'phone' && value.replace(/\D/g, '').length === 10) {
+          setNewOrderProfileLoading(true);
+          const profileRes = await getCustomerProfile(value);
+          setNewOrderProfileLoading(false);
+          if (profileRes.success && profileRes.data) setNewOrderProfile(profileRes.data);
+        }
+      }
+    } else {
+      setShowNewOrderDropdown(false);
+    }
+  };
+
+  const selectNewOrderCustomer = async (contact) => {
+    setNewOrderCustomer({ name: contact.name, phone: contact.phone });
+    setShowNewOrderDropdown(false);
+    setNewOrderSuggestions([]);
+    setNewOrderProfileLoading(true);
+    const profileRes = await getCustomerProfile(contact.phone, contact.id);
+    setNewOrderProfileLoading(false);
+    if (profileRes.success) setNewOrderProfile(profileRes.data);
+  };
+
   return (
     <form onSubmit={handleFormSubmit} className="space-y-4">
       <input type="hidden" name="referenceImagesJson" defaultValue="" />
       {/* Customer Info */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-muted mb-1.5">Customer Name *</label>
-          <input type="text" name="customer" required placeholder="Full name" className="w-full px-4 py-2.5 rounded-xl text-sm" />
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Customer Name *</label>
+            <input type="text" name="customer" required placeholder="Full name"
+              value={newOrderCustomer.name}
+              onChange={e => handleNewOrderCustomerSearch(e.target.value, 'name')}
+              className="w-full px-4 py-2.5 rounded-xl text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Phone *</label>
+            <input type="text" name="phone" required placeholder="+91 XXXXX XXXXX"
+              value={newOrderCustomer.phone}
+              onChange={e => handleNewOrderCustomerSearch(e.target.value, 'phone')}
+              className="w-full px-4 py-2.5 rounded-xl text-sm" />
+          </div>
         </div>
-        <div>
-          <label className="block text-xs font-medium text-muted mb-1.5">Phone *</label>
-          <input type="text" name="phone" required placeholder="+91 XXXXX XXXXX" className="w-full px-4 py-2.5 rounded-xl text-sm" />
-        </div>
+        {showNewOrderDropdown && newOrderSuggestions.length > 0 && (
+          <div className="bg-surface border border-border rounded-xl shadow-lg max-h-[150px] overflow-y-auto">
+            {newOrderSuggestions.map(c => (
+              <button key={c.id} type="button" onClick={() => selectNewOrderCustomer(c)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-hover transition-colors text-left border-b border-border/50 last:border-0">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
+                  <p className="text-xs text-muted">{c.phone}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        <ReturningCustomerCard profile={newOrderProfile} loading={newOrderProfileLoading} />
       </div>
       <div>
         <label className="block text-xs font-medium text-muted mb-1.5">Full Address *</label>

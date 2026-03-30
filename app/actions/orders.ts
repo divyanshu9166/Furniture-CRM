@@ -55,10 +55,19 @@ export async function createOrder(data: unknown) {
     contact = await prisma.contact.create({ data: { name: customer, phone } })
   }
 
-  // Generate display ID
+  // Generate display ID — based on last order's ID to survive deletions
   const prefix = source === 'STORE' ? 'ORD' : source === 'AMAZON' ? 'AMZ' : source === 'FLIPKART' ? 'FK' : 'SHP'
-  const count = await prisma.order.count({ where: { source: source as OrderSource } })
-  const displayId = `${prefix}-${String(count + 1).padStart(3, '0')}`
+  const lastOrder = await prisma.order.findFirst({
+    where: { displayId: { startsWith: prefix } },
+    orderBy: { id: 'desc' },
+    select: { displayId: true },
+  })
+  let nextNum = 1
+  if (lastOrder?.displayId) {
+    const match = lastOrder.displayId.match(/(\d+)$/)
+    if (match) nextNum = parseInt(match[1]) + 1
+  }
+  const displayId = `${prefix}-${String(nextNum).padStart(4, '0')}`
 
   // Check stock availability
   const product = await prisma.product.findUnique({ where: { id: productId } })

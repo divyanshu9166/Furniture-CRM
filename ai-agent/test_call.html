@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Furniture CRM - AI Agent Test Call</title>
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0a0a0a; color: #e5e5e5;
+            display: flex; align-items: center; justify-content: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 400px; width: 100%; padding: 2rem;
+            border: 1px solid #262626; border-radius: 1rem;
+            background: #141414;
+        }
+        h1 { font-size: 1.25rem; text-align: center; margin-bottom: 0.5rem; }
+        .subtitle { text-align: center; color: #737373; font-size: 0.8rem; margin-bottom: 1.5rem; }
+        .status {
+            text-align: center; padding: 0.75rem; border-radius: 0.5rem;
+            background: #1a1a1a; margin-bottom: 1rem; font-size: 0.85rem;
+        }
+        .status.connected { color: #22c55e; }
+        .status.disconnected { color: #ef4444; }
+        .status.connecting { color: #f59e0b; }
+        .btn {
+            width: 100%; padding: 0.75rem; border: none; border-radius: 0.75rem;
+            font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+            margin-bottom: 0.5rem;
+        }
+        .btn-call { background: #22c55e; color: white; }
+        .btn-call:hover { background: #16a34a; }
+        .btn-end { background: #ef4444; color: white; }
+        .btn-end:hover { background: #dc2626; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .log {
+            margin-top: 1rem; padding: 0.75rem; background: #0a0a0a;
+            border: 1px solid #262626; border-radius: 0.5rem;
+            max-height: 200px; overflow-y: auto; font-size: 0.75rem;
+            font-family: monospace; color: #a3a3a3;
+        }
+        .log p { margin-bottom: 0.25rem; }
+        .log .time { color: #525252; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI Agent Test Call</h1>
+        <p class="subtitle">Furniture CRM Voice Agent</p>
+        <div id="status" class="status disconnected">Disconnected</div>
+        <button id="callBtn" class="btn btn-call" onclick="startCall()">Start Test Call</button>
+        <button id="endBtn" class="btn btn-end" onclick="endCall()" disabled>End Call</button>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script>
+        let room = null;
+
+        function log(msg) {
+            const el = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            el.innerHTML += `<p><span class="time">[${time}]</span> ${msg}</p>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function setStatus(text, cls) {
+            const el = document.getElementById('status');
+            el.textContent = text;
+            el.className = 'status ' + cls;
+        }
+
+        async function startCall() {
+            document.getElementById('callBtn').disabled = true;
+            setStatus('Connecting...', 'connecting');
+            log('Requesting token...');
+
+            try {
+                const resp = await fetch('/token');
+                const data = await resp.json();
+                log(`Token received. Room: ${data.room}`);
+
+                room = new LivekitClient.Room();
+
+                room.on(LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+                    if (track.kind === 'audio') {
+                        const el = track.attach();
+                        document.body.appendChild(el);
+                        log('Agent audio connected');
+                    }
+                });
+
+                room.on(LivekitClient.RoomEvent.Disconnected, () => {
+                    setStatus('Disconnected', 'disconnected');
+                    document.getElementById('callBtn').disabled = false;
+                    document.getElementById('endBtn').disabled = true;
+                    log('Disconnected from room');
+                });
+
+                await room.connect(data.url, data.token);
+                setStatus('Connected - Speaking with AI Agent', 'connected');
+                document.getElementById('endBtn').disabled = false;
+                log('Connected to room. Enabling microphone...');
+
+                await room.localParticipant.setMicrophoneEnabled(true);
+                log('Microphone enabled. You can speak now.');
+            } catch (err) {
+                log(`Error: ${err.message}`);
+                setStatus('Connection failed', 'disconnected');
+                document.getElementById('callBtn').disabled = false;
+            }
+        }
+
+        async function endCall() {
+            if (room) {
+                await room.disconnect();
+                room = null;
+            }
+            setStatus('Disconnected', 'disconnected');
+            document.getElementById('callBtn').disabled = false;
+            document.getElementById('endBtn').disabled = true;
+            log('Call ended');
+        }
+    </script>
+</body>
+</html>

@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Store, Users, Link2, Bell, Bot, Save, Plus, Trash2, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle } from 'lucide-react';
+import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings';
-import { getStaff } from '@/app/actions/staff';
+import { getStaff, createStaff, assignStaffLogin, updateStaffMember } from '@/app/actions/staff';
 import { getChannelConfigs, upsertChannelConfig } from '@/app/actions/channels';
 import { testSmtp, sendSmtpTestEmail } from '@/app/actions/email-campaigns';
 
@@ -18,6 +18,8 @@ const channelDefinitions = [
       { key: 'phoneNumberId', label: 'Phone Number ID', placeholder: 'From Meta Business Suite', type: 'text' },
       { key: 'apiToken', label: 'Permanent API Token', placeholder: 'Meta Graph API token', type: 'password' },
       { key: 'verifyToken', label: 'Webhook Verify Token', placeholder: 'Any string you choose', type: 'text' },
+      { key: 'templateName', label: 'Notification Template Name', placeholder: 'e.g. furniture_order_update (approved template)', type: 'text' },
+      { key: 'templateLanguage', label: 'Template Language Code', placeholder: 'en (default)', type: 'text' },
     ],
     docs: 'https://developers.facebook.com/docs/whatsapp/cloud-api/get-started',
   },
@@ -64,11 +66,48 @@ const nonChannelIntegrations = [
   { name: 'Razorpay', description: 'Accept online payments and track transactions', connected: false, icon: '💳' },
 ];
 
+const getInitialInviteForm = () => ({
+  name: '',
+  role: 'Sales Executive',
+  phone: '',
+  email: '',
+  joinDate: new Date().toISOString().split('T')[0],
+  loginUsername: '',
+  loginPassword: '',
+});
+
+const getInitialEditForm = () => ({
+  id: '',
+  name: '',
+  role: 'Sales Executive',
+  phone: '',
+  email: '',
+  status: 'Active',
+  joinDate: new Date().toISOString().split('T')[0],
+  loginUsername: '',
+  loginPassword: '',
+});
+
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('store');
   const [loading, setLoading] = useState(true);
   const [storeSettings, setStoreSettings] = useState(null);
   const [teamMembers, setTeamMembers] = useState([]);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
+  const [inviteForm, setInviteForm] = useState(getInitialInviteForm());
+  const [showLoginSetupForm, setShowLoginSetupForm] = useState(false);
+  const [loginSetupForm, setLoginSetupForm] = useState({ staffId: '', loginUsername: '', loginPassword: '' });
+  const [assigningLogin, setAssigningLogin] = useState(false);
+  const [assignLoginError, setAssignLoginError] = useState('');
+  const [assignLoginSuccess, setAssignLoginSuccess] = useState('');
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editForm, setEditForm] = useState(getInitialEditForm());
+  const [editingMember, setEditingMember] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [editSuccess, setEditSuccess] = useState('');
   const [saving, setSaving] = useState(false);
   const [detectingGps, setDetectingGps] = useState(false);
   const [gpsDetected, setGpsDetected] = useState(null); // { lat, lng, address }
@@ -95,6 +134,153 @@ export default function SettingsPage() {
   const [smtpTestEmail, setSmtpTestEmail] = useState('');
   const [smtpSaving, setSmtpSaving] = useState(false);
   const [showSmtpPass, setShowSmtpPass] = useState(false);
+
+  const mapTeamMember = (s) => ({
+    id: s.id,
+    name: s.name,
+    phone: s.phone || '',
+    email: s.email || '',
+    role: s.role || 'Staff',
+    status: s.status || 'Active',
+    joinDate: s.joinDate || new Date().toISOString().split('T')[0],
+    loginUsername: s.loginUsername || '',
+    hasLogin: !!s.hasLogin,
+    loginActive: !!s.loginActive,
+  });
+
+  const refreshTeamMembers = async () => {
+    const staffRes = await getStaff();
+    if (staffRes.success) setTeamMembers(staffRes.data.map(mapTeamMember));
+  };
+
+  const handleInviteMember = async (e) => {
+    e.preventDefault();
+    setInviting(true);
+    setInviteError('');
+    setInviteSuccess('');
+    try {
+      const payload = {
+        ...inviteForm,
+        loginUsername: inviteForm.loginUsername.trim(),
+        loginPassword: inviteForm.loginPassword,
+      };
+
+      const res = await createStaff(payload);
+      if (!res.success) {
+        setInviteError(res.error || 'Failed to add team member');
+        return;
+      }
+
+      await refreshTeamMembers();
+      setInviteSuccess('Team member added successfully');
+      setInviteForm(getInitialInviteForm());
+      setShowInviteForm(false);
+    } catch (err) {
+      console.error('Invite member error:', err);
+      setInviteError('Failed to add team member. Please try again.');
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const openAssignLoginForm = (member) => {
+    setShowLoginSetupForm(true);
+    setAssignLoginError('');
+    setAssignLoginSuccess('');
+    setLoginSetupForm({
+      staffId: String(member.id),
+      loginUsername: member.email || '',
+      loginPassword: '',
+    });
+  };
+
+  const handleAssignLogin = async (e) => {
+    e.preventDefault();
+    if (!loginSetupForm.staffId) return;
+
+    setAssigningLogin(true);
+    setAssignLoginError('');
+    setAssignLoginSuccess('');
+
+    try {
+      const res = await assignStaffLogin(
+        Number(loginSetupForm.staffId),
+        loginSetupForm.loginUsername,
+        loginSetupForm.loginPassword
+      );
+
+      if (!res.success) {
+        setAssignLoginError(res.error || 'Failed to assign login credentials');
+        return;
+      }
+
+      await refreshTeamMembers();
+      setAssignLoginSuccess('Login credentials assigned successfully');
+      setShowLoginSetupForm(false);
+      setLoginSetupForm({ staffId: '', loginUsername: '', loginPassword: '' });
+    } catch (err) {
+      console.error('Assign login error:', err);
+      setAssignLoginError('Failed to assign login credentials. Please try again.');
+    } finally {
+      setAssigningLogin(false);
+    }
+  };
+
+  const openEditMemberForm = (member) => {
+    setShowEditForm(true);
+    setEditError('');
+    setEditSuccess('');
+    setEditForm({
+      id: String(member.id),
+      name: member.name,
+      role: member.role,
+      phone: member.phone || '',
+      email: member.email || '',
+      status: member.status || 'Active',
+      joinDate: member.joinDate || new Date().toISOString().split('T')[0],
+      loginUsername: member.loginUsername || '',
+      loginPassword: '',
+    });
+  };
+
+  const handleUpdateMember = async (e) => {
+    e.preventDefault();
+    if (!editForm.id) return;
+
+    setEditingMember(true);
+    setEditError('');
+    setEditSuccess('');
+
+    try {
+      const payload = {
+        id: Number(editForm.id),
+        name: editForm.name,
+        role: editForm.role,
+        phone: editForm.phone,
+        email: editForm.email,
+        status: editForm.status,
+        joinDate: editForm.joinDate,
+        loginUsername: editForm.loginUsername.trim(),
+        loginPassword: editForm.loginPassword,
+      };
+
+      const res = await updateStaffMember(payload);
+      if (!res.success) {
+        setEditError(res.error || 'Failed to update team member');
+        return;
+      }
+
+      await refreshTeamMembers();
+      setEditSuccess('Team member updated successfully');
+      setShowEditForm(false);
+      setEditForm(getInitialEditForm());
+    } catch (err) {
+      console.error('Update team member error:', err);
+      setEditError('Failed to update team member. Please try again.');
+    } finally {
+      setEditingMember(false);
+    }
+  };
 
   const handleDetectLocation = async () => {
     setDetectingGps(true);
@@ -191,12 +377,7 @@ export default function SettingsPage() {
           smtpSecure: settingsRes.data.smtpSecure || false,
         });
       }
-      if (staffRes.success) setTeamMembers(staffRes.data.map(s => ({
-        name: s.name,
-        email: s.email || '',
-        role: s.role || 'Staff',
-        status: s.status || 'Active',
-      })));
+      if (staffRes.success) setTeamMembers(staffRes.data.map(mapTeamMember));
       if (channelsRes.success) {
         const configMap = {};
         const formMap = {};
@@ -392,37 +573,328 @@ export default function SettingsPage() {
             <div className="glass-card p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4 sm:mb-5">
                 <h2 className="text-lg font-semibold text-foreground">Team Members</h2>
-                <button className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"><Plus className="w-4 h-4" /> Invite</button>
+                <button
+                  onClick={() => {
+                    setShowInviteForm(prev => !prev);
+                    setInviteError('');
+                    setInviteSuccess('');
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
+                >
+                  <Plus className="w-4 h-4" /> {showInviteForm ? 'Close' : 'Invite'}
+                </button>
               </div>
+
+              {inviteSuccess && <p className="mb-3 text-xs text-success">{inviteSuccess}</p>}
+              {inviteError && <p className="mb-3 text-xs text-danger">{inviteError}</p>}
+
+              {showInviteForm && (
+                <form onSubmit={handleInviteMember} className="mb-5 p-4 rounded-xl bg-surface border border-border space-y-3">
+                  <p className="text-xs text-muted">Add a team member and optionally assign login credentials. Username is used as email login.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Full Name</label>
+                      <input
+                        type="text"
+                        value={inviteForm.name}
+                        onChange={e => setInviteForm(prev => ({ ...prev, name: e.target.value }))}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Role</label>
+                      <select
+                        value={inviteForm.role}
+                        onChange={e => setInviteForm(prev => ({ ...prev, role: e.target.value }))}
+                        className="w-full"
+                      >
+                        <option value="Senior Sales Executive">Senior Sales Executive</option>
+                        <option value="Sales Executive">Sales Executive</option>
+                        <option value="Junior Sales Executive">Junior Sales Executive</option>
+                        <option value="Design Consultant">Design Consultant</option>
+                        <option value="Warehouse Manager">Warehouse Manager</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Phone</label>
+                      <input
+                        type="tel"
+                        value={inviteForm.phone}
+                        onChange={e => setInviteForm(prev => ({ ...prev, phone: e.target.value }))}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Staff Email</label>
+                      <input
+                        type="email"
+                        value={inviteForm.email}
+                        onChange={e => setInviteForm(prev => ({ ...prev, email: e.target.value }))}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
+                      <input
+                        type="email"
+                        value={inviteForm.loginUsername}
+                        onChange={e => setInviteForm(prev => ({ ...prev, loginUsername: e.target.value }))}
+                        placeholder="username@example.com"
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Password</label>
+                      <input
+                        type="password"
+                        value={inviteForm.loginPassword}
+                        onChange={e => setInviteForm(prev => ({ ...prev, loginPassword: e.target.value }))}
+                        placeholder="Minimum 4 characters"
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Join Date</label>
+                      <input
+                        type="date"
+                        value={inviteForm.joinDate}
+                        onChange={e => setInviteForm(prev => ({ ...prev, joinDate: e.target.value }))}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={inviting}
+                      className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white rounded-xl text-sm font-semibold transition-all"
+                    >
+                      {inviting ? 'Adding...' : 'Add Team Member'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInviteForm(getInitialInviteForm());
+                        setInviteError('');
+                        setInviteSuccess('');
+                      }}
+                      className="px-3 py-2 border border-border rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-all"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {assignLoginSuccess && <p className="mb-3 text-xs text-success">{assignLoginSuccess}</p>}
+              {assignLoginError && <p className="mb-3 text-xs text-danger">{assignLoginError}</p>}
+
+              {showLoginSetupForm && (
+                <form onSubmit={handleAssignLogin} className="mb-5 p-4 rounded-xl bg-surface border border-border space-y-3">
+                  <p className="text-xs text-muted">Assign login credentials for an existing team member.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Team Member</label>
+                      <select
+                        value={loginSetupForm.staffId}
+                        onChange={e => setLoginSetupForm(prev => ({ ...prev, staffId: e.target.value }))}
+                        required
+                        className="w-full"
+                      >
+                        <option value="">Select member</option>
+                        {teamMembers.filter(m => !m.hasLogin).map(m => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
+                      <input
+                        type="email"
+                        value={loginSetupForm.loginUsername}
+                        onChange={e => setLoginSetupForm(prev => ({ ...prev, loginUsername: e.target.value }))}
+                        required
+                        className="w-full"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Password</label>
+                      <input
+                        type="password"
+                        value={loginSetupForm.loginPassword}
+                        onChange={e => setLoginSetupForm(prev => ({ ...prev, loginPassword: e.target.value }))}
+                        required
+                        minLength={4}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={assigningLogin}
+                      className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white rounded-xl text-sm font-semibold transition-all"
+                    >
+                      {assigningLogin ? 'Assigning...' : 'Assign Login'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowLoginSetupForm(false);
+                        setAssignLoginError('');
+                        setAssignLoginSuccess('');
+                        setLoginSetupForm({ staffId: '', loginUsername: '', loginPassword: '' });
+                      }}
+                      className="px-3 py-2 border border-border rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-all"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {editSuccess && <p className="mb-3 text-xs text-success">{editSuccess}</p>}
+              {editError && <p className="mb-3 text-xs text-danger">{editError}</p>}
+
+              {showEditForm && (
+                <form onSubmit={handleUpdateMember} className="mb-5 p-4 rounded-xl bg-surface border border-border space-y-3">
+                  <p className="text-xs text-muted">Update team member profile and optionally reset login password.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Full Name</label>
+                      <input type="text" value={editForm.name} onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))} required className="w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Role</label>
+                      <select value={editForm.role} onChange={e => setEditForm(prev => ({ ...prev, role: e.target.value }))} className="w-full">
+                        <option value="Senior Sales Executive">Senior Sales Executive</option>
+                        <option value="Sales Executive">Sales Executive</option>
+                        <option value="Junior Sales Executive">Junior Sales Executive</option>
+                        <option value="Design Consultant">Design Consultant</option>
+                        <option value="Warehouse Manager">Warehouse Manager</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Status</label>
+                      <select value={editForm.status} onChange={e => setEditForm(prev => ({ ...prev, status: e.target.value }))} className="w-full">
+                        <option value="Active">Active</option>
+                        <option value="Off Duty">Off Duty</option>
+                        <option value="Inactive">Inactive</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Phone</label>
+                      <input type="tel" value={editForm.phone} onChange={e => setEditForm(prev => ({ ...prev, phone: e.target.value }))} required className="w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Staff Email</label>
+                      <input type="email" value={editForm.email} onChange={e => setEditForm(prev => ({ ...prev, email: e.target.value }))} required className="w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Join Date</label>
+                      <input type="date" value={editForm.joinDate} onChange={e => setEditForm(prev => ({ ...prev, joinDate: e.target.value }))} required className="w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Login Username</label>
+                      <input type="email" value={editForm.loginUsername} onChange={e => setEditForm(prev => ({ ...prev, loginUsername: e.target.value }))} placeholder="username@example.com" className="w-full" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">New Password (optional)</label>
+                      <input type="password" value={editForm.loginPassword} onChange={e => setEditForm(prev => ({ ...prev, loginPassword: e.target.value }))} placeholder="Leave blank to keep current" className="w-full" />
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="submit" disabled={editingMember} className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white rounded-xl text-sm font-semibold transition-all">
+                      {editingMember ? 'Saving...' : 'Save Member'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditForm(false);
+                        setEditError('');
+                        setEditSuccess('');
+                        setEditForm(getInitialEditForm());
+                      }}
+                      className="px-3 py-2 border border-border rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-all"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {/* Desktop table */}
               <table className="crm-table hidden sm:table">
-                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
+                <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Login</th><th>Status</th><th>Action</th></tr></thead>
                 <tbody>
-                  {teamMembers.map((m, i) => (
-                    <tr key={i}>
+                  {teamMembers.map((m) => (
+                    <tr key={m.id}>
                       <td className="font-medium text-foreground">{m.name}</td>
                       <td className="text-muted">{m.email}</td>
                       <td><span className="badge bg-accent-light text-accent">{m.role}</span></td>
+                      <td>
+                        {m.hasLogin ? (
+                          <div className="flex flex-col">
+                            <span className="text-xs text-foreground">{m.loginUsername}</span>
+                            <span className={`text-[10px] ${m.loginActive ? 'text-success' : 'text-muted'}`}>{m.loginActive ? 'Active login' : 'Login disabled'}</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted">Not assigned</span>
+                            <button
+                              onClick={() => openAssignLoginForm(m)}
+                              className="text-[10px] px-2 py-0.5 rounded border border-border text-accent hover:bg-accent/10 transition-colors"
+                            >
+                              Set Login
+                            </button>
+                          </div>
+                        )}
+                      </td>
                       <td><span className={`badge ${m.status === 'Active' ? 'bg-success-light text-success' : 'bg-info-light text-info'}`}>{m.status}</span></td>
-                      <td>{m.role !== 'Owner' && <button className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-danger"><Trash2 className="w-4 h-4" /></button>}</td>
+                      <td>
+                        <button
+                          onClick={() => openEditMemberForm(m)}
+                          className="text-[10px] px-2 py-0.5 rounded border border-border text-accent hover:bg-accent/10 transition-colors"
+                        >
+                          Edit
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {/* Mobile cards */}
               <div className="space-y-3 sm:hidden">
-                {teamMembers.map((m, i) => (
-                  <div key={i} className="p-3 rounded-xl bg-surface border border-border">
+                {teamMembers.map((m) => (
+                  <div key={m.id} className="p-3 rounded-xl bg-surface border border-border">
                     <div className="flex items-start justify-between">
                       <div>
                         <p className="text-sm font-medium text-foreground">{m.name}</p>
                         <p className="text-xs text-muted mt-0.5">{m.email}</p>
+                        <p className="text-[11px] text-muted mt-1">Login: {m.hasLogin ? m.loginUsername : 'Not assigned'}</p>
                       </div>
-                      {m.role !== 'Owner' && <button className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-danger"><Trash2 className="w-4 h-4" /></button>}
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <span className="badge bg-accent-light text-accent">{m.role}</span>
                       <span className={`badge ${m.status === 'Active' ? 'bg-success-light text-success' : 'bg-info-light text-info'}`}>{m.status}</span>
+                      <button
+                        onClick={() => openEditMemberForm(m)}
+                        className="text-[10px] px-2 py-0.5 rounded border border-border text-accent hover:bg-accent/10 transition-colors"
+                      >
+                        Edit
+                      </button>
+                      {!m.hasLogin && (
+                        <button
+                          onClick={() => openAssignLoginForm(m)}
+                          className="text-[10px] px-2 py-0.5 rounded border border-border text-accent hover:bg-accent/10 transition-colors"
+                        >
+                          Set Login
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 
-const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/api/walkin', '/api/email-track']
+const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/api/walkin', '/api/email-track', '/api/calls/log', '/api/calls/schedule-callback', '/api/appointments/create']
 
 // Role-based route restrictions
 const routePermissions: Record<string, string[]> = {
@@ -14,7 +14,7 @@ const routePermissions: Record<string, string[]> = {
   '/email-marketing': ['ADMIN', 'MANAGER'],
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // Allow public paths
@@ -62,6 +62,6 @@ export async function middleware(req: NextRequest) {
   return response
 }
 
-export const config = {
+export const proxyConfig = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 }

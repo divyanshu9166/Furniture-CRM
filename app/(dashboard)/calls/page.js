@@ -31,12 +31,22 @@ import {
   Users,
   CalendarPlus,
   X,
+  Bot,
+  PhoneCall,
+  Mic,
+  MicOff,
+  Wifi,
+  WifiOff,
+  Settings,
+  Loader2,
+  Volume2,
 } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import Modal from '@/components/Modal';
-import { getCallLogs } from '@/app/actions/calls';
+import { getCallLogs, initiateAICall, getAIAgentStatus } from '@/app/actions/calls';
 
 const TABS = [
+  { id: 'ai-caller', label: 'AI Caller', icon: Bot },
   { id: 'logs', label: 'Call Logs', icon: Phone },
   { id: 'phonebook', label: 'Phone Book', icon: BookOpen },
   { id: 'transcripts', label: 'Transcripts', icon: MessageSquare },
@@ -51,7 +61,7 @@ const tagFilters = ['All', 'Hot Lead', 'Warm Lead', 'Cold Lead', 'Customer', 'Un
 export default function CallsPage() {
   const [callLogs, setCallLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('logs');
+  const [activeTab, setActiveTab] = useState('ai-caller');
   const [searchQuery, setSearchQuery] = useState('');
   const [directionFilter, setDirectionFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -63,12 +73,37 @@ export default function CallsPage() {
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   const [expandedTranscript, setExpandedTranscript] = useState(null);
 
+  // AI Caller state
+  const [agentStatus, setAgentStatus] = useState(null);
+  const [outboundPhone, setOutboundPhone] = useState('');
+  const [outboundName, setOutboundName] = useState('');
+  const [outboundReason, setOutboundReason] = useState('');
+  const [callingState, setCallingState] = useState('idle'); // idle | calling | connected | ended
+  const [browserCallState, setBrowserCallState] = useState('idle'); // idle | connecting | connected
+  const [callMessage, setCallMessage] = useState('');
+
+  const refreshLogs = () => {
+    getCallLogs().then(res => {
+      if (res.success) setCallLogs(res.data);
+    });
+  };
+
   useEffect(() => {
     getCallLogs().then(res => {
       if (res.success) setCallLogs(res.data);
       setLoading(false);
     });
+    getAIAgentStatus().then(res => {
+      if (res.success) setAgentStatus(res.data);
+    });
   }, []);
+
+  // Auto-refresh every 15s while a call is in progress
+  useEffect(() => {
+    if (callingState !== 'connected') return;
+    const interval = setInterval(refreshLogs, 15000);
+    return () => clearInterval(interval);
+  }, [callingState]);
 
   // Derive phone book from call logs
   const phoneBook = useMemo(() => {
@@ -390,7 +425,7 @@ export default function CallsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredPhoneBook.map((contact) => (
           <div
-            key={contact.id}
+            key={contact.phone || contact.name}
             className="glass-card p-4 cursor-pointer hover:border-accent/30 transition-all"
             onClick={() => setSelectedContact(contact)}
           >
@@ -772,6 +807,371 @@ export default function CallsPage() {
     );
   };
 
+  // ─── AI CALLER TAB ───
+  const handleOutboundCall = async () => {
+    if (!outboundPhone) return;
+    setCallingState('calling');
+    setCallMessage('');
+    const res = await initiateAICall(outboundPhone, outboundReason, outboundName);
+    if (res.success) {
+      setCallingState('connected');
+      setCallMessage(`Call initiated! Room: ${res.data.roomName}`);
+      // Refresh at 30s, 60s, 120s, 180s after call starts to catch when it ends
+      [30000, 60000, 120000, 180000, 300000].forEach(delay => {
+        setTimeout(() => getCallLogs().then(r => { if (r.success) setCallLogs(r.data); }), delay);
+      });
+    } else {
+      setCallingState('idle');
+      setCallMessage(res.error || 'Failed to initiate call');
+    }
+  };
+
+  const handleBrowserCall = async () => {
+    if (browserCallState === 'connected') {
+      // End call
+      if (window._livekitRoom) {
+        await window._livekitRoom.disconnect();
+        window._livekitRoom = null;
+      }
+      setBrowserCallState('idle');
+      return;
+    }
+
+    setBrowserCallState('connecting');
+    try {
+      const resp = await fetch('/api/calls/token');
+      const data = await resp.json();
+      if (data.error) {
+        setBrowserCallState('idle');
+        setCallMessage(data.error);
+        return;
+      }
+
+      // Dynamically load LiveKit client
+      if (!window.LivekitClient) {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js';
+        document.head.appendChild(script);
+        await new Promise((resolve, reject) => {
+          script.onload = resolve;
+          script.onerror = reject;
+        });
+      }
+
+      const room = new window.LivekitClient.Room();
+      window._livekitRoom = room;
+
+      room.on(window.LivekitClient.RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === 'audio') {
+          const el = track.attach();
+          el.id = 'livekit-audio';
+          document.body.appendChild(el);
+        }
+      });
+
+      room.on(window.LivekitClient.RoomEvent.Disconnected, () => {
+        setBrowserCallState('idle');
+        const audioEl = document.getElementById('livekit-audio');
+        if (audioEl) audioEl.remove();
+        // Refresh logs
+        getCallLogs().then(r => { if (r.success) setCallLogs(r.data); });
+      });
+
+      await room.connect(data.url, data.token);
+      await room.localParticipant.setMicrophoneEnabled(true);
+      setBrowserCallState('connected');
+    } catch (err) {
+      setBrowserCallState('idle');
+      setCallMessage('Failed to connect: ' + err.message);
+    }
+  };
+
+  const renderAICaller = () => {
+    const aiCalls = callLogs.filter(c => c.aiHandled);
+    const recentAICalls = aiCalls.slice(0, 5);
+
+    return (
+      <div>
+        {/* Agent Status & Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <StatCard
+            icon={Bot}
+            label="AI Agent"
+            value={agentStatus?.configured ? 'Online' : 'Not Configured'}
+            trend={agentStatus?.configured ? 'LiveKit connected' : 'Setup required'}
+            positive={agentStatus?.configured}
+          />
+          <StatCard icon={PhoneOutgoing} label="AI Outbound" value={aiCalls.filter(c => c.direction === 'Outbound').length} trend="Total AI calls" positive />
+          <StatCard icon={PhoneIncoming} label="AI Inbound" value={aiCalls.filter(c => c.direction === 'Inbound').length} trend="Total AI calls" positive />
+          <StatCard icon={Clock} label="AI Calls Today" value={aiCalls.filter(c => c.date === new Date().toISOString().split('T')[0]).length} trend="Today" positive />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Make Outbound Call */}
+          <div className="glass-card p-6">
+            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+              <PhoneOutgoing className="w-5 h-5 text-accent" />
+              AI Outbound Call
+            </h3>
+            <p className="text-xs text-muted mb-4">
+              Aria (AI Agent) will call the customer and handle the conversation automatically.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm text-muted mb-1 block">Phone Number *</label>
+                <input
+                  type="text"
+                  placeholder="+91XXXXX XXXXX"
+                  value={outboundPhone}
+                  onChange={(e) => setOutboundPhone(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted mb-1 block">Customer Name</label>
+                <input
+                  type="text"
+                  placeholder="Enter name (optional)"
+                  value={outboundName}
+                  onChange={(e) => setOutboundName(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
+                />
+              </div>
+              <div>
+                <label className="text-sm text-muted mb-1 block">Call Reason</label>
+                <select
+                  value={outboundReason}
+                  onChange={(e) => setOutboundReason(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
+                >
+                  <option value="">Select reason...</option>
+                  <option value="Follow up on inquiry">Follow up on inquiry</option>
+                  <option value="Appointment reminder">Appointment reminder</option>
+                  <option value="Delivery update">Delivery update</option>
+                  <option value="Quotation follow-up">Quotation follow-up</option>
+                  <option value="Feedback collection">Feedback collection</option>
+                  <option value="New collection announcement">New collection announcement</option>
+                  <option value="Payment reminder">Payment reminder</option>
+                  <option value="Order status update">Order status update</option>
+                  <option value="Custom reason">Custom reason</option>
+                </select>
+              </div>
+              {outboundReason === 'Custom reason' && (
+                <input
+                  type="text"
+                  placeholder="Enter custom reason..."
+                  onChange={(e) => setOutboundReason(e.target.value)}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
+                />
+              )}
+
+              {callMessage && (
+                <div className={`text-sm p-3 rounded-xl ${callingState === 'connected' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' : 'bg-red-500/10 text-red-700 border border-red-500/20'}`}>
+                  {callMessage}
+                </div>
+              )}
+
+              <button
+                onClick={handleOutboundCall}
+                disabled={!outboundPhone || callingState === 'calling'}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-accent text-white rounded-xl text-sm font-semibold hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {callingState === 'calling' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Initiating Call...</>
+                ) : callingState === 'connected' ? (
+                  <><PhoneCall className="w-4 h-4" /> Call in Progress</>
+                ) : (
+                  <><PhoneOutgoing className="w-4 h-4" /> Start AI Call</>
+                )}
+              </button>
+
+              {callingState === 'connected' && (
+                <button
+                  onClick={() => { setCallingState('idle'); setCallMessage(''); }}
+                  className="w-full py-2 text-sm text-muted hover:text-foreground transition-colors"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Browser Voice Call */}
+          <div className="glass-card p-6">
+            <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+              <Mic className="w-5 h-5 text-teal-600" />
+              Browser Voice Call
+            </h3>
+            <p className="text-xs text-muted mb-4">
+              Talk to the AI agent directly from your browser. Useful for testing or when you want to speak as a customer.
+            </p>
+
+            <div className="flex flex-col items-center py-6">
+              {/* Call visualization */}
+              <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-4 transition-all ${
+                browserCallState === 'connected'
+                  ? 'bg-emerald-500/20 border-2 border-emerald-500/40 animate-pulse'
+                  : browserCallState === 'connecting'
+                  ? 'bg-amber-500/20 border-2 border-amber-500/40 animate-pulse'
+                  : 'bg-surface border-2 border-border'
+              }`}>
+                {browserCallState === 'connected' ? (
+                  <Volume2 className="w-10 h-10 text-emerald-600" />
+                ) : browserCallState === 'connecting' ? (
+                  <Loader2 className="w-10 h-10 text-amber-600 animate-spin" />
+                ) : (
+                  <Mic className="w-10 h-10 text-muted" />
+                )}
+              </div>
+
+              <p className="text-sm font-medium text-foreground mb-1">
+                {browserCallState === 'connected'
+                  ? 'Connected — Speak now'
+                  : browserCallState === 'connecting'
+                  ? 'Connecting to AI Agent...'
+                  : 'Ready to call'}
+              </p>
+              <p className="text-xs text-muted mb-6">
+                {browserCallState === 'connected'
+                  ? 'AI Agent Aria is listening'
+                  : 'Click below to start a voice conversation'}
+              </p>
+
+              <button
+                onClick={handleBrowserCall}
+                className={`flex items-center gap-2 px-8 py-3 rounded-2xl text-sm font-semibold transition-all ${
+                  browserCallState === 'connected'
+                    ? 'bg-red-500 text-white hover:bg-red-600'
+                    : browserCallState === 'connecting'
+                    ? 'bg-amber-500/20 text-amber-700 cursor-wait'
+                    : 'bg-teal-600 text-white hover:bg-teal-700'
+                }`}
+                disabled={browserCallState === 'connecting'}
+              >
+                {browserCallState === 'connected' ? (
+                  <><PhoneOff className="w-4 h-4" /> End Call</>
+                ) : browserCallState === 'connecting' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Connecting...</>
+                ) : (
+                  <><Phone className="w-4 h-4" /> Start Browser Call</>
+                )}
+              </button>
+            </div>
+
+            {/* Agent configuration status */}
+            {agentStatus && (
+              <div className="border-t border-border pt-4 mt-2">
+                <p className="text-xs text-muted mb-2 uppercase tracking-wider">Service Status</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'LiveKit', ok: agentStatus.configured },
+                    { label: 'Deepgram STT/TTS', ok: agentStatus.hasDeepgram },
+                    { label: 'Groq LLM', ok: agentStatus.hasGroq },
+                    { label: 'Twilio SIP', ok: agentStatus.hasTwilio },
+                    { label: 'SIP Trunk', ok: agentStatus.hasSipTrunk },
+                  ].map(({ label, ok }) => (
+                    <div key={label} className="flex items-center gap-2 text-xs">
+                      <div className={`w-1.5 h-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
+                      <span className={ok ? 'text-foreground' : 'text-muted'}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Recent AI Calls */}
+        {recentAICalls.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-base font-semibold text-foreground mb-3 flex items-center gap-2">
+              <Bot className="w-4 h-4 text-accent" />
+              Recent AI Calls
+            </h3>
+            <div className="glass-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="crm-table">
+                  <thead>
+                    <tr>
+                      <th>Direction</th>
+                      <th>Customer</th>
+                      <th>Phone</th>
+                      <th>Date & Time</th>
+                      <th>Duration</th>
+                      <th>Purpose</th>
+                      <th>Outcome</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentAICalls.map((call) => (
+                      <tr key={call.id} className="cursor-pointer" onClick={() => setSelectedCall(call)}>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            {getDirectionIcon(call.direction)}
+                            <span className="text-xs text-muted">{call.direction}</span>
+                          </div>
+                        </td>
+                        <td className="font-medium text-foreground">
+                          <div className="flex items-center gap-1.5">
+                            <Bot className="w-3 h-3 text-accent" />
+                            {call.customer}
+                          </div>
+                        </td>
+                        <td className="text-muted">{call.phone}</td>
+                        <td>
+                          <div className="text-sm">{call.date}</div>
+                          <div className="text-xs text-muted">{call.time}</div>
+                        </td>
+                        <td>{call.duration}</td>
+                        <td className="text-sm max-w-[200px] truncate">{call.purpose}</td>
+                        <td>{getOutcomeBadge(call.outcome)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Quick Call from Phone Book */}
+        {phoneBook.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-base font-semibold text-foreground mb-3 flex items-center gap-2">
+              <PhoneCall className="w-4 h-4 text-accent" />
+              Quick AI Call — Recent Contacts
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {phoneBook.slice(0, 6).map((contact) => (
+                <div key={contact.phone} className="glass-card p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">
+                      <User className="w-4 h-4 text-accent" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{contact.name}</p>
+                      <p className="text-xs text-muted">{contact.phone}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setOutboundPhone(contact.phone);
+                      setOutboundName(contact.name);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-accent/10 text-accent rounded-lg text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
+                  >
+                    <Bot className="w-3 h-3" />
+                    AI Call
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Page Header */}
@@ -783,9 +1183,23 @@ export default function CallsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-medium text-emerald-700">AI Agent Active</span>
+          <button
+            onClick={refreshLogs}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-muted hover:text-foreground transition-colors"
+            title="Refresh call data"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${
+            agentStatus?.configured
+              ? 'bg-emerald-500/10 border border-emerald-500/20'
+              : 'bg-zinc-500/10 border border-zinc-500/20'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${agentStatus?.configured ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'}`} />
+            <span className={`text-xs font-medium ${agentStatus?.configured ? 'text-emerald-700' : 'text-muted'}`}>
+              {agentStatus?.configured ? 'AI Agent Online' : 'AI Agent Offline'}
+            </span>
           </div>
         </div>
       </div>
@@ -815,6 +1229,7 @@ export default function CallsPage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'ai-caller' && renderAICaller()}
       {activeTab === 'logs' && renderCallLogs()}
       {activeTab === 'phonebook' && renderPhoneBook()}
       {activeTab === 'transcripts' && renderTranscripts()}
@@ -877,6 +1292,46 @@ export default function CallsPage() {
               <p className="text-xs text-muted mb-1">Notes</p>
               <p className="text-sm text-foreground">{selectedCall.notes}</p>
             </div>
+
+            {/* Transcript */}
+            {selectedCall.transcript && (
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="px-4 py-3 bg-surface flex items-center justify-between border-b border-border">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-accent" />
+                    <span className="text-sm font-semibold text-foreground">Call Transcript</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {getSentimentBadge(selectedCall.transcript.sentiment)}
+                  </div>
+                </div>
+                {selectedCall.transcript.summary && (
+                  <div className="px-4 py-2 bg-accent/5 border-b border-border">
+                    <p className="text-xs text-muted">Summary</p>
+                    <p className="text-sm text-foreground mt-0.5">{selectedCall.transcript.summary}</p>
+                  </div>
+                )}
+                <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
+                  {(selectedCall.transcript.messages || []).map((msg, idx) => (
+                    <div key={idx} className={`flex ${msg.from === 'agent' ? 'justify-start' : 'justify-end'}`}>
+                      <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${
+                        msg.from === 'agent'
+                          ? 'bg-accent/10 border border-accent/20'
+                          : 'bg-surface border border-border'
+                      }`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
+                            {msg.from === 'agent' ? 'Aria (AI)' : 'Customer'}
+                          </span>
+                          <span className="text-[10px] text-muted">{msg.time}</span>
+                        </div>
+                        <p className="text-sm leading-relaxed text-foreground">{msg.text}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-2 pt-2">
               {selectedCall.recording && (

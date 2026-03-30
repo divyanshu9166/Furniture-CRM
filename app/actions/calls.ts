@@ -28,6 +28,8 @@ export async function getCallLogs() {
       outcome: c.outcome,
       notes: c.notes,
       recording: c.recording,
+      aiHandled: c.aiHandled,
+      callType: c.callType,
       transcript: c.transcript ? {
         summary: c.transcript.summary,
         sentiment: c.transcript.sentiment,
@@ -71,11 +73,12 @@ export async function createCallLog(data: unknown) {
 }
 
 export async function getCallStats() {
-  const [total, completed, missed, totalDuration] = await Promise.all([
+  const [total, completed, missed, totalDuration, aiHandled] = await Promise.all([
     prisma.callLog.count(),
     prisma.callLog.count({ where: { status: 'COMPLETED' } }),
     prisma.callLog.count({ where: { status: 'MISSED' } }),
     prisma.callLog.aggregate({ _sum: { durationSec: true } }),
+    prisma.callLog.count({ where: { aiHandled: true } }),
   ])
 
   return {
@@ -84,7 +87,53 @@ export async function getCallStats() {
       total,
       completed,
       missed,
+      aiHandled,
       avgDuration: total > 0 ? Math.round((totalDuration._sum.durationSec || 0) / total) : 0,
+    },
+  }
+}
+
+export async function initiateAICall(phoneNumber: string, reason: string, customerName: string = '') {
+  try {
+    const LIVEKIT_URL = process.env.LIVEKIT_URL
+    const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY
+    const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET
+
+    if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) {
+      return { success: false, error: 'LiveKit not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in .env' }
+    }
+
+    const { createRoom, dispatchAgent } = await import('@/lib/livekit')
+    const roomName = `outbound-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+    await createRoom(roomName)
+    await dispatchAgent(roomName, {
+      call_type: 'outbound',
+      phone_number: phoneNumber,
+      reason: reason || 'Follow-up call',
+      customer_name: customerName || '',
+    })
+
+    revalidatePath('/calls')
+    return { success: true, data: { roomName, message: `Call initiated to ${phoneNumber}` } }
+  } catch (error: any) {
+    console.error('Failed to initiate AI call:', error)
+    return { success: false, error: error?.message || 'Failed to initiate call' }
+  }
+}
+
+export async function getAIAgentStatus() {
+  // Check if LiveKit environment variables are configured
+  const configured = !!(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET)
+  return {
+    success: true,
+    data: {
+      configured,
+      livekitUrl: configured ? process.env.LIVEKIT_URL : null,
+      hasDeepgram: !!process.env.DEEPGRAM_API_KEY,
+      hasGroq: !!process.env.GROQ_API_KEY,
+      hasTwilio: !!process.env.TWILIO_AUTH_TOKEN,
+      hasSipTrunk: !!process.env.OUTBOUND_SIP_TRUNK_ID,
     },
   }
 }

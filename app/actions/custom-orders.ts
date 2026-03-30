@@ -10,6 +10,7 @@ import {
   updateMeasurementsSchema,
 } from '@/lib/validations/custom-order'
 import type { CustomOrderStatus } from '@prisma/client'
+import { sendEmail } from '@/lib/email'
 
 const statusMap: Record<string, CustomOrderStatus> = {
   'Measurement Scheduled': 'MEASUREMENT_SCHEDULED',
@@ -144,7 +145,7 @@ export async function createCustomOrder(data: unknown) {
     const match = lastOrder.displayId.match(/CUS-(\d+)/)
     if (match) nextNum = parseInt(match[1]) + 1
   }
-  const displayId = `CUS-${String(nextNum).padStart(3, '0')}`
+  const displayId = `CUS-${String(nextNum).padStart(4, '0')}`
 
   const now = new Date()
 
@@ -609,6 +610,171 @@ export async function updateSelfVisitPhotos(visitId: number, newUrls: string[]) 
 
   revalidatePath('/staff-portal')
   return { success: true }
+}
+
+// ─── SEND PROGRESS NOTIFICATION ────────────────────────────────────
+
+export async function sendProgressNotification(data: {
+  orderId: number
+  message: string
+  channels: ('whatsapp' | 'email')[]
+}) {
+  const { orderId, message, channels } = data
+
+  const order = await prisma.customOrder.findUnique({
+    where: { id: orderId },
+    select: {
+      displayId: true,
+      type: true,
+      phone: true,
+      status: true,
+      contact: { select: { name: true, email: true } },
+    },
+  })
+  if (!order) return { success: false, error: 'Order not found' }
+
+  const results: { whatsapp?: string; email?: string } = {}
+  const errors: string[] = []
+
+  // ── WhatsApp ────────────────────────────────────────────────────
+  if (channels.includes('whatsapp')) {
+    try {
+      const config = await prisma.channelConfig.findUnique({ where: { channel: 'WhatsApp' } })
+      const cfg = config?.config as Record<string, string> | null
+      // Settings saves token as 'apiToken' — use that, fall back to 'accessToken' for compatibility
+      const token = cfg?.apiToken || cfg?.accessToken
+      if (!config?.enabled || !cfg?.phoneNumberId || !token) {
+        errors.push('WhatsApp not configured or disabled. Go to Settings → Channels → WhatsApp and enable it with your Phone Number ID and API Token.')
+      } else {
+        const phone = order.phone.replace(/\D/g, '')
+        const waPhone = phone.startsWith('91') ? phone : `91${phone}`
+
+        // Use approved template if configured, otherwise fall back to text
+        // (text only works within 24hr customer service window)
+        const templateName = cfg?.templateName
+        const statusDisplay: Record<string, string> = {
+          MEASUREMENT_SCHEDULED: 'Measurement Scheduled',
+          DESIGN_PHASE: 'Design Phase',
+          IN_PRODUCTION: 'In Production',
+          QUALITY_CHECK: 'Quality Check',
+          INSTALLATION: 'Installation',
+          DELIVERED: 'Delivered',
+        }
+        const statusLabel = statusDisplay[order.status] || order.status
+
+        let body: Record<string, unknown>
+        if (templateName) {
+          // Template message — works for all outbound (cold) messages
+          body = {
+            messaging_product: 'whatsapp',
+            to: waPhone,
+            type: 'template',
+            template: {
+              name: templateName,
+              language: { code: cfg?.templateLanguage || 'en' },
+              components: [
+                {
+                  type: 'body',
+                  parameters: [
+                    { type: 'text', text: order.contact.name },   // {{1}} customer name
+                    { type: 'text', text: order.displayId },       // {{2}} order ID
+                    { type: 'text', text: statusLabel },           // {{3}} status
+                    { type: 'text', text: message },               // {{4}} custom message
+                  ],
+                },
+              ],
+            },
+          }
+        } else {
+          // Free-text fallback — only works if customer messaged you first within 24h
+          body = {
+            messaging_product: 'whatsapp',
+            to: waPhone,
+            type: 'text',
+            text: { body: message },
+          }
+        }
+
+        const res = await fetch(
+          `https://graph.facebook.com/v19.0/${cfg.phoneNumberId}/messages`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          }
+        )
+        const json = await res.json()
+        if (!res.ok) {
+          errors.push(`WhatsApp: ${json.error?.message || 'Send failed'} (code ${json.error?.code || res.status})`)
+        } else {
+          results.whatsapp = json.messages?.[0]?.id || 'sent'
+        }
+      }
+    } catch (e: any) {
+      errors.push(`WhatsApp: ${e.message}`)
+    }
+  }
+
+  // ── Email ───────────────────────────────────────────────────────
+  if (channels.includes('email')) {
+    const email = order.contact.email
+    if (!email) {
+      errors.push('Email: no email address on file for this customer')
+    } else {
+      const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
+      const storeName = settings?.storeName || 'Furniture Store'
+      const statusLabel = statusDisplay[order.status]
+      const html = `
+        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
+          <div style="border-bottom:3px solid #7c3aed;padding-bottom:16px;margin-bottom:24px;">
+            <h2 style="margin:0;color:#1a1a1a;font-size:20px;">${storeName}</h2>
+            <p style="margin:4px 0 0;color:#888;font-size:13px;">Custom Order Update</p>
+          </div>
+          <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:10px;padding:16px 20px;margin-bottom:24px;">
+            <p style="margin:0;font-size:13px;color:#5b21b6;font-weight:600;">Order ${order.displayId} — ${statusLabel}</p>
+          </div>
+          <p style="color:#374151;font-size:15px;line-height:1.6;white-space:pre-line;">${message}</p>
+          <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
+            <p style="margin:0;">This message was sent regarding your custom order from ${storeName}.</p>
+          </div>
+        </div>
+      `
+      const res = await sendEmail({
+        to: email,
+        subject: `Your Order ${order.displayId} Update — ${statusLabel}`,
+        html,
+      })
+      if (!res.success) {
+        errors.push(`Email: ${res.error}`)
+      } else {
+        results.email = res.messageId || 'sent'
+      }
+    }
+  }
+
+  // ── Log to timeline ─────────────────────────────────────────────
+  const sentVia = Object.keys(results).join(' & ')
+  if (sentVia) {
+    await prisma.customOrderTimeline.create({
+      data: {
+        customOrderId: orderId,
+        date: new Date(),
+        event: `Customer notified via ${sentVia}`,
+        notes: message.length > 120 ? message.slice(0, 117) + '…' : message,
+        status: 'done',
+        updatedBy: 'Manager',
+      },
+    })
+    revalidatePath('/custom-orders')
+  }
+
+  if (errors.length > 0 && !sentVia) {
+    return { success: false, error: errors.join('; ') }
+  }
+  return { success: true, results, errors: errors.length > 0 ? errors : undefined }
 }
 
 // ─── GET CUSTOM ORDER STATS ─────────────────────────────

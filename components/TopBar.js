@@ -1,21 +1,103 @@
 'use client';
 
-import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield } from 'lucide-react';
+import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useSidebarContext } from './SidebarContext';
+import {
+  getTopNotifications,
+  markConversationNotificationRead,
+  markAllConversationNotificationsRead,
+} from '@/app/actions/notifications';
 
 export default function TopBar() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [notifications, setNotifications] = useState({
+    unreadCount: 0,
+    unreadConversationsCount: 0,
+    pendingFollowUps: 0,
+    overdueInvoices: 0,
+    items: [],
+  });
   const { setSidebarOpen } = useSidebarContext();
   const { data: session } = useSession();
   const menuRef = useRef(null);
+  const notificationsRef = useRef(null);
 
   const userName = session?.user?.name || 'User';
   const userRole = session?.user?.role || 'STAFF';
   const userInitials = userName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
   const roleLabel = userRole === 'ADMIN' ? 'Administrator' : userRole === 'MANAGER' ? 'Manager' : 'Staff';
+
+  const refreshNotifications = async () => {
+    setLoadingNotifications(true);
+    const res = await getTopNotifications();
+    if (res?.success) setNotifications(res.data);
+    setLoadingNotifications(false);
+  };
+
+  useEffect(() => {
+    refreshNotifications();
+    const interval = setInterval(refreshNotifications, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleBellClick = async () => {
+    const opening = !showNotifications;
+    setShowNotifications(opening);
+    if (opening) {
+      await refreshNotifications();
+    }
+  };
+
+  const formatTimeAgo = (dateStr) => {
+    const now = Date.now();
+    const then = new Date(dateStr).getTime();
+    const diffMin = Math.max(0, Math.round((now - then) / 60000));
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.round(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.round(diffHr / 24);
+    return `${diffDay}d ago`;
+  };
+
+  const getNotificationIcon = (type) => {
+    if (type === 'conversation') return MessageSquare;
+    if (type === 'followup') return CalendarClock;
+    return AlertTriangle;
+  };
+
+  const getNotificationIconColor = (type) => {
+    if (type === 'conversation') return 'text-info bg-info/10';
+    if (type === 'followup') return 'text-accent bg-accent/10';
+    return 'text-danger bg-danger/10';
+  };
+
+  const handleNotificationClick = async (item) => {
+    if (item.type === 'conversation') {
+      const convoId = Number(item.id.split('-')[1]);
+      if (!Number.isNaN(convoId)) {
+        await markConversationNotificationRead(convoId);
+      }
+    }
+
+    setShowNotifications(false);
+    await refreshNotifications();
+    window.location.href = item.href;
+  };
+
+  const handleMarkAllConversationsRead = async () => {
+    if (notifications.unreadConversationsCount <= 0) return;
+    setMarkingAllRead(true);
+    await markAllConversationNotificationsRead();
+    await refreshNotifications();
+    setMarkingAllRead(false);
+  };
 
   // Close menu on outside click
   useEffect(() => {
@@ -23,10 +105,13 @@ export default function TopBar() {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setShowUserMenu(false);
       }
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target)) {
+        setShowNotifications(false);
+      }
     };
-    if (showUserMenu) document.addEventListener('mousedown', handler);
+    if (showUserMenu || showNotifications) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [showUserMenu]);
+  }, [showUserMenu, showNotifications]);
 
   return (
     <header className="h-[64px] border-b border-border bg-white flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
@@ -59,10 +144,80 @@ export default function TopBar() {
       {/* Right section */}
       <div className="flex items-center gap-2 md:gap-3 flex-shrink-0 ml-2">
         {/* Notifications */}
-        <button className="relative p-2 rounded-lg hover:bg-surface-hover transition-colors">
-          <Bell className="w-[18px] h-[18px] text-muted" />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full" />
-        </button>
+        <div className="relative" ref={notificationsRef}>
+          <button
+            onClick={handleBellClick}
+            className="relative p-2 rounded-lg hover:bg-surface-hover transition-colors"
+            aria-label="Open notifications"
+          >
+            <Bell className="w-[18px] h-[18px] text-muted" />
+            {notifications.unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-danger text-white text-[10px] font-semibold leading-4 text-center">
+                {notifications.unreadCount > 99 ? '99+' : notifications.unreadCount}
+              </span>
+            )}
+          </button>
+
+          {showNotifications && (
+            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[90vw] bg-white rounded-xl border border-border shadow-lg z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Notifications</p>
+                  <p className="text-[11px] text-muted">
+                    {notifications.unreadCount} active · {notifications.unreadConversationsCount} unread chats
+                  </p>
+                </div>
+                <button
+                  onClick={handleMarkAllConversationsRead}
+                  disabled={markingAllRead || notifications.unreadConversationsCount === 0}
+                  className="text-[11px] font-medium text-accent disabled:text-muted disabled:cursor-not-allowed"
+                >
+                  {markingAllRead ? 'Marking...' : 'Mark chats read'}
+                </button>
+              </div>
+
+              <div className="max-h-[380px] overflow-y-auto">
+                {loadingNotifications ? (
+                  <div className="p-4 text-sm text-muted">Loading notifications...</div>
+                ) : notifications.items.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <p className="text-sm font-medium text-foreground">No notifications</p>
+                    <p className="text-xs text-muted mt-1">You are all caught up.</p>
+                  </div>
+                ) : (
+                  notifications.items.map(item => {
+                    const Icon = getNotificationIcon(item.type);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => handleNotificationClick(item)}
+                        className="w-full text-left p-3.5 border-b border-border last:border-0 hover:bg-surface-hover transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${getNotificationIconColor(item.type)}`}>
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
+                              <span className="text-[10px] text-muted whitespace-nowrap">{formatTimeAgo(item.date)}</span>
+                            </div>
+                            <p className="text-[11px] text-muted truncate mt-0.5">{item.subtitle}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="px-4 py-2.5 border-t border-border bg-surface/50 flex items-center justify-between">
+                <a href="/conversations" className="text-[11px] font-medium text-accent hover:text-accent-hover">Open conversations</a>
+                <a href="/billing" className="text-[11px] font-medium text-accent hover:text-accent-hover">Open billing</a>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Divider — desktop only */}
         <div className="w-px h-7 bg-border hidden md:block" />

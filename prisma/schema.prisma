@@ -564,6 +564,11 @@ model CallLog {
   recording    Boolean       @default(false)
   createdAt    DateTime      @default(now())
 
+  // AI calling agent fields
+  livekitRoomId String?
+  callType      String?      @default("manual") // manual | ai_inbound | ai_outbound | browser_test
+  aiHandled     Boolean      @default(false)
+
   transcript CallTranscript?
 
   @@index([date])

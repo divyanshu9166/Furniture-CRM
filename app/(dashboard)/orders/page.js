@@ -10,6 +10,8 @@ import { getOrders, createOrder } from '@/app/actions/orders';
 import { getMarketplaceChannels } from '@/app/actions/settings';
 import { getProducts } from '@/app/actions/products';
 import Modal from '@/components/Modal';
+import ReturningCustomerCard from '@/components/ReturningCustomerCard';
+import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
 
 const orderStatuses = ['All', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
 const orderSources = ['All', 'Store', 'Amazon', 'Flipkart', 'Shopify'];
@@ -49,6 +51,11 @@ export default function OrdersPage() {
   const [submitting, setSubmitting] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [orderQty, setOrderQty] = useState(1);
+  const [orderCustomer, setOrderCustomer] = useState({ name: '', phone: '' });
+  const [orderCustomerSuggestions, setOrderCustomerSuggestions] = useState([]);
+  const [showOrderCustomerDropdown, setShowOrderCustomerDropdown] = useState(false);
+  const [orderCustomerProfile, setOrderCustomerProfile] = useState(null);
+  const [orderCustomerProfileLoading, setOrderCustomerProfileLoading] = useState(false);
 
   useEffect(() => {
     Promise.all([getOrders(), getMarketplaceChannels(), getProducts()]).then(([ordersRes, channelsRes, productsRes]) => {
@@ -92,6 +99,40 @@ export default function OrdersPage() {
       </div>
     );
   }
+
+  const handleOrderCustomerSearch = async (value, field) => {
+    setOrderCustomer(prev => ({ ...prev, [field]: value }));
+    setOrderCustomerProfile(null);
+    setOrderCustomerProfileLoading(false);
+    if (value.length >= 2) {
+      const res = await searchContacts(value);
+      if (res.success && res.data.length > 0) {
+        setOrderCustomerSuggestions(res.data);
+        setShowOrderCustomerDropdown(true);
+      } else {
+        setOrderCustomerSuggestions([]);
+        setShowOrderCustomerDropdown(false);
+        if (field === 'phone' && value.replace(/\D/g, '').length === 10) {
+          setOrderCustomerProfileLoading(true);
+          const profileRes = await getCustomerProfile(value);
+          setOrderCustomerProfileLoading(false);
+          if (profileRes.success && profileRes.data) setOrderCustomerProfile(profileRes.data);
+        }
+      }
+    } else {
+      setShowOrderCustomerDropdown(false);
+    }
+  };
+
+  const selectOrderCustomer = async (contact) => {
+    setOrderCustomer({ name: contact.name, phone: contact.phone });
+    setShowOrderCustomerDropdown(false);
+    setOrderCustomerSuggestions([]);
+    setOrderCustomerProfileLoading(true);
+    const profileRes = await getCustomerProfile(contact.phone, contact.id);
+    setOrderCustomerProfileLoading(false);
+    if (profileRes.success) setOrderCustomerProfile(profileRes.data);
+  };
 
   const handleSync = (channelId) => {
     setSyncing(prev => ({ ...prev, [channelId]: true }));
@@ -412,7 +453,7 @@ export default function OrdersPage() {
       )}
 
       {/* ─── NEW OFFLINE ORDER MODAL ─── */}
-      <Modal isOpen={showCreateModal} onClose={() => { setShowCreateModal(false); setSelectedProduct(null); setOrderQty(1); }} title="New Offline Order">
+      <Modal isOpen={showCreateModal} onClose={() => { setShowCreateModal(false); setSelectedProduct(null); setOrderQty(1); setOrderCustomer({ name: '', phone: '' }); setOrderCustomerProfile(null); }} title="New Offline Order">
         <form className="space-y-4" onSubmit={async (e) => {
           e.preventDefault();
           setSubmitting(true);
@@ -420,8 +461,8 @@ export default function OrdersPage() {
           const qty = parseInt(f.quantity.value) || 1;
           const price = selectedProduct ? selectedProduct.price : 0;
           const res = await createOrder({
-            customer: f.customerName.value.trim(),
-            phone: f.customerPhone.value.trim(),
+            customer: orderCustomer.name.trim() || f.customerName.value.trim(),
+            phone: orderCustomer.phone.trim() || f.customerPhone.value.trim(),
             productId: selectedProduct?.id,
             quantity: qty,
             amount: price * qty,
@@ -433,6 +474,8 @@ export default function OrdersPage() {
             setShowCreateModal(false);
             setSelectedProduct(null);
             setOrderQty(1);
+            setOrderCustomer({ name: '', phone: '' });
+            setOrderCustomerProfile(null);
             const refreshed = await getOrders();
             if (refreshed.success) setOrders(refreshed.data);
           } else {
@@ -441,15 +484,37 @@ export default function OrdersPage() {
           setSubmitting(false);
         }}>
           {/* Customer */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Customer Name <span className="text-red-500">*</span></label>
-              <input type="text" name="customerName" required placeholder="e.g. Rahul Sharma" className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm focus:outline-none focus:border-accent/50" />
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Customer Name <span className="text-red-500">*</span></label>
+                <input type="text" name="customerName" required placeholder="e.g. Rahul Sharma"
+                  value={orderCustomer.name}
+                  onChange={e => handleOrderCustomerSearch(e.target.value, 'name')}
+                  className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm focus:outline-none focus:border-accent/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Phone Number <span className="text-red-500">*</span></label>
+                <input type="tel" name="customerPhone" required placeholder="e.g. 9876543210"
+                  value={orderCustomer.phone}
+                  onChange={e => handleOrderCustomerSearch(e.target.value, 'phone')}
+                  className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm focus:outline-none focus:border-accent/50" />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Phone Number <span className="text-red-500">*</span></label>
-              <input type="tel" name="customerPhone" required placeholder="e.g. 9876543210" className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm focus:outline-none focus:border-accent/50" />
-            </div>
+            {showOrderCustomerDropdown && orderCustomerSuggestions.length > 0 && (
+              <div className="bg-surface border border-border rounded-xl shadow-lg max-h-[160px] overflow-y-auto">
+                {orderCustomerSuggestions.map(c => (
+                  <button key={c.id} type="button" onClick={() => selectOrderCustomer(c)}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-surface-hover transition-colors text-left border-b border-border/50 last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{c.name}</p>
+                      <p className="text-xs text-muted">{c.phone}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            <ReturningCustomerCard profile={orderCustomerProfile} loading={orderCustomerProfileLoading} />
           </div>
 
           {/* Product */}
