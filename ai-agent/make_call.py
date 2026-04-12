@@ -1,5 +1,5 @@
 """
-CLI tool to trigger outbound AI calls from the Furniture CRM.
+CLI tool to trigger outbound AI calls from the Furzentic.
 Usage: python make_call.py --to +91XXXXXXXXXX --reason "Follow up on sofa inquiry" --name "Rahul Sharma"
 """
 

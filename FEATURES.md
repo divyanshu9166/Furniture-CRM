@@ -1,352 +1,461 @@
-# FurnitureCRM — Smart Store Manager
+# FurnitureCRM Complete Feature Documentation
 
-### The All-in-One CRM Built for Modern Furniture Stores
+## 1. Product Purpose
 
----
+FurnitureCRM is an operations and growth platform built specifically for furniture businesses.
+It combines showroom operations, lead handling, sales execution, inventory, custom project tracking, customer communication, and analytics in one system.
 
-## Why FurnitureCRM?
+This document explains:
 
-Running a furniture store means juggling walk-ins, online orders, custom measurements, deliveries, staff performance, and customer follow-ups — all at once. FurnitureCRM brings everything into one clean dashboard so you never lose a lead, miss a follow-up, or run out of stock.
+- What each module does
+- How modules connect across the customer lifecycle
+- How the CRM helps brand owners in marketing, management, and automation
 
----
+## 2. Core Business Value For Furniture Brand Owners
 
-## Feature Overview
+### 2.1 Marketing Impact
 
-| Module | What It Does |
-|---|---|
-| Dashboard | Real-time business overview with KPIs, charts & alerts |
-| Walk-in Management | Register, track & convert walk-in customers |
-| Lead Management | Pipeline view, automated follow-ups, source tracking |
-| Staff Dashboard | Performance, targets, commission, attendance, activity monitoring |
-| Staff Portal | Individual staff login with clock in/out, activity logging |
-| Appointments | Calendar-based scheduling with reminders |
-| Inventory & Warehouse | SKU tracking, warehouse locations, stock alerts, reorder management |
-| Orders & Marketplace Sync | Unified orders from Store, Amazon, Flipkart & Shopify |
-| Billing & POS | Invoice generation, GST calculation, discount management, POS system |
-| Custom Orders | On-site measurements, photos, production timeline tracking |
-| Marketing Automation | WhatsApp, Email & SMS campaigns with analytics |
-| AI Conversations | Omnichannel AI chatbot across WhatsApp, Instagram & Website |
-| Call Center | Call logs, phone book, transcripts, appointment booking, analytics |
-| Reviews & Reputation | Google review monitoring, negative alerts, auto-request reviews |
-| AI Virtual Staging | Upload room photo + furniture to generate staged room images |
-| Settings & Integrations | Store profile, team management, third-party integrations, AI config |
+- Tracks lead source quality across channels like walk-ins, WhatsApp, Instagram, Facebook, and website
+- Supports campaign execution and measurement for both digital and in-store efforts
+- Improves conversion through faster follow-ups, appointment scheduling, and channel visibility
+- Strengthens reputation management through review tracking and response workflows
 
----
+### 2.2 Management Impact
 
-## Detailed Feature Breakdown
+- Gives owners and managers a unified daily control center across sales, staff, inventory, and billing
+- Provides role-based visibility so leaders can monitor performance without operational noise
+- Standardizes custom-order operations, field visits, and billing workflows
+- Enables better forecasting with real-time KPIs, funnel view, and pending collections tracking
 
----
+### 2.3 Automation Impact
 
-### 1. Dashboard
+- Automates repetitive communication and follow-up processes
+- Consolidates incoming customer conversations from multiple channels
+- Surfaces operational exceptions automatically, such as low stock, overdue invoices, and pending follow-ups
+- Reduces manual coordination load for management and frontline teams
 
-Your business at a glance — updated in real-time.
+## 3. Platform Scope And Access
 
-- **KPI Cards** — Leads today, appointments, active orders, total revenue with week-over-week trends
-- **Best Selling Furniture** — Bar chart of top 8 products by units sold
-- **Stock Alerts** — Items running low or out of stock, with quantity indicators
-- **Recent Leads** — Latest leads with source icons (WhatsApp, Instagram, Facebook, Website)
-- **Upcoming Appointments** — Today's scheduled meetings and visits
-- **AI Activity Feed** — Live feed of automated actions (follow-ups sent, leads captured, chats handled, appointments booked, reviews requested, catalogs shared)
+### 3.1 Primary User Roles
 
----
+- Admin: full business visibility and configuration rights
+- Manager: operational control for sales, staff, billing, and campaigns
+- Staff: day-to-day execution via staff portal and assigned workflows
 
-### 2. Walk-in Customer Management
+### 3.2 Major Navigation Modules
 
-Never lose a walk-in customer again. Register them the moment they enter your showroom.
+- Dashboard
+- Walk-ins
+- Leads
+- Staff
+- Staff Portal
+- Appointments
+- Inventory
+- Orders
+- Billing and POS
+- Custom Orders
+- Drafts
+- Email Marketing
+- Marketing
+- Conversations
+- Call Center
+- Reviews
+- AI Recommend
+- Settings
 
-- **Quick Registration** — Name, phone, requirement, budget range, salesperson assignment
-- **Live Tracking** — See who is in-store right now, what they're looking at, how long they've been browsing
-- **Status Pipeline** — Browsing, Interested, Follow-up, Converted, Left
-- **Today's Stats** — Walk-in count, conversion rate, average visit duration
-- **One-Click Actions** — Call customer, convert to lead, or create order directly from walk-in record
-- **Search & Filter** — Find walk-ins by name, phone, requirement, status, or date
+## 4. Detailed Module Documentation
 
----
+### 4.1 Dashboard
 
-### 3. Lead Management
+Purpose:
+Real-time command center for leadership.
 
-Track every potential customer from first contact to final sale.
+Key capabilities:
 
-- **Pipeline View (Kanban)** — Visual drag-and-drop pipeline with stages: New, Contacted, Showroom Visit, Quotation, Won, Lost
-- **List View** — Searchable table with all lead details at a glance
-- **Source Tracking** — Know where each lead came from (WhatsApp, Instagram, Facebook, Website, Walk-in)
-- **Lead Details** — Full contact info, budget, product interest, notes
-- **AI Follow-up Timeline** — Automated follow-up schedule with status indicators (Day 1: Catalog, Day 3: Visit, Day 7: Discount)
-- **Add Lead Form** — Customer name, phone, email, source, budget, product interest, notes
+- KPI cards for revenue, conversion, average order value, and pending collections
+- Sales funnel with stage distribution (including Converted and Lost)
+- Channel performance by lead source
+- Action center for pending follow-ups and overdue invoices
+- Best-selling products and stock alert visibility
 
----
+How it helps owners:
 
-### 4. Staff Dashboard (Admin View)
+- Immediate clarity on growth, cash flow pressure, and pipeline health
+- Faster prioritization of sales and finance actions
+- Better weekly decision-making with trend-based metrics
 
-Complete visibility into your team's performance and operations.
+### 4.2 Walk-ins
 
-**8 Tabs:**
+Purpose:
+Capture and track physical showroom demand.
 
-| Tab | Features |
-|---|---|
-| **Overview** | Staff cards with KPIs, conversion rates, revenue, target progress bars, clock-in status |
-| **Leaderboard** | Sales ranking by revenue, conversions, rating — gamified competition |
-| **Targets & Commission** | Monthly target setting per staff, progress bars, commission rate/earned/pending |
-| **Attendance** | 7-day attendance grid, clock in/out times, hours worked, present/absent/half-day summary |
-| **Activity Log** | Live timeline of all staff actions — sales, calls, walk-ins, stock updates, QR leads, sorted by time |
-| **Field Operations** | On-site visit tracking with customer address, measurements, photos uploaded, visit status |
-| **Stock Updates** | Staff inventory actions — items received, sold out, dispatched, low stock alerts per staff |
-| **Store Marketing** | In-store QR campaigns with scan counts, lead captures, conversion rates |
+Key capabilities:
 
-- **Staff Profile Modal** — Click any staff member for detailed view with 5 sub-tabs (Overview, Activity, Field Visits, Stock, Attendance)
+- Walk-in registration and assignment
+- Status progression from browsing to converted/left
+- Conversion-focused follow-up readiness
 
----
+How it helps owners:
 
-### 5. Staff Portal (Individual Login)
+- Prevents in-store lead leakage
+- Measures true showroom conversion performance
 
-Each staff member gets their own login to manage their day.
+### 4.3 Leads
 
-- **Secure Login** — Staff selects their name and enters 4-digit PIN
-- **Clock In / Clock Out** — One-tap attendance with live time tracking
-- **Personal Dashboard** — Revenue, today's sales, conversion rate, rating, target progress, commission breakdown
+Purpose:
+Manage demand from first contact to sales outcome.
 
-**Quick Actions:**
-- Log Sale
-- Log Call
-- Update Stock
-- Log Field Visit
+Key capabilities:
 
-**6 Tabs:**
+- Lead pipeline stages: New, Contacted, Showroom Visit, Quotation, Converted, Lost
+- Source attribution for each lead
+- Follow-up scheduling and tracking
+- Status updates and operational notes
 
-| Tab | What Staff Can Do |
-|---|---|
-| My Dashboard | View personal KPIs, target progress, commission, today's activity feed, upcoming visits |
-| Activity Log | Log and view all activities (sales, calls, walk-ins, stock, leads, measurements, QR leads, marketing) |
-| Stock Updates | Update inventory — product, warehouse, action type (Received/Dispatched/Stock Out), quantity |
-| Field Visits | Schedule visits, enter customer address, add measurements, upload photos, mark complete |
-| My Attendance | View 7-day attendance with clock times, hours worked, present/absent/half-day summary |
-| My Sales | View sales history, revenue, conversion stats, recent sales table |
+How it helps owners:
 
----
+- Creates accountability in sales process execution
+- Identifies high-performing channels and weak handoff points
 
-### 6. Appointments
+### 4.4 Staff Management
 
-Calendar-based scheduling for showroom visits, measurements, and follow-ups.
+Purpose:
+Track team performance, attendance, and operational output.
 
-- **Interactive Calendar** — Month view with appointment indicators, day selection
-- **Daily View** — All appointments for selected date with time, customer, purpose, status
-- **Book Appointment** — Customer name, phone, date, time, purpose (7 types), notes
-- **Purpose Types** — Sofa Viewing, Bed Selection, Measurement, Kitchen Design, Wardrobe Design, Showroom Visit, Order Pickup
-- **Status Tracking** — Scheduled, Completed, Cancelled
-- **Appointment Stats** — Upcoming count, completed count
+Key capabilities:
 
----
+- Team records with role and status
+- Attendance clock-in/clock-out with worked-hour calculations
+- Team-level analytics and activity visibility
+- Credential assignment for staff logins
 
-### 7. Inventory & Warehouse Management
+How it helps owners:
 
-Full SKU-level tracking across multiple warehouse locations.
+- Improves workforce planning and transparency
+- Connects individual effort with business outcomes
 
-- **Product Catalog** — Grid or list view with name, SKU, category, price, stock, warehouse
-- **SKU Management** — Unique SKU codes for every product
-- **Warehouse Tracking** — Track stock across Showroom A, Showroom B, Main Warehouse
-- **Stock Alerts** — Automatic alerts when stock falls below reorder level
-- **Reorder Management** — View shortfall quantity, priority (Urgent/Low), one-click reorder
-- **Stock Update Modal** — Add, remove, or set stock with reason tracking
-- **Best Seller Badges** — Products with 30+ units sold are auto-tagged
-- **Category Filters** — Sofas, Beds, Dining, Desks, Storage, Decor, Kids, Kitchen
-- **Add Product Form** — Full product details including SKU, category, price, material, color, stock, reorder level, warehouse
+### 4.5 Staff Portal
 
----
+Purpose:
+Self-service execution interface for team members.
 
-### 8. Orders & Marketplace Sync
+Key capabilities:
 
-Manage all orders from one place — online and offline.
+- Staff authentication using manager-assigned credential
+- Clock-in and clock-out workflows
+- Personal activity and sales visibility
+- Execution shortcuts for day-to-day updates
 
-**Orders Tab:**
-- **Unified Order View** — Store, Amazon, Flipkart, Shopify orders in one table
-- **Source Badges** — Color-coded badges showing order origin
-- **Order Details** — Order ID, customer, product, quantity, amount, status, payment, date
-- **Status Pipeline** — Confirmed, Processing, Shipped, Delivered, Cancelled
-- **Payment Tracking** — Paid, COD, Pending
+How it helps owners:
 
-**Marketplace Channels Tab:**
-- **Channel Cards** — Amazon, Flipkart, Shopify connection status with sync controls
-- **Per-Channel Stats** — Total orders, pending orders, revenue, last sync time
-- **One-Click Sync** — Sync orders from any marketplace instantly
-- **Connect/Disconnect** — Toggle marketplace connections on/off
-- **Sync Settings** — Auto-sync orders (every 15 min), sync inventory, auto-update tracking, new order notifications
+- Drives structured field/store execution
+- Reduces manual reporting and end-of-day coordination
 
----
+### 4.6 Appointments
 
-### 9. Billing & POS
+Purpose:
+Manage scheduled customer interactions.
 
-Generate invoices and process in-store sales with full GST support.
+Key capabilities:
 
-**Invoices Tab:**
-- **Invoice List** — All invoices with customer, items, subtotal, discount, GST, total, payment method, status
-- **Invoice Detail** — Professional invoice layout with store header, itemized table, totals, print & download PDF
-- **Payment Status** — Paid, Partial, Pending
-- **Payment Methods** — Cash, UPI, Card, EMI, Bank Transfer, Cheque
-- **Stats** — Total invoices, total billed, collected, pending amounts
+- Appointment creation and calendar tracking
+- Status management for scheduled/completed/cancelled
+- Follow-up and visit planning support
 
-**POS Tab (Point of Sale):**
-- **Product Search** — Search and add products to cart with auto-suggestions
-- **Cart Management** — Quantity adjustment, line totals, remove items, clear all
-- **Customer Details** — Name and phone number capture
-- **Discount System** — Flat amount (₹) or percentage (%) discount
-- **GST Calculation** — Automatic 18% GST on subtotal after discount
-- **Payment Selection** — Choose from 6 payment methods
-- **Bill Summary** — Subtotal, discount, GST, grand total
-- **Generate Invoice** — One-click invoice generation with print option
+How it helps owners:
 
----
+- Improves no-show control and conversion reliability
+- Gives predictable visibility on upcoming demand
 
-### 10. Custom Orders
+### 4.7 Inventory
 
-For stores that build custom furniture — wardrobes, kitchens, modular units.
+Purpose:
+Maintain product and stock control across categories.
 
-- **Order Cards** — Custom order overview with status, customer, furniture type, quoted price, materials, delivery date
-- **Production Timeline** — Visual step-by-step progress: Measurement Scheduled, Design Phase, In Production, Quality Check, Installation, Delivered
-- **Progress Bar** — Percentage completion indicator per order
-- **On-Site Measurements** — Length, width, height, countertop dimensions
-- **Site Photos** — Upload customer site photos for reference
-- **Material & Color Specs** — Track materials (teak, plywood, MDF) and chosen colors
-- **Staff Assignment** — Assign designer/consultant to each custom order
-- **New Order Form** — Full form with customer details, measurements, materials, photo upload, special requirements
+Key capabilities:
 
----
+- SKU-level catalog and stock updates
+- Low-stock and reorder-level visibility
+- Inventory context for sales and billing teams
 
-### 11. Marketing Automation
+How it helps owners:
 
-Run campaigns across WhatsApp, Email, and SMS — track what works.
+- Prevents lost sales due to stock-outs
+- Reduces overstock risk through timely reorder decisions
 
-- **Campaign Stats** — Total sent, opened, clicked, average open rate
-- **Campaign Cards** — Name, channel, status (Draft/Scheduled/Sent), audience count, performance metrics
-- **Create Campaign** — Name, channel selection, schedule date, message template
-- **Channel Support** — WhatsApp, Email, SMS campaigns
-- **Performance Tracking** — Sent count, open rate %, click rate % per campaign
-- **Campaign Detail** — Full breakdown with template preview
+### 4.8 Orders
 
----
+Purpose:
+Track order lifecycle and source performance.
 
-### 12. AI Conversations
+Key capabilities:
 
-AI chatbot handles customer inquiries across all channels automatically.
+- Unified order management with status transitions
+- Payment status tracking
+- Source-level visibility for marketplace and direct sales
 
-- **Omnichannel** — WhatsApp, Instagram, Website chat in one inbox
-- **AI-Powered Responses** — Bot handles common queries (pricing, availability, delivery) automatically
-- **Human Handoff** — Conversations flagged as "Needs Human" when AI can't handle
-- **Channel Filters** — Filter conversations by platform
-- **Chat Interface** — Full message thread with bot/human message differentiation
-- **Unread Badges** — See unread message counts per conversation
-- **Live Monitoring** — AI actively monitors and responds to conversations
+How it helps owners:
 
----
+- Improves order fulfillment discipline
+- Reveals profitable channels and process bottlenecks
 
-### 13. Call Center
+### 4.9 Billing And POS
 
-Complete call management for your sales team.
+Purpose:
+Convert sales to invoices and collections efficiently.
 
-| Tab | Features |
-|---|---|
-| **Call Logs** | Inbound/outbound call history with duration, status, notes, search & filters |
-| **Phone Book** | Contact directory with tags (Hot Lead, Warm Lead, Cold Lead, Customer), quick call/SMS actions |
-| **Transcripts** | Call recordings with AI-generated summaries, sentiment analysis, outcome tracking |
-| **Book Appointment** | Schedule follow-up appointments directly from call records |
-| **Analytics** | Call volume trends, duration analysis, sentiment distribution, conversion metrics |
+Key capabilities:
 
-- **Call Stats** — Total calls today, inbound count, outbound count, average duration
-- **Status Tracking** — Completed, Missed, No Answer, Busy
-- **Direction Icons** — Visual indicators for inbound vs outbound calls
+- Invoice generation with GST-ready structure
+- POS checkout with discount and tax calculations
+- Partial payment handling including quick payment options
+- Pending and overdue balance tracking
 
----
+How it helps owners:
 
-### 14. Reviews & Reputation
+- Speeds billing operations at the counter
+- Strengthens collection discipline and cash flow visibility
 
-Monitor your Google reviews and protect your store's reputation.
+### 4.10 Custom Orders
 
-- **Google Rating Display** — Large average rating with star visualization
-- **Rating Distribution** — Bar chart breakdown (5-star to 1-star) with percentages
-- **Negative Review Alerts** — Highlighted section for 1-2 star reviews with reply option
-- **Review Automation** — Auto-request reviews after delivery, customizable message template
-- **Review Filters** — All, Positive (4-5 star), Neutral (3 star), Negative (1-2 star)
-- **Monthly Stats** — Review requests sent this month
-- **Reply Tracking** — See which reviews have been replied to
+Purpose:
+Manage bespoke furniture projects end-to-end.
 
----
+Key capabilities:
 
-### 15. AI Virtual Staging
+- Custom order status timeline from measurement to delivery
+- Field-visit support with measurements, notes, and updates
+- Advance payment and delivery coordination support
 
-Help customers visualize furniture in their space using AI.
+How it helps owners:
 
-- **3-Step Process:**
-  1. Upload room photo
-  2. Upload furniture items (up to 3)
-  3. Describe the edit (e.g., "Replace sofa with uploaded green 3-seater")
+- Standardizes complex project execution
+- Reduces delays caused by missing site and production details
 
-- **AI Processing** — Analyzes room layout, lighting, and style using Llama Vision
-- **Staged Output** — Generated image showing furniture placed in the customer's room
-- **Product Recommendations** — AI suggests matching products from your catalog
-- **Room Analysis** — Detects room type, style, and lighting conditions
+### 4.11 Drafts
 
----
+Purpose:
+Hold in-progress billing/transaction states before final confirmation.
 
-### 16. Settings & Configuration
+How it helps owners:
 
-Customize everything to match your store's needs.
+- Reduces accidental data loss and billing errors during busy counter operations
 
-| Section | What You Can Configure |
-|---|---|
-| **Store Profile** | Store name, logo, phone, email, address, GST number, website |
-| **Team** | Invite team members, assign roles (Owner, Admin, Staff), manage access |
-| **Integrations** | Connect WhatsApp Business, Google Calendar, Instagram, Facebook Messenger, Google My Business, Razorpay |
-| **Notifications** | Toggle alerts for new leads, appointment reminders, low stock, order updates, negative reviews, daily summary |
-| **AI Settings** | Enable/disable AI chatbot, set personality (Friendly/Formal/Casual), customize welcome message, configure follow-up schedule |
+### 4.12 Email Marketing
 
----
+Purpose:
+Execute outbound communication at scale.
 
-## In-Store Marketing Tools
+Key capabilities:
 
-Built-in offline marketing capabilities:
+- Campaign setup and sending workflows
+- Campaign tracking and engagement feedback
 
-- **QR Code Campaigns** — Generate QR codes for store entrance, billing counter, product displays, design corner
-- **QR Use Cases:**
-  - Walk-in lead capture (Scan to open WhatsApp/chatbot)
-  - In-store offers and seasonal deals
-  - Post-purchase feedback collection
-  - Custom order inquiry forms
-- **Campaign Tracking** — Scan counts, leads captured, conversion rates per QR code
-- **Flyer + QR Distribution** — Track offline marketing efforts at apartment complexes and nearby areas
+How it helps owners:
 
----
+- Re-engages dormant customers and improves repeat sales opportunities
 
-## Technical Highlights
+### 4.13 Marketing
 
-| Feature | Detail |
-|---|---|
-| **Built With** | Next.js (React) — fast, modern web framework |
-| **UI** | Clean, minimal light-mode design with Roboto Mono font |
-| **Responsive** | Works on desktop, tablet, and mobile browsers |
-| **Real-Time** | Live data updates across all modules |
-| **AI-Powered** | Automated chatbot, follow-ups, virtual staging, sentiment analysis |
-| **Multi-Channel** | WhatsApp, Instagram, Website, Email, SMS, Phone |
-| **Marketplace Ready** | Amazon, Flipkart, Shopify order sync |
-| **GST Compliant** | Automatic 18% GST calculation on all invoices |
-| **Indian Market** | INR currency, Indian phone format, GST support |
+Purpose:
+Plan and monitor broader marketing activities.
 
----
+Key capabilities:
 
-## Who Is This For?
+- Campaign records and performance monitoring
+- Support for offline/online channel initiatives
 
-- Furniture showrooms and retail stores
-- Custom furniture manufacturers
-- Multi-branch furniture chains
-- Home decor and interior design studios
-- Modular kitchen and wardrobe businesses
+How it helps owners:
 
----
+- Links spend and execution to measurable outcomes
 
-## Summary
+### 4.14 Conversations
 
-FurnitureCRM is a complete store management solution — from the moment a customer walks into your showroom or sends a WhatsApp message, all the way through measurement, production, delivery, billing, and review collection. Every touchpoint is tracked, every follow-up is automated, and every team member's performance is visible.
+Purpose:
+Unified communication inbox across channels.
 
-**16 integrated modules. One dashboard. Zero leads lost.**
+Key capabilities:
 
----
+- Multi-channel message consolidation
+- Unread tracking and conversation status (AI handled, needs human, resolved)
+- Outbound messaging support
 
-*FurnitureCRM — Smart Store Manager*
+How it helps owners:
+
+- Improves response speed and customer experience consistency
+- Reduces missed inquiries that directly impact conversion
+
+### 4.15 Call Center
+
+Purpose:
+Manage voice-led customer interactions and follow-ups.
+
+Key capabilities:
+
+- Call logging and status tracking
+- Contact handling and follow-up context
+- Call outcome visibility for sales teams
+
+How it helps owners:
+
+- Adds control over phone-driven sales pipeline activities
+- Supports call quality and follow-up compliance
+
+### 4.16 Reviews
+
+Purpose:
+Monitor and improve customer reputation signals.
+
+Key capabilities:
+
+- Review collection and listing visibility
+- Low-rating escalation readiness
+- Reply tracking
+
+How it helps owners:
+
+- Protects brand trust and local discovery performance
+- Enables timely response to negative sentiment
+
+### 4.17 AI Recommend
+
+Purpose:
+Support visual merchandising and recommendation-led selling.
+
+Key capabilities:
+
+- AI-assisted room/furniture recommendation flows
+- Better product visualization support for customer decisions
+
+How it helps owners:
+
+- Improves confidence during assisted selling
+- Helps upsell matching products with higher basket value potential
+
+### 4.18 Settings
+
+Purpose:
+Configure store identity, team, integrations, and system behavior.
+
+Key capabilities:
+
+- Store profile and branding settings
+- Team creation, updates, and login management
+- Notification and integration controls
+
+How it helps owners:
+
+- Keeps business setup centralized and consistent across modules
+
+## 5. Notification System (Top Bar Bell)
+
+Purpose:
+Provide a single alert stream for urgent execution items.
+
+Current behavior:
+
+- Displays aggregated unread count
+- Shows unread conversations, due follow-ups, and overdue invoices
+- Supports opening related module directly from each alert
+- Supports marking chat notifications as read
+
+Owner value:
+
+- Critical work does not get buried inside module-specific pages
+- Teams can act quickly on high-impact items
+
+## 6. End-To-End Business Workflows
+
+### 6.1 Lead-To-Revenue Workflow
+
+1. Capture from walk-in, website, chat, or campaign
+2. Qualify and move through lead stages
+3. Schedule showroom visit or appointment
+4. Convert to order and invoice in billing
+5. Track payment completion and pending balances
+
+### 6.2 Custom Order Workflow
+
+1. Create custom order and assign team member
+2. Capture site measurements and production notes
+3. Move through production timeline stages
+4. Manage payment progress and delivery completion
+
+### 6.3 Service And Retention Workflow
+
+1. Handle conversations and calls in centralized channels
+2. Resolve pending follow-ups and overdue collections
+3. Trigger post-sale review and retention campaigns
+
+## 7. Automation Coverage Map
+
+### 7.1 Sales Automation
+
+- Stage-wise lead movement and follow-up reminders
+- Unified unread/conversation tracking for faster response
+
+### 7.2 Operations Automation
+
+- Attendance and activity logging
+- Stock alerts and pending action surfacing
+
+### 7.3 Finance Automation
+
+- Auto tax and total calculations in POS/billing
+- Overdue and pending collection alerts
+
+## 8. Analytics And Decision Support
+
+Key decision metrics available through the CRM include:
+
+- Lead conversion trends
+- Funnel stage distribution and drop-off points
+- Channel-wise lead and conversion outcomes
+- Revenue and average order value movement
+- Pending collections and overdue risk
+- Staff and activity performance indicators
+
+These insights help owners allocate budget, rebalance team focus, and improve margin quality.
+
+## 9. Why This Is Strong For Furniture Businesses
+
+Furniture selling is high-consideration, multi-touch, and often operationally complex.
+FurnitureCRM is designed around that exact reality:
+
+- Long buying cycles with repeat follow-up needs
+- Mix of in-store and online demand channels
+- Custom project execution with field dependencies
+- High-ticket billing and collection pressure
+- Need for strong visual selling and reputation trust
+
+Instead of disconnected tools, the CRM gives one operating system for the full journey.
+
+## 10. Recommended Owner Operating Rhythm
+
+Daily:
+
+- Review dashboard action center
+- Clear unread conversations
+- Check pending follow-ups and overdue invoices
+
+Weekly:
+
+- Review funnel movement and channel performance
+- Evaluate staff productivity and attendance patterns
+- Prioritize stock risk and reorder actions
+
+Monthly:
+
+- Review campaign performance and conversion quality
+- Analyze collections discipline and cash flow trends
+- Adjust team goals and operational targets
+
+## 11. Executive Summary
+
+FurnitureCRM provides furniture brand owners with three outcomes in one system:
+
+- Better growth control through measurable marketing and conversion data
+- Better operational control through staff, order, inventory, and billing visibility
+- Better execution speed through centralized alerts and workflow automation
+
+It is not just a data dashboard. It is a practical execution platform for daily furniture business management at scale.

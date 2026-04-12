@@ -5,7 +5,7 @@ import AuthProvider from '@/components/AuthProvider';
 const robotoMono = Roboto_Mono({ subsets: ['latin'], variable: '--font-roboto-mono', weight: ['300', '400', '500', '600', '700'] });
 
 export const metadata = {
-  title: 'FurnitureCRM — Smart Store Manager',
+  title: 'Furzentic — Smart Store Manager',
   description: 'AI-powered CRM for furniture stores. Manage leads, appointments, inventory, orders, marketing, and more.',
 };
 

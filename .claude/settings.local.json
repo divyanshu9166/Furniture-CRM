@@ -5,7 +5,7 @@
       "Bash(vercel --version)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(xargs grep:*)",
-      "Bash(ls -laR \"/c/Users/divya/Desktop/Furniture CRM/app/\\(dashboard\\)\")"
+      "Bash(ls -laR \"/c/Users/divya/Desktop/Furzentic/app/\\(dashboard\\)\")"
     ]
   }
 }

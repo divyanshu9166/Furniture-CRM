@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle } from 'lucide-react';
+import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings';
 import { getStaff, createStaff, assignStaffLogin, updateStaffMember } from '@/app/actions/staff';
 import { getChannelConfigs, upsertChannelConfig } from '@/app/actions/channels';
 import { testSmtp, sendSmtpTestEmail } from '@/app/actions/email-campaigns';
+import { runStockCheck } from '@/app/actions/notifications';
 
 const channelDefinitions = [
   {
@@ -109,8 +110,12 @@ export default function SettingsPage() {
   const [editError, setEditError] = useState('');
   const [editSuccess, setEditSuccess] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [detectingGps, setDetectingGps] = useState(false);
   const [gpsDetected, setGpsDetected] = useState(null); // { lat, lng, address }
+  const [stockCheckRunning, setStockCheckRunning] = useState(false);
+  const [stockCheckResult, setStockCheckResult] = useState(null);
 
   // Channel integration state
   const [channelConfigs, setChannelConfigs] = useState({});
@@ -395,6 +400,8 @@ export default function SettingsPage() {
   const handleSaveStore = async (e) => {
     e.preventDefault();
     setSaving(true);
+    setSaveSuccess(false);
+    setSaveError('');
     try {
       const form = e.target;
       const data = {
@@ -410,10 +417,16 @@ export default function SettingsPage() {
         shiftEndTime: form.shiftEndTime.value || undefined,
       };
       const res = await updateStoreSettings(data);
-      if (res.success) setStoreSettings({ ...storeSettings, ...data });
-      else console.error('Save failed:', res.error);
+      if (res.success) {
+        setStoreSettings({ ...storeSettings, ...data });
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+      } else {
+        setSaveError(res.error || 'Failed to save settings. Please try again.');
+      }
     } catch (err) {
       console.error('Save error:', err);
+      setSaveError('An unexpected error occurred. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -564,7 +577,19 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 </div>
-                <button type="submit" disabled={saving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all mt-2"><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Changes'}</button>
+                <div className="flex items-center gap-3 flex-wrap mt-2">
+                  <button type="submit" disabled={saving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Changes'}</button>
+                  {saveSuccess && (
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-green-600">
+                      <CheckCircle2 className="w-4 h-4" /> Settings saved successfully
+                    </span>
+                  )}
+                  {saveError && (
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-red-600">
+                      <XCircle className="w-4 h-4" /> {saveError}
+                    </span>
+                  )}
+                </div>
               </form>
             </div>
           )}
@@ -1252,6 +1277,42 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* Stock Check Action */}
+              <div className="mt-6 pt-6 border-t border-border">
+                <h3 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2"><Package className="w-4 h-4 text-warning" /> Stock Alert Check</h3>
+                <p className="text-xs text-muted mb-3">Manually scan inventory and send low-stock alerts to all managers via in-app notification, email, and WhatsApp.</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setStockCheckRunning(true);
+                    setStockCheckResult(null);
+                    try {
+                      const data = await runStockCheck();
+                      if (data.success) {
+                        setStockCheckResult({ ok: true, msg: data.message || `${data.alertsSent} alert(s) sent` });
+                      } else {
+                        setStockCheckResult({ ok: false, msg: data.error || 'Failed to run stock check' });
+                      }
+                    } catch (err) {
+                      setStockCheckResult({ ok: false, msg: 'An error occurred. Please try again.' });
+                    } finally {
+                      setStockCheckRunning(false);
+                    }
+                  }}
+                  disabled={stockCheckRunning}
+                  className="flex items-center gap-2 px-4 py-2 bg-warning/10 hover:bg-warning/20 text-warning border border-warning/20 rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${stockCheckRunning ? 'animate-spin' : ''}`} />
+                  {stockCheckRunning ? 'Checking...' : 'Run Stock Check Now'}
+                </button>
+                {stockCheckResult && (
+                  <p className={`mt-2 text-sm font-medium flex items-center gap-1.5 ${stockCheckResult.ok ? 'text-green-600' : 'text-red-600'}`}>
+                    {stockCheckResult.ok ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                    {stockCheckResult.msg}
+                  </p>
+                )}
               </div>
             </div>
           )}

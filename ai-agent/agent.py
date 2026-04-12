@@ -1,5 +1,5 @@
 """
-Furniture CRM AI Calling Agent (livekit-agents v1.5.x)
+Furzentic AI Calling Agent (livekit-agents v1.5.x)
 Uses LiveKit + Deepgram STT/TTS + Groq LLM + Twilio SIP
 Handles both inbound and outbound calls for furniture businesses
 """

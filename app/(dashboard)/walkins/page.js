@@ -116,7 +116,7 @@ export default function WalkinsPage() {
         <p>Welcome! Please scan this QR code</p>
         <p>to register your visit</p>
         <img src="${qrDataUrl}" />
-        <p style="margin-top:16px;font-size:12px;color:#999;">Powered by Furniture CRM</p>
+        <p style="margin-top:16px;font-size:12px;color:#999;">Powered by Furzentic</p>
       </div></body></html>
     `);
     win.document.close();

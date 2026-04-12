@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { notifyManagers } from '@/lib/notify'
 import {
   createCustomOrderSchema,
   addTimelineEntrySchema,
@@ -423,6 +424,39 @@ export async function updateFieldVisit(data: unknown) {
         updatedBy: staff?.name || 'Staff',
       },
     })
+
+    // Notify managers about field visit completion
+    const order = await prisma.customOrder.findUnique({
+      where: { id: visit.customOrderId },
+      select: { displayId: true, type: true, contactId: true, contact: { select: { name: true } } },
+    })
+    const customerName = order?.contact?.name || 'Customer'
+    const staffName = staff?.name || 'Staff'
+    const orderId = order?.displayId || `#${visit.customOrderId}`
+    const hasMeasurements = measurements ? 'Yes' : 'No'
+
+    notifyManagers({
+      type: 'field_visit',
+      title: `Visit Completed: ${customerName}`,
+      subtitle: `${staffName} completed visit for ${orderId}${measurements ? ' — measurements recorded' : ''}`,
+      href: '/custom-orders',
+      metadata: { visitId, customOrderId: visit.customOrderId, staffId: visit.staffId },
+      emailSubject: `✅ Field Visit Completed — ${customerName} (${orderId})`,
+      emailHtml: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+          <h2 style="color:#8B4513;border-bottom:2px solid #D4A574;padding-bottom:10px;">✅ Field Visit Completed</h2>
+          <table style="width:100%;border-collapse:collapse;margin-top:16px;">
+            <tr><td style="padding:8px 12px;font-weight:600;color:#555;width:160px;">Customer</td><td style="padding:8px 12px;">${customerName}</td></tr>
+            <tr style="background:#F9F6F3;"><td style="padding:8px 12px;font-weight:600;color:#555;">Order</td><td style="padding:8px 12px;">${orderId}${order?.type ? ` — ${order.type}` : ''}</td></tr>
+            <tr><td style="padding:8px 12px;font-weight:600;color:#555;">Completed By</td><td style="padding:8px 12px;">${staffName}</td></tr>
+            <tr style="background:#F9F6F3;"><td style="padding:8px 12px;font-weight:600;color:#555;">Measurements Captured</td><td style="padding:8px 12px;">${hasMeasurements}</td></tr>
+            ${staffNotes ? `<tr><td style="padding:8px 12px;font-weight:600;color:#555;">Staff Notes</td><td style="padding:8px 12px;">${staffNotes}</td></tr>` : ''}
+          </table>
+          <p style="margin-top:20px;font-size:13px;color:#888;">Log in to review the visit details and update the order status.</p>
+        </div>
+      `,
+      whatsappText: `✅ *Field Visit Completed*\n\nCustomer: ${customerName}\nOrder: ${orderId}\nCompleted by: ${staffName}\nMeasurements: ${hasMeasurements}${staffNotes ? `\nNotes: ${staffNotes}` : ''}\n\nLog in to review and update order status.`,
+    }).catch(err => console.error('[field-visit] Notification failed:', err))
   }
 
   revalidatePath('/custom-orders')

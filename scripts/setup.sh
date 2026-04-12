@@ -3,7 +3,7 @@ set -e
 
 echo ""
 echo "======================================"
-echo "  Furniture CRM — First-Time Setup"
+echo "  Furzentic — First-Time Setup"
 echo "======================================"
 echo ""
 
@@ -76,7 +76,7 @@ echo "  Setup Complete!"
 echo "======================================"
 echo ""
 echo "  Default admin login:"
-echo "    Email:    admin@furniturecrm.com"
+echo "    Email:    admin@furzentic.com"
 echo "    Password: admin123"
 echo ""
 echo "  Run the app:  npm run dev"

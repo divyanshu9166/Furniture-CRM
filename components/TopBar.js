@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle } from 'lucide-react';
+import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle, Package, MapPin } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useSidebarContext } from './SidebarContext';
@@ -8,6 +8,8 @@ import {
   getTopNotifications,
   markConversationNotificationRead,
   markAllConversationNotificationsRead,
+  markNotificationRead,
+  markAllAlertNotificationsRead,
 } from '@/app/actions/notifications';
 
 export default function TopBar() {
@@ -69,12 +71,16 @@ export default function TopBar() {
   const getNotificationIcon = (type) => {
     if (type === 'conversation') return MessageSquare;
     if (type === 'followup') return CalendarClock;
+    if (type === 'stock_alert') return Package;
+    if (type === 'field_visit') return MapPin;
     return AlertTriangle;
   };
 
   const getNotificationIconColor = (type) => {
     if (type === 'conversation') return 'text-info bg-info/10';
     if (type === 'followup') return 'text-accent bg-accent/10';
+    if (type === 'stock_alert') return 'text-warning bg-warning/10';
+    if (type === 'field_visit') return 'text-success bg-success/10';
     return 'text-danger bg-danger/10';
   };
 
@@ -83,6 +89,11 @@ export default function TopBar() {
       const convoId = Number(item.id.split('-')[1]);
       if (!Number.isNaN(convoId)) {
         await markConversationNotificationRead(convoId);
+      }
+    } else if (item.type === 'stock_alert' || item.type === 'field_visit') {
+      const notifId = Number(item.id.split('-')[1]);
+      if (!Number.isNaN(notifId)) {
+        await markNotificationRead(notifId);
       }
     }
 
@@ -95,6 +106,7 @@ export default function TopBar() {
     if (notifications.unreadConversationsCount <= 0) return;
     setMarkingAllRead(true);
     await markAllConversationNotificationsRead();
+    await markAllAlertNotificationsRead();
     await refreshNotifications();
     setMarkingAllRead(false);
   };
@@ -211,9 +223,10 @@ export default function TopBar() {
                 )}
               </div>
 
-              <div className="px-4 py-2.5 border-t border-border bg-surface/50 flex items-center justify-between">
-                <a href="/conversations" className="text-[11px] font-medium text-accent hover:text-accent-hover">Open conversations</a>
-                <a href="/billing" className="text-[11px] font-medium text-accent hover:text-accent-hover">Open billing</a>
+              <div className="px-4 py-2.5 border-t border-border bg-surface/50 flex items-center justify-between gap-2">
+                <a href="/conversations" className="text-[11px] font-medium text-accent hover:text-accent-hover">Conversations</a>
+                <a href="/inventory" className="text-[11px] font-medium text-accent hover:text-accent-hover">Inventory</a>
+                <a href="/billing" className="text-[11px] font-medium text-accent hover:text-accent-hover">Billing</a>
               </div>
             </div>
           )}

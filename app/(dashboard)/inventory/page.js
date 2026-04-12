@@ -4,9 +4,11 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, Package, AlertTriangle, TrendingUp, Grid3x3, List,
   Warehouse, QrCode, RefreshCw, ArrowDown, ArrowUp, Bell,
-  CheckCircle2, XCircle, Clock,
+  CheckCircle2, XCircle, Clock, Layers, Boxes, Timer,
 } from 'lucide-react';
 import { getProducts, getCategories, getWarehouses, createProduct, updateStock } from '@/app/actions/products';
+import { getStockGroups, createStockGroup } from '@/app/actions/stock-groups';
+import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
 import Modal from '@/components/Modal';
 
 const stockBadge = (stock, reorderLevel) => {
@@ -30,6 +32,16 @@ export default function InventoryPage() {
   const [productImages, setProductImages] = useState([]);
   const [addingProduct, setAddingProduct] = useState(false);
 
+  // Deep inventory state
+  const [stockGroups, setStockGroups] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [agingData, setAgingData] = useState([]);
+  const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [groupForm, setGroupForm] = useState({ name: '', parentId: '' });
+  const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
+  const [deepLoading, setDeepLoading] = useState(false);
+
   useEffect(() => {
     Promise.all([getProducts(), getCategories(), getWarehouses()]).then(([pRes, cRes, wRes]) => {
       if (pRes.success) setProducts(pRes.data);
@@ -43,6 +55,21 @@ export default function InventoryPage() {
     const res = await getProducts();
     if (res.success) setProducts(res.data);
   };
+
+  const loadDeepInventory = async () => {
+    setDeepLoading(true);
+    const [sgRes, bRes, aRes] = await Promise.all([getStockGroups(), getBatches(), getAgingAnalysis()]);
+    if (sgRes.success) setStockGroups(sgRes.data);
+    if (bRes.success) setBatches(bRes.data);
+    if (aRes.success) setAgingData(aRes.data);
+    setDeepLoading(false);
+  };
+
+  useEffect(() => {
+    if (['stockGroups', 'batches', 'aging'].includes(tab) && stockGroups.length === 0 && !deepLoading) {
+      loadDeepInventory();
+    }
+  }, [tab]);
 
   const filtered = useMemo(() => products.filter(p =>
     (category === 'All' || p.category === category) &&
@@ -80,7 +107,7 @@ export default function InventoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit">
+      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit flex-wrap">
         <button onClick={() => setTab('products')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
           <Package className="w-3.5 h-3.5" /> Products
         </button>
@@ -89,6 +116,15 @@ export default function InventoryPage() {
           {needsReorder.length > 0 && (
             <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{needsReorder.length}</span>
           )}
+        </button>
+        <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <Layers className="w-3.5 h-3.5" /> Stock Groups
+        </button>
+        <button onClick={() => setTab('batches')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <Boxes className="w-3.5 h-3.5" /> Batches
+        </button>
+        <button onClick={() => setTab('aging')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <Timer className="w-3.5 h-3.5" /> Aging Analysis
         </button>
       </div>
 
@@ -315,8 +351,11 @@ export default function InventoryPage() {
                             </span>
                           </td>
                           <td>
-                            <button className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20">
-                              Reorder
+                            <button
+                              onClick={() => setShowStockModal(product)}
+                              className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
+                            >
+                              Restock
                             </button>
                           </td>
                         </tr>
@@ -324,6 +363,190 @@ export default function InventoryPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── STOCK GROUPS TAB ─── */}
+      {tab === 'stockGroups' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowGroupModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Stock Group</button>
+          </div>
+          {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {stockGroups.map(g => (
+                <div key={g.id} className="glass-card p-5">
+                  <h3 className="font-semibold text-foreground">{g.name}</h3>
+                  <p className="text-xs text-muted mt-1">Parent: {g.parent?.name || 'Root'}</p>
+                  <div className="flex items-center gap-4 mt-3 text-sm text-muted">
+                    <span>{g._count?.products || 0} products</span>
+                    <span>{g._count?.children || 0} sub-groups</span>
+                  </div>
+                </div>
+              ))}
+              {stockGroups.length === 0 && <div className="col-span-full text-center py-12 text-muted">No stock groups created yet</div>}
+            </div>
+          )}
+          <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="Add Stock Group">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-muted mb-1 block">Group Name *</label>
+                <input value={groupForm.name} onChange={e => setGroupForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+              </div>
+              <div>
+                <label className="text-sm text-muted mb-1 block">Parent Group</label>
+                <select value={groupForm.parentId} onChange={e => setGroupForm(p => ({ ...p, parentId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+                  <option value="">None (Root)</option>
+                  {stockGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+              </div>
+              <button onClick={async () => {
+                const res = await createStockGroup({ name: groupForm.name, parentId: groupForm.parentId ? Number(groupForm.parentId) : undefined });
+                if (res.success) { setShowGroupModal(false); setGroupForm({ name: '', parentId: '' }); loadDeepInventory(); }
+                else alert(res.error);
+              }} disabled={!groupForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">Create Stock Group</button>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* ─── BATCHES TAB ─── */}
+      {tab === 'batches' && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button onClick={() => setShowBatchModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Batch</button>
+          </div>
+          {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
+            <div className="glass-card overflow-hidden">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-border">
+                  {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {batches.map(b => (
+                    <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                      <td className="px-4 py-3 text-foreground font-medium">{b.product?.name}</td>
+                      <td className="px-4 py-3 text-muted font-mono text-xs">{b.product?.sku}</td>
+                      <td className="px-4 py-3 text-foreground">{b.batchNumber}</td>
+                      <td className="px-4 py-3 text-muted">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
+                      <td className="px-4 py-3 text-muted">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
+                      <td className="px-4 py-3 text-foreground">{b.quantity}</td>
+                      <td className="px-4 py-3"><span className={`font-medium ${b.remainingQty <= 0 ? 'text-red-400' : b.remainingQty < b.quantity * 0.2 ? 'text-amber-400' : 'text-emerald-400'}`}>{b.remainingQty}</span></td>
+                      <td className="px-4 py-3 text-foreground">₹{b.costPrice?.toLocaleString('en-IN')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {batches.length === 0 && <div className="text-center py-12 text-muted">No batch records found</div>}
+            </div>
+          )}
+          <Modal isOpen={showBatchModal} onClose={() => setShowBatchModal(false)} title="Add Batch">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-muted mb-1 block">Product *</label>
+                <select value={batchForm.productId} onChange={e => setBatchForm(p => ({ ...p, productId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+                  <option value="">Select Product</option>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Batch Number *</label>
+                  <input value={batchForm.batchNumber} onChange={e => setBatchForm(p => ({ ...p, batchNumber: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                </div>
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Cost Price</label>
+                  <input type="number" min="0" value={batchForm.costPrice} onChange={e => setBatchForm(p => ({ ...p, costPrice: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Purchase Date</label>
+                  <input type="date" value={batchForm.purchaseDate} onChange={e => setBatchForm(p => ({ ...p, purchaseDate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Expiry Date</label>
+                  <input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm(p => ({ ...p, expiryDate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Quantity *</label>
+                  <input type="number" min="1" value={batchForm.quantity} onChange={e => setBatchForm(p => ({ ...p, quantity: e.target.value, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
+                <div>
+                  <label className="text-sm text-muted mb-1 block">Remaining Qty</label>
+                  <input type="number" min="0" value={batchForm.remainingQty} onChange={e => setBatchForm(p => ({ ...p, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
+              </div>
+              <button onClick={async () => {
+                const res = await createBatch({
+                  productId: Number(batchForm.productId), batchNumber: batchForm.batchNumber,
+                  purchaseDate: batchForm.purchaseDate || undefined, expiryDate: batchForm.expiryDate || undefined,
+                  quantity: Number(batchForm.quantity), remainingQty: Number(batchForm.remainingQty), costPrice: Number(batchForm.costPrice)
+                });
+                if (res.success) { setShowBatchModal(false); setBatchForm({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 }); loadDeepInventory(); }
+                else alert(res.error);
+              }} disabled={!batchForm.productId || !batchForm.batchNumber} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">Create Batch</button>
+            </div>
+          </Modal>
+        </div>
+      )}
+
+      {/* ─── AGING ANALYSIS TAB ─── */}
+      {tab === 'aging' && (
+        <div className="space-y-4">
+          {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
+            <>
+              {/* Aging summary */}
+              {agingData.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
+                    const items = agingData.filter(a => a.bracket === bracket);
+                    const value = items.reduce((s, a) => s + a.value, 0);
+                    const colors = { '0-30 days': 'text-emerald-400', '31-60 days': 'text-blue-400', '61-90 days': 'text-amber-400', '91-180 days': 'text-orange-400', '180+ days': 'text-red-400' };
+                    return (
+                      <div key={bracket} className="glass-card p-4">
+                        <p className="text-xs text-muted">{bracket}</p>
+                        <p className={`text-lg font-semibold ${colors[bracket]}`}>₹{value.toLocaleString('en-IN')}</p>
+                        <p className="text-xs text-muted">{items.length} batches</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="glass-card overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-border">
+                    {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {agingData.map((a, i) => (
+                      <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                        <td className="px-4 py-3 text-foreground font-medium">{a.product?.name}</td>
+                        <td className="px-4 py-3 text-muted font-mono text-xs">{a.product?.sku}</td>
+                        <td className="px-4 py-3 text-muted">{a.product?.category?.name || '—'}</td>
+                        <td className="px-4 py-3 text-foreground">{a.batchNumber}</td>
+                        <td className="px-4 py-3 text-foreground">{a.ageDays}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
+                            a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
+                            a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
+                            'bg-emerald-500/10 text-emerald-400'
+                          }`}>{a.bracket}</span>
+                        </td>
+                        <td className="px-4 py-3 text-foreground">{a.remainingQty}</td>
+                        <td className="px-4 py-3 text-foreground">₹{a.value?.toLocaleString('en-IN')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {agingData.length === 0 && <div className="text-center py-12 text-muted">No batch data available for aging analysis. Add product batches first.</div>}
               </div>
             </>
           )}

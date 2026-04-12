@@ -1,4 +1,4 @@
-# Furniture CRM - AI Calling Agent
+Furzentic - AI Calling Agent
 
 AI-powered voice agent for inbound and outbound customer calls using **LiveKit**, **Deepgram**, **Groq**, and **Twilio SIP**.
 

@@ -74,6 +74,8 @@ model Contact {
   phone     String   @unique
   email     String?
   address   String?
+  gstNumber String?  // Buyer GSTIN — enables B2B classification in GSTR-1
+  state     String?  // State for place of supply (e.g. "Maharashtra")
   source    String?
   notes             String?
   emailSubscribed   Boolean  @default(true)
@@ -174,9 +176,25 @@ model Product {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  orders       Order[]
-  invoiceItems InvoiceItem[]
-  customOrders CustomOrder[]
+  orders              Order[]
+  invoiceItems        InvoiceItem[]
+  customOrders        CustomOrder[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  purchaseReturnItems PurchaseReturnItem[]
+  godownStocks        GodownStock[]
+  transferItems       GodownTransferItem[]
+  batches             ProductBatch[]
+  bomItems            BomItem[]           @relation("RawMaterial")
+  bomFinished         BillOfMaterials[]   @relation("FinishedProduct")
+  productionFinished  ProductionOrder[]   @relation("ProductionFinished")
+  materialConsumed    MaterialConsumption[] @relation("MaterialConsumed")
+
+  // Deep inventory fields
+  hsnCode       String?
+  unitOfMeasure String  @default("PCS")
+  costPrice     Int     @default(0)
+  stockGroupId  Int?
+  stockGroup    StockGroup? @relation(fields: [stockGroupId], references: [id])
 
   @@index([categoryId])
   @@index([sku])
@@ -266,12 +284,17 @@ model Invoice {
   gst           Int           @default(0)
   cgst          Int           @default(0)
   sgst          Int           @default(0)
+  igst          Int           @default(0)   // Interstate GST
+  cess          Int           @default(0)   // Cess on applicable goods
   total         Int
   amountPaid    Int           @default(0)
   balanceDue    Int           @default(0)
   paymentMethod String        // primary payment method
   paymentStatus PaymentStatus @default(PENDING)
   invoiceStatus InvoiceStatus @default(ACTIVE)
+  supplyType    String        @default("INTRASTATE") // INTRASTATE | INTERSTATE | EXPORT | EXEMPT | NIL_RATED
+  placeOfSupply String?       // State name, e.g. "Maharashtra"
+  isRCM         Boolean       @default(false)        // Reverse Charge Mechanism
   date          DateTime
   time          String?
   dueDate       DateTime?
@@ -282,9 +305,10 @@ model Invoice {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  items    InvoiceItem[]
-  payments Payment[]
+  items     InvoiceItem[]
+  payments  Payment[]
   creditNotes CreditNote[]
+  eWayBills   EWayBill[]
 
   @@index([date])
   @@index([paymentStatus])
@@ -303,6 +327,12 @@ model InvoiceItem {
   quantity  Int
   price     Int
   hsnCode   String?  // HSN/SAC code for GST
+  gstRate   Float    @default(18)  // Per-item GST rate (from HSN)
+  cgst      Int      @default(0)   // Per-item CGST
+  sgst      Int      @default(0)   // Per-item SGST
+  igst      Int      @default(0)   // Per-item IGST (interstate)
+  cess      Int      @default(0)   // Per-item cess
+  taxableAmount Int  @default(0)   // price * quantity (pre-tax)
 
   @@index([invoiceId])
 }
@@ -440,6 +470,21 @@ model Staff {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Payroll fields
+  basicSalary          Int     @default(0)
+  designation          String?
+  panNumber            String?
+  bankAccount          String?
+  bankName             String?
+  ifscCode             String?
+  pfEnrolled           Boolean @default(false)
+  esiEnrolled          Boolean @default(false)
+  uanNumber            String?   // Universal Account Number (PF)
+  pfNumber             String?   // PF registration number
+  esiNumber            String?   // ESI registration number
+  professionalTaxState String @default("Maharashtra")
+  tdsMonthly           Int    @default(0)  // fixed monthly TDS amount
+
   user         User?
   leads        Lead[]
   invoices     Invoice[]
@@ -449,6 +494,8 @@ model Staff {
   activities   StaffActivity[]
   fieldVisits  FieldVisit[]
   stockUpdates StockUpdate[]
+  payslips     Payslip[]
+  loans        StaffLoan[]
 
   @@index([email])
 }
@@ -697,6 +744,22 @@ model StoreSettings {
   updatedAt      DateTime @updatedAt
 }
 
+// ─── IN-APP NOTIFICATIONS ───────────────────────────
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      String   // 'stock_alert' | 'field_visit'
+  title     String
+  subtitle  String
+  href      String   // link to navigate to
+  read      Boolean  @default(false)
+  metadata  Json?    // extra data (productId, visitId, etc.)
+  createdAt DateTime @default(now())
+
+  @@index([read])
+  @@index([type])
+}
+
 // ─── STORE CAMPAIGNS (QR Codes) ──────────────────────
 
 model StoreCampaign {
@@ -832,4 +895,474 @@ model Draft {
 
   @@index([sourceType])
   @@index([expiresAt])
+}
+
+// ─── MODULE 1: PURCHASE MANAGEMENT ──────────────────
+
+enum POStatus {
+  DRAFT
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model Supplier {
+  id             Int      @id @default(autoincrement())
+  name           String
+  gstNumber      String?
+  phone          String?
+  email          String?
+  address        String?
+  contactPerson  String?
+  paymentTerms   Int      @default(30)
+  openingBalance Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  purchaseOrders  PurchaseOrder[]
+  purchaseReturns PurchaseReturn[]
+}
+
+model PurchaseOrder {
+  id           Int      @id @default(autoincrement())
+  displayId    String   @unique
+  supplierId   Int
+  supplier     Supplier @relation(fields: [supplierId], references: [id])
+  status       POStatus @default(DRAFT)
+  subtotal     Int      @default(0)
+  discount     Int      @default(0)
+  gst          Int      @default(0)
+  cgst         Int      @default(0)
+  sgst         Int      @default(0)
+  igst         Int      @default(0)   // Interstate purchases
+  total        Int      @default(0)
+  amountPaid   Int      @default(0)
+  balanceDue   Int      @default(0)
+  isRCM        Boolean  @default(false) // Reverse Charge Mechanism
+  itcEligible  Boolean  @default(true)  // Is ITC claimable?
+  itcCategory  String   @default("INPUTS") // INPUTS | SERVICES | CAPITAL_GOODS | INELIGIBLE
+  date         DateTime @default(now())
+  expectedDate DateTime?
+  receivedAt   DateTime?
+  notes        String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  items           PurchaseOrderItem[]
+  purchaseReturns PurchaseReturn[]
+
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseOrderItem {
+  id          Int           @id @default(autoincrement())
+  poId        Int
+  po          PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  productId   Int
+  product     Product       @relation(fields: [productId], references: [id])
+  name        String
+  sku         String
+  hsnCode     String?
+  quantity    Int
+  receivedQty Int           @default(0)
+  unitCost    Int
+  gstRate     Float         @default(18)
+  amount      Int
+
+  @@index([poId])
+}
+
+model PurchaseReturn {
+  id          Int            @id @default(autoincrement())
+  displayId   String         @unique
+  poId        Int?
+  po          PurchaseOrder? @relation(fields: [poId], references: [id])
+  supplierId  Int
+  supplier    Supplier       @relation(fields: [supplierId], references: [id])
+  reason      String
+  totalAmount Int
+  date        DateTime       @default(now())
+  status      String         @default("Pending")
+  notes       String?
+  createdAt   DateTime       @default(now())
+
+  items PurchaseReturnItem[]
+
+  @@index([supplierId])
+}
+
+model PurchaseReturnItem {
+  id        Int            @id @default(autoincrement())
+  returnId  Int
+  return    PurchaseReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId Int
+  product   Product        @relation(fields: [productId], references: [id])
+  name      String
+  sku       String
+  quantity  Int
+  unitCost  Int
+
+  @@index([returnId])
+}
+
+// ─── MODULE 2: MULTI-BRANCH / GODOWN ────────────────
+
+model Branch {
+  id           Int      @id @default(autoincrement())
+  name         String
+  address      String?
+  phone        String?
+  email        String?
+  managerName  String?
+  isHeadOffice Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  godowns Godown[]
+}
+
+model Godown {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  branchId  Int?
+  branch    Branch?  @relation(fields: [branchId], references: [id])
+  createdAt DateTime @default(now())
+
+  stocks        GodownStock[]
+  transfersFrom GodownTransfer[] @relation("FromGodown")
+  transfersTo   GodownTransfer[] @relation("ToGodown")
+
+  @@index([branchId])
+}
+
+model GodownStock {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  godownId  Int
+  godown    Godown  @relation(fields: [godownId], references: [id])
+  quantity  Int     @default(0)
+
+  @@unique([productId, godownId])
+  @@index([godownId])
+}
+
+model GodownTransfer {
+  id           Int      @id @default(autoincrement())
+  displayId    String   @unique
+  fromGodownId Int
+  fromGodown   Godown   @relation("FromGodown", fields: [fromGodownId], references: [id])
+  toGodownId   Int
+  toGodown     Godown   @relation("ToGodown", fields: [toGodownId], references: [id])
+  status       String   @default("Pending")
+  date         DateTime @default(now())
+  notes        String?
+  requestedBy  String?
+  approvedBy   String?
+  createdAt    DateTime @default(now())
+
+  items GodownTransferItem[]
+
+  @@index([fromGodownId])
+  @@index([toGodownId])
+}
+
+model GodownTransferItem {
+  id         Int            @id @default(autoincrement())
+  transferId Int
+  transfer   GodownTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  Int
+  product    Product        @relation(fields: [productId], references: [id])
+  name       String
+  sku        String
+  quantity   Int
+
+  @@index([transferId])
+}
+
+// ─── MODULE 3: DEEP INVENTORY ────────────────────────
+
+model StockGroup {
+  id        Int          @id @default(autoincrement())
+  name      String       @unique
+  parentId  Int?
+  parent    StockGroup?  @relation("StockGroupHierarchy", fields: [parentId], references: [id])
+  children  StockGroup[] @relation("StockGroupHierarchy")
+  createdAt DateTime     @default(now())
+
+  products Product[]
+}
+
+model ProductBatch {
+  id           Int      @id @default(autoincrement())
+  productId    Int
+  product      Product  @relation(fields: [productId], references: [id])
+  batchNumber  String
+  purchaseDate DateTime @default(now())
+  expiryDate   DateTime?
+  quantity     Int
+  remainingQty Int
+  costPrice    Int      @default(0)
+  supplierId   Int?
+  poId         Int?
+  createdAt    DateTime @default(now())
+
+  @@unique([productId, batchNumber])
+  @@index([productId])
+}
+
+// ─── MODULE 4: GST COMPLIANCE ────────────────────────
+
+model HsnCode {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  description String
+  gstRate     Float    @default(18)
+  cessRate    Float    @default(0)
+  type        String   @default("GOODS")
+  createdAt   DateTime @default(now())
+}
+
+model GSTReturn {
+  id         Int      @id @default(autoincrement())
+  returnType String
+  period     String
+  status     String   @default("DRAFT")
+  filedAt    DateTime?
+  data       Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([returnType, period])
+  @@index([period])
+}
+
+model EWayBill {
+  id               Int      @id @default(autoincrement())
+  ewbNumber        String?  // e-Way Bill number from portal
+  invoiceId        Int?
+  invoice          Invoice? @relation(fields: [invoiceId], references: [id])
+  vehicleNo        String?
+  transporterGSTIN String?
+  transporterName  String?
+  fromAddress      String?
+  toAddress        String?
+  distance         Int?     // km
+  goodsDesc        String?
+  hsnCode          String?
+  quantity         Float?
+  value            Int      @default(0)  // Invoice value
+  validFrom        DateTime?
+  validUntil       DateTime?
+  status           String   @default("GENERATED") // GENERATED | CANCELLED | EXPIRED
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  @@index([invoiceId])
+  @@index([status])
+}
+
+// ─── MODULE 5: MANUFACTURING / JOB COSTING ──────────
+
+model BillOfMaterials {
+  id                Int      @id @default(autoincrement())
+  name              String
+  finishedProductId Int
+  finishedProduct   Product  @relation("FinishedProduct", fields: [finishedProductId], references: [id])
+  version           String   @default("1.0")
+  isActive          Boolean  @default(true)
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  items            BomItem[]
+  productionOrders ProductionOrder[]
+
+  @@index([finishedProductId])
+}
+
+model BomItem {
+  id              Int             @id @default(autoincrement())
+  bomId           Int
+  bom             BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  rawMaterialId   Int
+  rawMaterial     Product         @relation("RawMaterial", fields: [rawMaterialId], references: [id])
+  quantity        Float
+  unitOfMeasure   String          @default("PCS")
+  wastagePercent  Float           @default(0)
+  notes           String?
+
+  @@index([bomId])
+}
+
+model ProductionOrder {
+  id                Int             @id @default(autoincrement())
+  displayId         String          @unique
+  bomId             Int
+  bom               BillOfMaterials @relation(fields: [bomId], references: [id])
+  finishedProductId Int
+  finishedProduct   Product         @relation("ProductionFinished", fields: [finishedProductId], references: [id])
+  plannedQty        Int
+  actualQty         Int             @default(0)
+  status            String          @default("PLANNED")
+  startDate         DateTime?
+  completedDate     DateTime?
+  totalMaterialCost Int             @default(0)
+  totalLabourCost   Int             @default(0)
+  notes             String?
+  createdBy         String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  consumptions MaterialConsumption[]
+
+  @@index([status])
+}
+
+model MaterialConsumption {
+  id                Int             @id @default(autoincrement())
+  productionOrderId Int
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  rawMaterialId     Int
+  rawMaterial       Product         @relation("MaterialConsumed", fields: [rawMaterialId], references: [id])
+  plannedQty        Float
+  actualQty         Float           @default(0)
+  unitCost          Int             @default(0)
+  totalCost         Int             @default(0)
+
+  @@index([productionOrderId])
+}
+
+// ─── MODULE 6: STAFF PAYROLL ─────────────────────────
+
+model PayrollRun {
+  id                   Int      @id @default(autoincrement())
+  displayId            String   @unique
+  period               String
+  status               String   @default("DRAFT")
+  totalGross           Int      @default(0)
+  totalDeductions      Int      @default(0)
+  totalNet             Int      @default(0)
+  employerContributions Int     @default(0)  // total employer PF + ESI
+  processedAt          DateTime @default(now())
+  paidAt               DateTime?
+  processedBy          String?
+  createdAt            DateTime @default(now())
+
+  payslips Payslip[]
+
+  @@index([status])
+}
+
+model Payslip {
+  id               Int        @id @default(autoincrement())
+  payrollRunId     Int
+  payrollRun       PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  staffId          Int
+  staff            Staff      @relation(fields: [staffId], references: [id])
+  workingDays      Int        @default(26)
+  presentDays      Int        @default(0)
+  basicSalary      Int        @default(0)
+  hra              Int        @default(0)
+  da               Int        @default(0)
+  specialAllowance Int        @default(0)
+  otHours          Float      @default(0)
+  otPay            Int        @default(0)
+  bonus            Int        @default(0)
+  grossSalary      Int        @default(0)
+  pfEmployee       Int        @default(0)
+  pfEmployer       Int        @default(0)
+  esiEmployee      Int        @default(0)
+  esiEmployer      Int        @default(0)
+  professionalTax  Int        @default(0)
+  tds              Int        @default(0)
+  loanDeduction    Int        @default(0)
+  otherDeductions  Int        @default(0)
+  totalDeductions  Int        @default(0)
+  netSalary        Int        @default(0)
+  status           String     @default("Generated")
+  createdAt        DateTime   @default(now())
+
+  @@unique([payrollRunId, staffId])
+  @@index([staffId])
+}
+
+model StaffLoan {
+  id                Int      @id @default(autoincrement())
+  staffId           Int
+  staff             Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  purpose           String
+  principalAmount   Int
+  remainingAmount   Int
+  monthlyInstallment Int
+  startPeriod       String   // YYYY-MM
+  status            String   @default("Active")  // Active, Closed
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  @@index([staffId])
+  @@index([status])
+}
+
+// ─── MODULE 7: FINANCIAL STATEMENTS ─────────────────
+
+model AccountGroup {
+  id       Int      @id @default(autoincrement())
+  name     String   @unique
+  type     String   // ASSET | LIABILITY | INCOME | EXPENSE | EQUITY
+  parentId Int?
+  parent   AccountGroup?  @relation("AccountGroupHierarchy", fields: [parentId], references: [id])
+  children AccountGroup[] @relation("AccountGroupHierarchy")
+
+  accounts LedgerAccount[]
+}
+
+model LedgerAccount {
+  id              Int          @id @default(autoincrement())
+  code            String       @unique
+  name            String
+  groupId         Int
+  group           AccountGroup @relation(fields: [groupId], references: [id])
+  openingBalance  Int          @default(0)
+  isSystemAccount Boolean      @default(false)
+  createdAt       DateTime     @default(now())
+
+  lines JournalLine[]
+
+  @@index([groupId])
+}
+
+model JournalEntry {
+  id            Int      @id @default(autoincrement())
+  displayId     String   @unique
+  date          DateTime
+  narration     String
+  referenceType String?
+  referenceId   Int?
+  totalDebit    Int
+  totalCredit   Int
+  status        String   @default("POSTED")
+  createdBy     String?
+  createdAt     DateTime @default(now())
+
+  lines JournalLine[]
+
+  @@index([date])
+  @@index([status])
+}
+
+model JournalLine {
+  id             Int           @id @default(autoincrement())
+  journalEntryId Int
+  journalEntry   JournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      Int
+  account        LedgerAccount @relation(fields: [accountId], references: [id])
+  debit          Int           @default(0)
+  credit         Int           @default(0)
+  description    String?
+
+  @@index([journalEntryId])
+  @@index([accountId])
 }
