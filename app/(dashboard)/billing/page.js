@@ -11,7 +11,7 @@ import {
   RotateCcw, PauseCircle, PlayCircle, ChevronDown,
   ChevronsUpDown, Filter, MoreHorizontal,
   Wallet, BadgeIndianRupee, CircleDollarSign,
-  SplitSquareHorizontal, Eye, XCircle,
+  SplitSquareHorizontal, Eye, XCircle, Truck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
@@ -93,6 +93,7 @@ export default function BillingPage() {
   const [posCustomer, setPosCustomer] = useState({ name: '', phone: '' });
   const [posDiscount, setPosDiscount] = useState(0);
   const [posDiscountType, setPosDiscountType] = useState('flat');
+  const [posTransportCost, setPosTransportCost] = useState(0);
   const [posPayments, setPosPayments] = useState([{ amount: 0, method: 'Cash', reference: '' }]);
   const [posSalesperson, setPosSalesperson] = useState('');
   const [posNotes, setPosNotes] = useState('');
@@ -212,7 +213,7 @@ export default function BillingPage() {
   const posTotalGst = Math.round(posAfterDiscount * gstRate / 100);
   const posCgst = Math.round(posTotalGst / 2);
   const posSgst = posTotalGst - posCgst;
-  const posTotal = posAfterDiscount + posTotalGst;
+  const posTotal = posAfterDiscount + posTotalGst + (posTransportCost || 0);
   const posTotalPayments = posPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
@@ -314,6 +315,7 @@ export default function BillingPage() {
         items: posItems.map(i => ({ productId: i.id, name: i.name, sku: i.sku || '', quantity: i.qty, price: i.price })),
         discount: posDiscount,
         discountType: posDiscountType === 'flat' ? 'flat' : 'percent',
+        transportCost: posTransportCost || 0,
         payments: paymentsData,
         salespersonId: posSalesperson ? parseInt(posSalesperson) : undefined,
         notes: posNotes || undefined,
@@ -498,6 +500,7 @@ export default function BillingPage() {
         ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
         <div class="row"><span>CGST (${gstRate / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
         <div class="row"><span>SGST (${gstRate / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>
+        ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
         <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
         <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
         ${inv.balanceDue > 0 ? `<div class="row due"><span>Balance Due</span><span>₹${inv.balanceDue.toLocaleString('en-IN')}</span></div>` : ''}
@@ -1056,6 +1059,21 @@ export default function BillingPage() {
               )}
             </div>
 
+            {/* Transport Cost */}
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Truck className="w-4 h-4 text-accent" /> Transport Cost
+                <span className="text-[10px] text-muted font-normal">(optional)</span>
+              </h3>
+              <div className="relative">
+                <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                <input type="number" min="0" placeholder="Enter transport/freight amount"
+                  value={posTransportCost || ''}
+                  onChange={e => setPosTransportCost(Number(e.target.value) || 0)}
+                  className="w-full pl-9 pr-3 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50" />
+              </div>
+            </div>
+
             {/* Split Payments */}
             <div className="glass-card p-5">
               <div className="flex items-center justify-between mb-4">
@@ -1197,6 +1215,12 @@ export default function BillingPage() {
                   <span className="text-muted">SGST ({gstRate / 2}%)</span>
                   <span className="text-foreground">{formatFullCurrency(posSgst)}</span>
                 </div>
+                {posTransportCost > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted">Transport Cost</span>
+                    <span className="text-foreground">{formatFullCurrency(posTransportCost)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-lg font-bold pt-3 border-t border-border mt-1">
                   <span className="text-foreground">Total</span>
                   <span className="text-accent">{formatFullCurrency(posTotal)}</span>
@@ -1248,7 +1272,7 @@ export default function BillingPage() {
             )}
             {selectedInvoice.isHeld && (
               <div className="px-4 py-2.5 rounded-xl text-sm font-medium text-center border bg-amber-500/10 text-amber-700 border-amber-500/20">
-                This bill is on hold — stock has not been deducted
+                This bill is on hold and can be finalized when you are ready
               </div>
             )}
 
@@ -1316,6 +1340,9 @@ export default function BillingPage() {
                   <div className="flex justify-between"><span className="text-muted">Subtotal</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.subtotal)}</span></div>
                   {selectedInvoice.discount > 0 && (
                     <div className="flex justify-between"><span className="text-muted">Discount</span><span className="text-success">-{formatFullCurrency(selectedInvoice.discount)}</span></div>
+                  )}
+                  {selectedInvoice.transportCost > 0 && (
+                    <div className="flex justify-between"><span className="text-muted">Transport Cost</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.transportCost)}</span></div>
                   )}
                   <div className="flex justify-between text-xs"><span className="text-muted">CGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.cgst)}</span></div>
                   <div className="flex justify-between text-xs"><span className="text-muted">SGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.sgst)}</span></div>
@@ -1507,7 +1534,7 @@ export default function BillingPage() {
           <div className="space-y-4">
             <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-xl">
               <p className="text-sm text-red-700 font-medium">Are you sure you want to cancel invoice {selectedInvoice.id}?</p>
-              <p className="text-xs text-red-600/70 mt-1">This will restore the product stock. This action cannot be undone.</p>
+              <p className="text-xs text-red-600/70 mt-1">This will mark the invoice as cancelled. This action cannot be undone.</p>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setShowCancelConfirm(false)}

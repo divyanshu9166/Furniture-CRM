@@ -4,11 +4,12 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, Package, AlertTriangle, TrendingUp, Grid3x3, List,
   Warehouse, QrCode, RefreshCw, ArrowDown, ArrowUp, Bell,
-  CheckCircle2, XCircle, Clock, Layers, Boxes, Timer,
+  CheckCircle2, XCircle, Clock, Layers, Boxes, Timer, MapPin, FileText
 } from 'lucide-react';
 import { getProducts, getCategories, getWarehouses, createProduct, updateStock } from '@/app/actions/products';
 import { getStockGroups, createStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
+import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
 
 const stockBadge = (stock, reorderLevel) => {
@@ -42,11 +43,23 @@ export default function InventoryPage() {
   const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
   const [deepLoading, setDeepLoading] = useState(false);
 
+  // Location view state
+  const [godownStocks, setGodownStocks] = useState([]);
+  const [godowns, setGodowns] = useState([]);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [selectedLocationGodown, setSelectedLocationGodown] = useState('');
+  const [locationSearch, setLocationSearch] = useState('');
+
+  // Stock Ledger state
+  const [ledgerEntries, setLedgerEntries] = useState([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+
   useEffect(() => {
-    Promise.all([getProducts(), getCategories(), getWarehouses()]).then(([pRes, cRes, wRes]) => {
+    Promise.all([getProducts(), getCategories(), getWarehouses(), getGodowns()]).then(([pRes, cRes, wRes, gdRes]) => {
       if (pRes.success) setProducts(pRes.data);
       setCategories(['All', ...cRes.map(c => c.name)]);
       setWarehouses(['All', ...wRes.map(w => w.name)]);
+      if (gdRes.success) setGodowns(gdRes.data);
       setLoading(false);
     });
   }, []);
@@ -65,9 +78,30 @@ export default function InventoryPage() {
     setDeepLoading(false);
   };
 
+  const loadLocationData = async () => {
+    setLocationLoading(true);
+    const [gsRes, gdRes] = await Promise.all([getGodownStock(), getGodowns()]);
+    if (gsRes.success) setGodownStocks(gsRes.data);
+    if (gdRes.success) setGodowns(gdRes.data);
+    setLocationLoading(false);
+  };
+
+  const loadLedger = async () => {
+    setLedgerLoading(true);
+    const res = await getStockLedger({ limit: 200 });
+    if (res.success) setLedgerEntries(res.data);
+    setLedgerLoading(false);
+  };
+
   useEffect(() => {
     if (['stockGroups', 'batches', 'aging'].includes(tab) && stockGroups.length === 0 && !deepLoading) {
       loadDeepInventory();
+    }
+    if (tab === 'location' && godownStocks.length === 0 && !locationLoading) {
+      loadLocationData();
+    }
+    if (tab === 'ledger' && ledgerEntries.length === 0 && !ledgerLoading) {
+      loadLedger();
     }
   }, [tab]);
 
@@ -76,6 +110,23 @@ export default function InventoryPage() {
     (warehouseFilter === 'All' || p.warehouse === warehouseFilter) &&
     (p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
   ), [category, warehouseFilter, search, products]);
+
+  // Group godown stocks by product for location view
+  const locationProducts = useMemo(() => {
+    const map = {};
+    const filteredGdStocks = godownStocks.filter(s =>
+      (!selectedLocationGodown || s.godownId === Number(selectedLocationGodown)) &&
+      (!locationSearch || s.product?.name?.toLowerCase().includes(locationSearch.toLowerCase()) || s.product?.sku?.toLowerCase().includes(locationSearch.toLowerCase()))
+    );
+    for (const s of filteredGdStocks) {
+      if (!map[s.productId]) {
+        map[s.productId] = { product: s.product, locations: [], totalQty: 0 };
+      }
+      map[s.productId].locations.push({ godown: s.godown, quantity: s.quantity });
+      map[s.productId].totalQty += s.quantity;
+    }
+    return Object.values(map).sort((a, b) => b.totalQty - a.totalQty);
+  }, [godownStocks, selectedLocationGodown, locationSearch]);
 
   const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
   const lowStockItems = products.filter(p => p.stock > 0 && p.stock <= p.reorderLevel);
@@ -99,7 +150,7 @@ export default function InventoryPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Inventory & Warehouse</h1>
-          <p className="text-xs md:text-sm text-muted mt-1">{products.length} products · {totalStock} total units across locations</p>
+          <p className="text-xs md:text-sm text-muted mt-1">{products.length} products · {totalStock} total units across {godowns.length || 1} locations</p>
         </div>
         <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
           <Plus className="w-4 h-4" /> Add Product
@@ -107,24 +158,30 @@ export default function InventoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit flex-wrap">
-        <button onClick={() => setTab('products')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+      <div className="flex bg-surface rounded-xl border border-border p-0.5 w-fit flex-wrap overflow-x-auto hide-scrollbar">
+        <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
           <Package className="w-3.5 h-3.5" /> Products
         </button>
-        <button onClick={() => setTab('alerts')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+        <button onClick={() => setTab('location')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'location' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <MapPin className="w-3.5 h-3.5" /> Location View
+        </button>
+        <button onClick={() => setTab('alerts')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
           <Bell className="w-3.5 h-3.5" /> Stock Alerts
           {needsReorder.length > 0 && (
             <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{needsReorder.length}</span>
           )}
         </button>
-        <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Layers className="w-3.5 h-3.5" /> Stock Groups
+        <button onClick={() => setTab('ledger')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'ledger' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <FileText className="w-3.5 h-3.5" /> Stock Ledger
         </button>
-        <button onClick={() => setTab('batches')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+        <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <Layers className="w-3.5 h-3.5" /> Groups
+        </button>
+        <button onClick={() => setTab('batches')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
           <Boxes className="w-3.5 h-3.5" /> Batches
         </button>
-        <button onClick={() => setTab('aging')} className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-          <Timer className="w-3.5 h-3.5" /> Aging Analysis
+        <button onClick={() => setTab('aging')} className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all flex-shrink-0 ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <Timer className="w-3.5 h-3.5" /> Aging
         </button>
       </div>
 
@@ -150,7 +207,7 @@ export default function InventoryPage() {
             </div>
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
               <div className="p-2.5 rounded-xl bg-info-light"><Warehouse className="w-5 h-5 text-info" /></div>
-              <div><p className="text-xs text-muted">Locations</p><p className="text-lg font-bold text-foreground">{warehouses.length - 1}</p></div>
+              <div><p className="text-xs text-muted">Locations</p><p className="text-lg font-bold text-foreground">{godowns.length || (warehouses.length - 1)}</p></div>
             </div>
           </div>
 
@@ -165,13 +222,6 @@ export default function InventoryPage() {
                 <button key={cat} onClick={() => setCategory(cat)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${category === cat ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>{cat}</button>
               ))}
             </div>
-            <div className="flex gap-1 overflow-x-auto hide-scrollbar">
-              {warehouses.map(w => (
-                <button key={w} onClick={() => setWarehouseFilter(w)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 flex-shrink-0 ${warehouseFilter === w ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>
-                  {w !== 'All' && <Warehouse className="w-3 h-3" />}{w}
-                </button>
-              ))}
-            </div>
             <div className="flex bg-surface rounded-lg border border-border p-0.5 ml-auto">
               <button onClick={() => setView('grid')} className={`p-2 rounded-md transition-all ${view === 'grid' ? 'bg-accent/20 text-accent' : 'text-muted'}`}><Grid3x3 className="w-4 h-4" /></button>
               <button onClick={() => setView('list')} className={`p-2 rounded-md transition-all ${view === 'list' ? 'bg-accent/20 text-accent' : 'text-muted'}`}><List className="w-4 h-4" /></button>
@@ -183,6 +233,8 @@ export default function InventoryPage() {
               {filtered.map(product => {
                 const badge = stockBadge(product.stock, product.reorderLevel);
                 const isBestSeller = product.sold >= 30;
+                // Get godown distribution for this product
+                const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                 return (
                   <div key={product.id} className="glass-card overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer" onClick={() => setShowStockModal(product)}>
                     <div className="h-32 bg-surface flex items-center justify-center relative overflow-hidden">
@@ -203,7 +255,19 @@ export default function InventoryPage() {
                         <h3 className="text-sm font-semibold text-foreground leading-tight">{product.name}</h3>
                       </div>
                       <p className="text-xs text-muted mb-1">{product.category} · {product.material}</p>
-                      <p className="text-[10px] text-muted mb-3 flex items-center gap-1"><Warehouse className="w-3 h-3" /> {product.warehouse}</p>
+                      <p className="text-[10px] text-muted mb-2 flex items-center gap-1"><Warehouse className="w-3 h-3" /> {product.warehouse}</p>
+                      
+                      {/* Godown distribution */}
+                      {godownDist.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {godownDist.map(gs => (
+                            <span key={gs.id} className="text-[9px] px-1.5 py-0.5 rounded bg-surface-hover text-muted">
+                              {gs.godown?.name}: {gs.quantity}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      
                       <div className="flex items-center justify-between">
                         <span className="text-base font-bold text-accent">₹{product.price.toLocaleString()}</span>
                         <span className={`badge text-[10px] ${badge.cls}`}>{badge.text}</span>
@@ -228,9 +292,9 @@ export default function InventoryPage() {
                       <th>Category</th>
                       <th>Price</th>
                       <th>Stock</th>
+                      <th>Godown Split</th>
                       <th>Reorder At</th>
                       <th>Sold</th>
-                      <th>Warehouse</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
@@ -238,6 +302,7 @@ export default function InventoryPage() {
                   <tbody>
                     {filtered.map(product => {
                       const badge = stockBadge(product.stock, product.reorderLevel);
+                      const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                       return (
                         <tr key={product.id} className="cursor-pointer" onClick={() => setShowStockModal(product)}>
                           <td>
@@ -261,11 +326,15 @@ export default function InventoryPage() {
                           <td>{product.category}</td>
                           <td className="text-accent font-semibold">₹{product.price.toLocaleString()}</td>
                           <td className={`font-medium ${product.stock <= product.reorderLevel ? 'text-danger' : 'text-foreground'}`}>{product.stock}</td>
+                          <td>
+                            <div className="flex flex-wrap gap-1">
+                              {godownDist.length > 0 ? godownDist.map(gs => (
+                                <span key={gs.id} className="text-[9px] px-1.5 py-0.5 rounded bg-surface-hover text-muted">{gs.godown?.name}: {gs.quantity}</span>
+                              )) : <span className="text-[10px] text-muted">—</span>}
+                            </div>
+                          </td>
                           <td className="text-muted">{product.reorderLevel}</td>
                           <td>{product.sold}</td>
-                          <td>
-                            <span className="text-xs text-muted flex items-center gap-1"><Warehouse className="w-3 h-3" /> {product.warehouse}</span>
-                          </td>
                           <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
                           <td>
                             <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
@@ -281,6 +350,127 @@ export default function InventoryPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* ─── LOCATION VIEW TAB ─── */}
+      {tab === 'location' && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+              <input value={locationSearch} onChange={e => setLocationSearch(e.target.value)} placeholder="Search products..." className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50" />
+            </div>
+            <select value={selectedLocationGodown} onChange={e => setSelectedLocationGodown(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+              <option value="">All Locations</option>
+              {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <button onClick={loadLocationData} className="p-2 bg-surface border border-border rounded-lg text-muted hover:text-foreground"><RefreshCw className="w-4 h-4" /></button>
+          </div>
+
+          {locationLoading ? (
+            <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
+          ) : (
+            <div className="space-y-3">
+              {locationProducts.map((item, idx) => (
+                <div key={idx} className="glass-card p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="font-semibold text-foreground text-sm">{item.product?.name}</h3>
+                      <p className="text-[10px] text-muted font-mono">{item.product?.sku} · {item.product?.category?.name}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-foreground">{item.totalQty}</p>
+                      <p className="text-[10px] text-muted">Total Units</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    {item.locations.map((loc, li) => {
+                      const pct = item.totalQty > 0 ? Math.round((loc.quantity / item.totalQty) * 100) : 0;
+                      return (
+                        <div key={li} className="bg-surface rounded-lg p-2.5 border border-border/50">
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <Warehouse className="w-3 h-3 text-muted" />
+                            <span className="text-xs font-medium text-foreground truncate">{loc.godown?.name}</span>
+                          </div>
+                          <div className="flex items-end justify-between">
+                            <span className={`text-base font-bold ${loc.quantity <= 0 ? 'text-red-400' : loc.quantity < 5 ? 'text-amber-400' : 'text-emerald-400'}`}>{loc.quantity}</span>
+                            <span className="text-[9px] text-muted">{pct}%</span>
+                          </div>
+                          <div className="h-1 bg-border rounded-full mt-1 overflow-hidden">
+                            <div className="h-full bg-accent/60 rounded-full" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {locationProducts.length === 0 && (
+                <div className="glass-card p-10 text-center">
+                  <MapPin className="w-10 h-10 text-muted/30 mx-auto mb-3" />
+                  <p className="text-foreground font-medium">No stock allocated to godowns yet</p>
+                  <p className="text-xs text-muted mt-1">Go to Godowns → Sync Stock to allocate existing product stock to your godowns.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── STOCK LEDGER TAB ─── */}
+      {tab === 'ledger' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted">Complete audit trail of all stock movements</p>
+            <button onClick={loadLedger} className="p-2 bg-surface border border-border rounded-lg text-muted hover:text-foreground"><RefreshCw className="w-4 h-4" /></button>
+          </div>
+          {ledgerLoading ? (
+            <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
+          ) : (
+            <div className="glass-card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-border">
+                    {['Date', 'Product', 'Godown', 'Type', 'Qty', 'Balance', 'Reference', 'Notes'].map(h => <th key={h} className="px-3 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {ledgerEntries.map(e => {
+                      const typeColors = {
+                        'IN': 'bg-emerald-500/10 text-emerald-400', 'OUT': 'bg-red-500/10 text-red-400',
+                        'TRANSFER_IN': 'bg-blue-500/10 text-blue-400', 'TRANSFER_OUT': 'bg-orange-500/10 text-orange-400',
+                        'ADJUSTMENT': 'bg-amber-500/10 text-amber-400', 'PRODUCTION': 'bg-purple-500/10 text-purple-400',
+                        'SALE': 'bg-red-500/10 text-red-400', 'RETURN': 'bg-cyan-500/10 text-cyan-400',
+                      };
+                      return (
+                        <tr key={e.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                          <td className="px-3 py-2.5 text-muted text-xs whitespace-nowrap">{new Date(e.createdAt).toLocaleDateString('en-IN')} {new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td>
+                          <td className="px-3 py-2.5">
+                            <p className="text-foreground font-medium text-xs">{e.product?.name}</p>
+                            <p className="text-[10px] text-muted font-mono">{e.product?.sku}</p>
+                          </td>
+                          <td className="px-3 py-2.5 text-foreground text-xs">{e.godown?.name}</td>
+                          <td className="px-3 py-2.5">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeColors[e.entryType] || 'bg-gray-500/10 text-gray-400'}`}>{e.entryType.replace('_', ' ')}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`font-semibold flex items-center gap-0.5 ${e.quantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                              {Math.abs(e.quantity)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-foreground font-medium text-xs">{e.balanceAfter}</td>
+                          <td className="px-3 py-2.5 text-muted text-[10px]">{e.referenceType || '—'}</td>
+                          <td className="px-3 py-2.5 text-muted text-[10px] max-w-[200px] truncate">{e.notes || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No stock movements yet. Movements will appear here when stock is adjusted, transferred, or sold.</div>}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ─── STOCK ALERTS TAB ─── */}
@@ -501,7 +691,6 @@ export default function InventoryPage() {
         <div className="space-y-4">
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
             <>
-              {/* Aging summary */}
               {agingData.length > 0 && (
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
@@ -573,13 +762,15 @@ export default function InventoryPage() {
               }
             } catch (err) { console.error('Image upload failed:', err); }
           }
+          const selectedGodownId = f.godownId?.value ? Number(f.godownId.value) : undefined;
           const res = await createProduct({
             name: f.productName.value, sku: f.sku.value, category: f.category.value,
             price: Number(f.price.value), material: f.material.value, color: f.color.value,
             stock: Number(f.stock.value), reorderLevel: Number(f.reorderLevel.value),
             warehouse: f.warehouse.value, description: f.description.value, image: imageUrl || '',
+            godownId: selectedGodownId,
           });
-          if (res.success) { setShowAddModal(false); setProductImages([]); refreshProducts(); }
+          if (res.success) { setShowAddModal(false); setProductImages([]); refreshProducts(); if (godownStocks.length > 0) loadLocationData(); }
           setAddingProduct(false);
         }}>
           {/* Product Images */}
@@ -659,6 +850,23 @@ export default function InventoryPage() {
               </datalist>
             </div>
           </div>
+          {/* Receiving Godown — where the initial stock goes (like Odoo's target warehouse) */}
+          {godowns.length > 0 && (
+            <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
+              <label className="block text-xs font-medium text-foreground mb-1.5 flex items-center gap-1.5">
+                <Warehouse className="w-3.5 h-3.5 text-accent" /> Receiving Godown / Location *
+              </label>
+              <select name="godownId" required className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
+                <option value="">Select godown where stock will be stored</option>
+                {godowns.map(g => (
+                  <option key={g.id} value={g.id}>
+                    {g.name} {g.isDefault ? '⭐ (Default)' : ''} — {g.branch?.name || 'Unassigned'}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-muted mt-1">This is the physical location where the stock will be stored</p>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Description</label>
             <textarea rows={3} name="description" placeholder="Product description..." className="w-full" />
@@ -707,6 +915,48 @@ export default function InventoryPage() {
               </div>
             </div>
 
+            {/* Godown distribution */}
+            {(() => {
+              const gdStocks = godownStocks.filter(gs => gs.productId === showStockModal.id);
+              return gdStocks.length > 0 ? (
+                <div>
+                  <p className="text-xs font-medium text-muted mb-2">Stock by Location</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {gdStocks.map(gs => (
+                      <div key={gs.id} className="bg-surface rounded-lg p-2 flex items-center justify-between">
+                        <span className="text-xs text-foreground flex items-center gap-1"><Warehouse className="w-3 h-3 text-muted" /> {gs.godown?.name}</span>
+                        <span className={`text-sm font-bold ${gs.quantity <= 0 ? 'text-red-400' : 'text-foreground'}`}>{gs.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Target Godown — where to adjust stock (like Odoo's stock.move) */}
+            {godowns.length > 0 && (
+              <div className="p-3 bg-accent/5 border border-accent/20 rounded-xl">
+                <label className="block text-xs font-medium text-foreground mb-1.5 flex items-center gap-1.5">
+                  <Warehouse className="w-3.5 h-3.5 text-accent" /> Target Godown / Location *
+                </label>
+                <select id="stockGodownId" className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
+                  <option value="">Select godown to adjust</option>
+                  {(() => {
+                    const gdStocksForProduct = godownStocks.filter(gs => gs.productId === showStockModal.id);
+                    return godowns.map(g => {
+                      const gdStock = gdStocksForProduct.find(gs => gs.godownId === g.id);
+                      return (
+                        <option key={g.id} value={g.id}>
+                          {g.name} {g.isDefault ? '⭐' : ''} — Current: {gdStock?.quantity || 0} units
+                        </option>
+                      );
+                    });
+                  })()}
+                </select>
+                <p className="text-[10px] text-muted mt-1">Select the physical location where stock will be added/removed</p>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Stock Adjustment</label>
               <div className="flex gap-2">
@@ -738,13 +988,21 @@ export default function InventoryPage() {
             <button onClick={async () => {
               const adjType = document.querySelector('#stockAdjType')?.value;
               const qty = Number(document.querySelector('#stockQty')?.value || 0);
-              let newStock = showStockModal.stock;
-              if (adjType === 'Add Stock') newStock += qty;
-              else if (adjType === 'Remove Stock') newStock = Math.max(0, newStock - qty);
+              const selectedGodownId = document.querySelector('#stockGodownId')?.value;
+              if (godowns.length > 0 && !selectedGodownId) { alert('Please select a godown / location'); return; }
+
+              // For godown-aware mode: the stock value is per-godown, not per-product
+              const gdStock = selectedGodownId ? godownStocks.find(gs => gs.productId === showStockModal.id && gs.godownId === Number(selectedGodownId)) : null;
+              const currentGdQty = gdStock?.quantity || 0;
+              let newStock;
+              if (adjType === 'Add Stock') newStock = currentGdQty + qty;
+              else if (adjType === 'Remove Stock') newStock = Math.max(0, currentGdQty - qty);
               else newStock = qty;
-              await updateStock({ id: showStockModal.id, stock: newStock });
+
+              await updateStock({ id: showStockModal.id, stock: newStock, godownId: selectedGodownId ? Number(selectedGodownId) : undefined });
               setShowStockModal(null);
               refreshProducts();
+              if (godownStocks.length > 0) loadLocationData();
             }} className="w-full py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
               Update Stock
             </button>

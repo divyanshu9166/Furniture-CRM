@@ -7,6 +7,7 @@ export const createOrderSchema = z.object({
   quantity: z.number().min(1).default(1),
   amount: z.number().min(0),
   source: z.enum(['STORE', 'AMAZON', 'FLIPKART', 'SHOPIFY']).default('STORE'),
+  godownId: z.number().int().positive().optional(),
   payment: z.enum(['PAID', 'PARTIAL', 'PENDING']).default('PENDING'),
   notes: z.string().optional(),
 })

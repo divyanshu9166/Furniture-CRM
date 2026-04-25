@@ -86,6 +86,7 @@ model Contact {
   orders        Order[]
   appointments  Appointment[]
   invoices      Invoice[]
+  quotations    Quotation[]
   customOrders  CustomOrder[]
   walkins       Walkin[]
   callLogs      CallLog[]
@@ -177,6 +178,7 @@ model Product {
   updatedAt     DateTime   @updatedAt
 
   orders              Order[]
+  quotationItems      QuotationItem[]
   invoiceItems        InvoiceItem[]
   customOrders        CustomOrder[]
   purchaseOrderItems  PurchaseOrderItem[]
@@ -188,6 +190,7 @@ model Product {
   bomFinished         BillOfMaterials[]   @relation("FinishedProduct")
   productionFinished  ProductionOrder[]   @relation("ProductionFinished")
   materialConsumed    MaterialConsumption[] @relation("MaterialConsumed")
+  stockLedger         StockLedger[]
 
   // Deep inventory fields
   hsnCode       String?
@@ -238,6 +241,8 @@ model Order {
   payment      PaymentStatus @default(PENDING)
   source       OrderSource   @default(STORE)
   notes        String?
+  godownId     Int?
+  godown       Godown?       @relation(fields: [godownId], references: [id])
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -245,6 +250,68 @@ model Order {
   @@index([source])
   @@index([date])
   @@index([contactId])
+}
+
+// ─── QUOTATIONS ───────────────────────────────────────
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  APPROVED
+  REJECTED
+}
+
+model Quotation {
+  id                   Int             @id @default(autoincrement())
+  displayId            String          @unique
+  contactId            Int
+  contact              Contact         @relation(fields: [contactId], references: [id])
+  date                 DateTime        @default(now())
+  validUntil           DateTime?
+  projectName          String?
+  deliveryMode         String?
+  roadPermit           String?
+  emailId              String?
+  contactPerson        String?
+  dispatchAddress      String?
+  installationPercent  Float           @default(5)
+  installationCharge   Int             @default(0)
+  freightCharge        Int             @default(0)
+  loadingCharge        Int             @default(0)
+  gstPercent           Float           @default(18)
+  gstAmount            Int             @default(0)
+  totalBeforeTax       Int             @default(0)
+  grandTotal           Int             @default(0)
+  notes                String?
+  termsAndConditions   String[]
+  status               QuotationStatus @default(DRAFT)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  items QuotationItem[]
+
+  @@index([date])
+  @@index([status])
+  @@index([contactId])
+}
+
+model QuotationItem {
+  id             Int        @id @default(autoincrement())
+  quotationId    Int
+  quotation      Quotation  @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  productId      Int?
+  product        Product?   @relation(fields: [productId], references: [id])
+  name           String
+  sku            String?
+  description    String?
+  quantity       Int        @default(1)
+  rate           Int
+  amount         Int
+  referenceImage String?
+  sortOrder      Int        @default(0)
+
+  @@index([quotationId])
+  @@index([productId])
 }
 
 // ─── APPOINTMENTS ────────────────────────────────────
@@ -292,6 +359,7 @@ model Invoice {
   paymentMethod String        // primary payment method
   paymentStatus PaymentStatus @default(PENDING)
   invoiceStatus InvoiceStatus @default(ACTIVE)
+  transportCost Int           @default(0)            // Transportation/freight cost added to invoice
   supplyType    String        @default("INTRASTATE") // INTRASTATE | INTERSTATE | EXPORT | EXEMPT | NIL_RATED
   placeOfSupply String?       // State name, e.g. "Maharashtra"
   isRCM         Boolean       @default(false)        // Reverse Charge Mechanism
@@ -496,6 +564,8 @@ model Staff {
   stockUpdates StockUpdate[]
   payslips     Payslip[]
   loans        StaffLoan[]
+  expenses     Expense[]        @relation("StaffExpenses")
+  productionOrders ProductionOrder[] @relation("ProductionOrderAssignedStaff")
 
   @@index([email])
 }
@@ -1027,6 +1097,9 @@ model Godown {
   id        Int      @id @default(autoincrement())
   name      String
   address   String?
+  type      String   @default("Warehouse") // Warehouse, Showroom, Factory
+  capacity  Int?     // max item capacity
+  isDefault Boolean  @default(false)        // primary godown for stock ops
   branchId  Int?
   branch    Branch?  @relation(fields: [branchId], references: [id])
   createdAt DateTime @default(now())
@@ -1034,6 +1107,8 @@ model Godown {
   stocks        GodownStock[]
   transfersFrom GodownTransfer[] @relation("FromGodown")
   transfersTo   GodownTransfer[] @relation("ToGodown")
+  ledgerEntries StockLedger[]
+  orders        Order[]
 
   @@index([branchId])
 }
@@ -1081,6 +1156,26 @@ model GodownTransferItem {
   quantity   Int
 
   @@index([transferId])
+}
+
+model StockLedger {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  product       Product  @relation(fields: [productId], references: [id])
+  godownId      Int
+  godown        Godown   @relation(fields: [godownId], references: [id])
+  entryType     String   // IN, OUT, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT, PRODUCTION, SALE, RETURN
+  quantity      Int      // positive = in, negative = out
+  balanceAfter  Int      // running balance at godown after entry
+  referenceType String?  // Order, Transfer, Production, Manual
+  referenceId   Int?
+  notes         String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+
+  @@index([productId])
+  @@index([godownId])
+  @@index([createdAt])
 }
 
 // ─── MODULE 3: DEEP INVENTORY ────────────────────────
@@ -1167,6 +1262,21 @@ model EWayBill {
 
 // ─── MODULE 5: MANUFACTURING / JOB COSTING ──────────
 
+model WorkCenter {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  type        String   @default("General") // Carpentry | Polishing | Upholstery | Finishing | Assembly | QC | Packaging | General
+  description String?
+  capacity    Int      @default(1)          // units producible per day
+  status      String   @default("Active")   // Active | Maintenance | Inactive
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  productionOrders ProductionOrder[]
+  steps            ProductionStep[]
+  bomSteps         BomStep[]
+}
+
 model BillOfMaterials {
   id                Int      @id @default(autoincrement())
   name              String
@@ -1174,10 +1284,12 @@ model BillOfMaterials {
   finishedProduct   Product  @relation("FinishedProduct", fields: [finishedProductId], references: [id])
   version           String   @default("1.0")
   isActive          Boolean  @default(true)
+  estimatedDays     Int?                   // expected production days
   notes             String?
   createdAt         DateTime @default(now())
 
   items            BomItem[]
+  steps            BomStep[]
   productionOrders ProductionOrder[]
 
   @@index([finishedProductId])
@@ -1192,9 +1304,38 @@ model BomItem {
   quantity        Float
   unitOfMeasure   String          @default("PCS")
   wastagePercent  Float           @default(0)
+  unitCost        Float           @default(0) // override costPrice from product
   notes           String?
 
   @@index([bomId])
+}
+
+// Manufacturing routing — step-by-step operations defined on a BOM
+model BomStep {
+  id                 Int             @id @default(autoincrement())
+  bomId              Int
+  bom                BillOfMaterials @relation(fields: [bomId], references: [id], onDelete: Cascade)
+  stepNumber         Int
+  operationName      String          // e.g. "Cut & Shape", "Polish", "Upholster"
+  workCenterId       Int?
+  workCenter         WorkCenter?     @relation(fields: [workCenterId], references: [id])
+  durationMins       Int             @default(60)  // per unit, in minutes
+  labourRatePerHour  Float           @default(0)   // ₹ per hour for this operation
+  machineCostPerUnit Float           @default(0)   // ₹ machine cost per unit (manual)
+  notes              String?
+
+  @@index([bomId])
+}
+
+// ─── BOM TEMPLATE ────────────────────────────────────
+// Reusable routing/step templates for products with same manufacturing process
+model BomTemplate {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  steps       Json     // array of step objects
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model ProductionOrder {
@@ -1204,21 +1345,62 @@ model ProductionOrder {
   bom               BillOfMaterials @relation(fields: [bomId], references: [id])
   finishedProductId Int
   finishedProduct   Product         @relation("ProductionFinished", fields: [finishedProductId], references: [id])
+  workCenterId      Int?
+  workCenter        WorkCenter?     @relation(fields: [workCenterId], references: [id])
   plannedQty        Int
   actualQty         Int             @default(0)
-  status            String          @default("PLANNED")
+  status            String          @default("PLANNED")  // PLANNED | IN_PROGRESS | COMPLETED | CANCELLED | ON_HOLD
+  priority          String          @default("MEDIUM")   // LOW | MEDIUM | HIGH | URGENT
+  dueDate           DateTime?
   startDate         DateTime?
   completedDate     DateTime?
+  cancelledDate     DateTime?
+  cancelReason      String?
   totalMaterialCost Int             @default(0)
   totalLabourCost   Int             @default(0)
+  overheadCost      Int             @default(0)          // electricity, tool wear, etc.
+  totalCost         Int             @default(0)          // material + labour + overhead
+  costPerUnit       Int             @default(0)
+  yieldRate         Float           @default(0)          // actualQty/plannedQty * 100
+  scrapQty          Int             @default(0)
+  scrapReason       String?
+  qualityStatus     String          @default("PENDING")  // PENDING | PASSED | FAILED | PARTIAL
+  qualityNotes      String?
+  assignedStaffId   Int?
+  assignedStaff     Staff?          @relation("ProductionOrderAssignedStaff", fields: [assignedStaffId], references: [id])
+  assignedTo        String?          // legacy/manual assignee text fallback
   notes             String?
   createdBy         String?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  consumptions MaterialConsumption[]
+  consumptions   MaterialConsumption[]
+  productionSteps ProductionStep[]
 
   @@index([status])
+  @@index([priority])
+  @@index([dueDate])
+  @@index([assignedStaffId])
+}
+
+// Tracks progress of each BOM step within a production order
+model ProductionStep {
+  id                Int             @id @default(autoincrement())
+  productionOrderId Int
+  productionOrder   ProductionOrder @relation(fields: [productionOrderId], references: [id], onDelete: Cascade)
+  workCenterId      Int?
+  workCenter        WorkCenter?     @relation(fields: [workCenterId], references: [id])
+  stepNumber        Int
+  operationName     String
+  status            String          @default("PENDING") // PENDING | IN_PROGRESS | DONE | SKIPPED
+  plannedMins       Int             @default(0)
+  actualMins        Int             @default(0)
+  assignedWorker    String?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  notes             String?
+
+  @@index([productionOrderId])
 }
 
 model MaterialConsumption {
@@ -1304,6 +1486,85 @@ model StaffLoan {
 
   @@index([staffId])
   @@index([status])
+}
+
+// ─── DAILY EXPENSE CALCULATOR ────────────────────────
+
+model ExpenseCategory {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  icon        String?   // lucide icon name for UI
+  color       String?   // hex color for charts
+  budget      Int       @default(0)   // monthly budget limit (₹)
+  isDefault   Boolean   @default(false)
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  expenses    Expense[]
+  recurringExpenses RecurringExpense[]
+}
+
+model Expense {
+  id           Int             @id @default(autoincrement())
+  date         DateTime
+  categoryId   Int
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  amount       Int             // amount in paise-free ₹ (whole rupees)
+  description  String
+  paymentMode  String          @default("Cash") // Cash, UPI, Card, Bank Transfer, Cheque, Credit
+  reference    String?         // bill/receipt number, UPI ref, cheque no
+  receipt      String?         // uploaded receipt image URL
+  vendor       String?         // who was paid
+  staffId      Int?            // which staff member incurred expense
+  staff        Staff?          @relation("StaffExpenses", fields: [staffId], references: [id])
+  status       String          @default("Approved") // Pending, Approved, Rejected
+  approvedBy   String?
+  isRecurring  Boolean         @default(false)
+  notes        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([date])
+  @@index([categoryId])
+  @@index([status])
+  @@index([staffId])
+}
+
+model RecurringExpense {
+  id           Int             @id @default(autoincrement())
+  categoryId   Int
+  category     ExpenseCategory @relation(fields: [categoryId], references: [id])
+  description  String
+  amount       Int
+  paymentMode  String          @default("Bank Transfer")
+  vendor       String?
+  frequency    String          @default("Monthly") // Daily, Weekly, Monthly, Quarterly, Yearly
+  dayOfMonth   Int?            // 1-31 for monthly
+  dayOfWeek    Int?            // 0-6 for weekly (0=Sunday)
+  isActive     Boolean         @default(true)
+  startDate    DateTime        @default(now())
+  endDate      DateTime?
+  lastRun      DateTime?
+  notes        String?
+  createdAt    DateTime        @default(now())
+
+  @@index([isActive])
+  @@index([frequency])
+}
+
+model DailyCashRegister {
+  id             Int      @id @default(autoincrement())
+  date           DateTime @unique
+  openingCash    Int      @default(0)
+  closingCash    Int?
+  cashIn         Int      @default(0)  // cash received (sales etc)
+  cashOut        Int      @default(0)  // cash expenses
+  notes          String?
+  closedBy       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([date])
 }
 
 // ─── MODULE 7: FINANCIAL STATEMENTS ─────────────────

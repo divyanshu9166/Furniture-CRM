@@ -19,6 +19,7 @@ const moreItems = [
   { href: '/staff-portal', label: 'Staff Portal' },
   { href: '/appointments', label: 'Appointments' },
   { href: '/billing', label: 'Billing & POS', roles: ['ADMIN', 'MANAGER'] },
+  { href: '/quotations', label: 'Quotations' },
   { href: '/custom-orders', label: 'Custom Orders' },
   { href: '/drafts', label: 'Drafts', roles: ['ADMIN', 'MANAGER'] },
   { href: '/email-marketing', label: 'Email Marketing', roles: ['ADMIN', 'MANAGER'] },

@@ -17,7 +17,10 @@ export async function getProducts() {
       sku: p.sku,
       name: p.name,
       category: p.category.name,
+      categoryId: p.categoryId,
       price: p.price,
+      costPrice: p.costPrice,
+      unitOfMeasure: p.unitOfMeasure,
       stock: p.stock,
       sold: p.sold,
       reorderLevel: p.reorderLevel,
@@ -45,7 +48,7 @@ export async function createProduct(data: unknown) {
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { category, warehouse, ...rest } = parsed.data
+  const { category, warehouse, unitOfMeasure, godownId, ...rest } = parsed.data
 
   // Find or create category
   const cat = await prisma.category.upsert({
@@ -65,15 +68,47 @@ export async function createProduct(data: unknown) {
     warehouseId = wh.id
   }
 
+  // Create the product with stock = 0 initially (sync engine will set it)
+  const initialStock = rest.stock || 0
   const product = await prisma.product.create({
     data: {
       ...rest,
+      stock: 0, // Will be set by sync engine
+      unitOfMeasure: unitOfMeasure || 'PCS',
       categoryId: cat.id,
       warehouseId,
     },
   })
 
+  // Allocate initial stock to the selected godown (like Odoo's stock.move on receipt)
+  if (initialStock > 0) {
+    const { adjustGodownStock, getOrCreateDefaultGodown } = await import('./godowns')
+    const godownCount = await prisma.godown.count()
+
+    if (godownCount > 0) {
+      // Use selected godown, or fall back to default
+      let targetGodownId = godownId
+      if (!targetGodownId) {
+        const defaultGodown = await getOrCreateDefaultGodown()
+        targetGodownId = defaultGodown.id
+      }
+
+      await adjustGodownStock(product.id, targetGodownId, initialStock, 'IN', {
+        referenceType: 'Manual',
+        notes: `Initial stock on product creation`,
+        createdBy: 'Admin',
+      })
+    } else {
+      // No godowns exist — set stock directly (legacy)
+      await prisma.product.update({
+        where: { id: product.id },
+        data: { stock: initialStock },
+      })
+    }
+  }
+
   revalidatePath('/inventory')
+  revalidatePath('/godowns')
   return { success: true, data: product }
 }
 
@@ -94,13 +129,53 @@ export async function updateStock(data: unknown) {
   const parsed = updateStockSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const product = await prisma.product.update({
-    where: { id: parsed.data.id },
-    data: { stock: parsed.data.stock, lastRestocked: new Date() },
-  })
+  const { adjustGodownStock, getOrCreateDefaultGodown } = await import('./godowns')
+
+  // Check if godowns exist
+  const godownCount = await prisma.godown.count()
+
+  if (godownCount > 0) {
+    // Route through godown sync engine
+    const product = await prisma.product.findUnique({ where: { id: parsed.data.id } })
+    if (!product) return { success: false, error: 'Product not found' }
+
+    // Determine target godown: user-selected or default
+    let targetGodownId = parsed.data.godownId
+    if (!targetGodownId) {
+      const defaultGodown = await getOrCreateDefaultGodown()
+      targetGodownId = defaultGodown.id
+    }
+
+    // Get current stock at this specific godown
+    const godownStock = await prisma.godownStock.findUnique({
+      where: { productId_godownId: { productId: parsed.data.id, godownId: targetGodownId } },
+    })
+    const currentGodownQty = godownStock?.quantity || 0
+    const diff = parsed.data.stock - currentGodownQty
+
+    if (diff === 0) return { success: true, data: product }
+
+    const entryType = diff > 0 ? 'IN' : 'OUT'
+    await adjustGodownStock(parsed.data.id, targetGodownId, diff, entryType, {
+      referenceType: 'Manual',
+      notes: `Stock adjusted at godown (${currentGodownQty} → ${parsed.data.stock})`,
+      createdBy: 'Admin',
+    })
+    await prisma.product.update({
+      where: { id: parsed.data.id },
+      data: { lastRestocked: diff > 0 ? new Date() : undefined },
+    })
+  } else {
+    // No godowns — direct update (legacy behavior)
+    await prisma.product.update({
+      where: { id: parsed.data.id },
+      data: { stock: parsed.data.stock, lastRestocked: new Date() },
+    })
+  }
 
   revalidatePath('/inventory')
-  return { success: true, data: product }
+  revalidatePath('/godowns')
+  return { success: true, data: await prisma.product.findUnique({ where: { id: parsed.data.id } }) }
 }
 
 export async function getCategories() {
@@ -127,4 +202,33 @@ export async function getLowStockProducts() {
     reorderLevel: p.reorderLevel,
     category: p.category.name,
   }))
+}
+
+export async function deleteProduct(id: number) {
+  try {
+    // Check if product is used in any BOM items
+    const bomUsage = await prisma.bomItem.count({ where: { rawMaterialId: id } })
+    if (bomUsage > 0) {
+      return { success: false, error: `Cannot delete: this material is used in ${bomUsage} BOM(s). Remove it from those BOMs first.` }
+    }
+
+    // Check if product is a finished product in any BOM
+    const bomFinished = await prisma.billOfMaterials.count({ where: { finishedProductId: id } })
+    if (bomFinished > 0) {
+      return { success: false, error: 'Cannot delete: this product is used as a finished product in a BOM.' }
+    }
+
+    // Check if product is in any production order
+    const prodUsage = await prisma.productionOrder.count({ where: { finishedProductId: id } })
+    if (prodUsage > 0) {
+      return { success: false, error: 'Cannot delete: this product is tied to production orders.' }
+    }
+
+    await prisma.product.delete({ where: { id } })
+    revalidatePath('/inventory')
+    revalidatePath('/manufacturing')
+    return { success: true }
+  } catch (error: any) {
+    return { success: false, error: error.message || 'Failed to delete product' }
+  }
 }

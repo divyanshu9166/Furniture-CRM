@@ -28,9 +28,11 @@ import {
   Truck,
   Warehouse,
   FileSpreadsheet,
+  FileText,
   Factory,
   Wallet,
   BarChart3,
+  Calculator,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
@@ -47,6 +49,7 @@ const navItems = [
   { href: '/appointments', label: 'Appointments', icon: Calendar },
   { href: '/inventory', label: 'Inventory', icon: Package },
   { href: '/orders', label: 'Orders', icon: ShoppingCart },
+  { href: '/quotations', label: 'Quotations', icon: FileText },
   { href: '/billing', label: 'Billing & POS', icon: Receipt, roles: ['ADMIN', 'MANAGER'] },
   { href: '/purchases', label: 'Purchases', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
   { href: '/godowns', label: 'Godowns', icon: Warehouse, roles: ['ADMIN', 'MANAGER'] },
@@ -60,6 +63,7 @@ const navItems = [
   { href: '/reviews', label: 'Reviews', icon: Star },
   { href: '/recommend', label: 'AI Recommend', icon: Sparkles },
   { href: '/gst', label: 'GST Compliance', icon: FileSpreadsheet, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/expenses', label: 'Expenses', icon: Calculator, roles: ['ADMIN', 'MANAGER'] },
   { href: '/payroll', label: 'Payroll', icon: Wallet, roles: ['ADMIN'] },
   { href: '/financials', label: 'Financials', icon: BarChart3, roles: ['ADMIN'] },
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['ADMIN'] },

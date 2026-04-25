@@ -431,7 +431,7 @@ export async function getReceivablesAging() {
   })
 
   const buckets = { current: [] as typeof outstanding, days30: [], days60: [], days90: [], over90: [] } as Record<string, typeof outstanding>
-  const labels = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
+  const labels: Record<string, string> = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
 
   for (const inv of outstanding) {
     const ageDays = Math.floor((today.getTime() - new Date(inv.date).getTime()) / (1000 * 60 * 60 * 24))
@@ -473,7 +473,7 @@ export async function getPayablesAging() {
   })
 
   const buckets = { current: [] as typeof outstanding, days30: [], days60: [], days90: [], over90: [] } as Record<string, typeof outstanding>
-  const labels = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
+  const labels: Record<string, string> = { current: '0-30 days', days30: '31-60 days', days60: '61-90 days', days90: '91-180 days', over90: '180+ days' }
 
   for (const po of outstanding) {
     const ageDays = Math.floor((today.getTime() - new Date(po.date).getTime()) / (1000 * 60 * 60 * 24))

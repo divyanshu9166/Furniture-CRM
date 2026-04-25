@@ -40,6 +40,7 @@ export async function getInvoices() {
       gst: inv.gst,
       cgst: inv.cgst,
       sgst: inv.sgst,
+      transportCost: inv.transportCost,
       total: inv.total,
       amountPaid: inv.amountPaid,
       balanceDue: inv.balanceDue,
@@ -95,7 +96,7 @@ export async function createInvoice(data: unknown) {
   const parsed = createInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { customer, phone, items, discount, discountType, payments, salespersonId, notes, dueDate, isHeld } = parsed.data
+  const { customer, phone, items, discount, discountType, payments, salespersonId, notes, dueDate, isHeld, transportCost } = parsed.data
 
   // Find or create contact
   let contact = await prisma.contact.findFirst({ where: { phone } })
@@ -120,7 +121,7 @@ export async function createInvoice(data: unknown) {
   const totalGst = Math.round(taxable * gstRate / 100)
   const cgst = Math.round(totalGst / 2)
   const sgst = totalGst - cgst // avoid rounding issues
-  const total = taxable + totalGst
+  const total = taxable + totalGst + (transportCost || 0)
 
   // Calculate total payment
   const totalPayment = payments.reduce((sum, p) => sum + p.amount, 0)
@@ -156,6 +157,7 @@ export async function createInvoice(data: unknown) {
       gst: totalGst,
       cgst,
       sgst,
+      transportCost: transportCost || 0,
       total,
       amountPaid,
       balanceDue,
@@ -190,19 +192,6 @@ export async function createInvoice(data: unknown) {
     },
     include: { items: true, payments: true },
   })
-
-  // Update product stock (skip for held bills)
-  if (!isHeld) {
-    for (const item of items) {
-      await prisma.product.update({
-        where: { id: item.productId },
-        data: {
-          stock: { decrement: item.quantity },
-          sold: { increment: item.quantity },
-        },
-      })
-    }
-  }
 
   revalidatePath('/billing')
   return { success: true, data: invoice }
@@ -257,23 +246,9 @@ export async function recordPayment(data: unknown) {
 // ─── CANCEL INVOICE ────────────────────────────────────
 
 export async function cancelInvoice(invoiceId: number) {
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: { items: true },
-  })
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
   if (!invoice) return { success: false, error: 'Invoice not found' }
   if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Invoice is already cancelled or refunded' }
-
-  // Restore stock
-  for (const item of invoice.items) {
-    await prisma.product.update({
-      where: { id: item.productId },
-      data: {
-        stock: { increment: item.quantity },
-        sold: { decrement: item.quantity },
-      },
-    })
-  }
 
   await prisma.invoice.update({
     where: { id: invoiceId },
@@ -329,23 +304,9 @@ export async function createCreditNote(data: unknown) {
 // ─── FINALIZE HELD BILL ────────────────────────────────
 
 export async function finalizeHeldInvoice(invoiceId: number) {
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: { items: true },
-  })
+  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
   if (!invoice) return { success: false, error: 'Invoice not found' }
   if (!invoice.heldAt) return { success: false, error: 'Invoice is not held' }
-
-  // Deduct stock now
-  for (const item of invoice.items) {
-    await prisma.product.update({
-      where: { id: item.productId },
-      data: {
-        stock: { decrement: item.quantity },
-        sold: { increment: item.quantity },
-      },
-    })
-  }
 
   await prisma.invoice.update({
     where: { id: invoiceId },

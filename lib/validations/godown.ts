@@ -12,6 +12,9 @@ export const createBranchSchema = z.object({
 export const createGodownSchema = z.object({
   name: z.string().min(1, 'Godown name is required'),
   address: z.string().optional(),
+  type: z.string().default('Warehouse'),
+  capacity: z.number().optional(),
+  isDefault: z.boolean().default(false),
   branchId: z.number().optional(),
 })
 

@@ -27,6 +27,7 @@ export const createInvoiceSchema = z.object({
   notes: z.string().optional(),
   dueDate: z.string().optional(), // ISO date string
   isHeld: z.boolean().optional(),  // park/hold the bill
+  transportCost: z.number().min(0).default(0),
 })
 
 export const recordPaymentSchema = z.object({

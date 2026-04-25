@@ -18,6 +18,7 @@ import { getStaff, clockIn as serverClockIn, clockOut as serverClockOut, staffSt
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';
 import { moveSelfVisitToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
+import { getStaffProductionOrders, staffUpdateProductionStep, staffUpdateProductionProgress } from '@/app/actions/manufacturing';
 
 const activityIcons = {
   call: { icon: Phone, color: 'bg-blue-500/10 text-blue-700', label: 'Call' },
@@ -126,6 +127,16 @@ export default function StaffPortalPage() {
     }
   }, [tab, loggedInStaff]);
 
+  // Fetch production orders when switching to production tab
+  useEffect(() => {
+    if (!loggedInStaff || tab !== 'production') return;
+    setProductionLoading(true);
+    getStaffProductionOrders(loggedInStaff.id).then(res => {
+      if (res.success) setProductionOrders(res.data);
+      setProductionLoading(false);
+    });
+  }, [tab, loggedInStaff]);
+
   // Modals
   const [showLogActivity, setShowLogActivity] = useState(false);
   const [showLogStock, setShowLogStock] = useState(false);
@@ -165,6 +176,11 @@ export default function StaffPortalPage() {
   // Self visits from DB
   const [selfVisits, setSelfVisits] = useState([]);
   const [deletingVisitId, setDeletingVisitId] = useState(null);
+
+  // Production orders
+  const [productionOrders, setProductionOrders] = useState([]);
+  const [productionLoading, setProductionLoading] = useState(false);
+  const [stepUpdating, setStepUpdating] = useState(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -560,6 +576,7 @@ export default function StaffPortalPage() {
 
   const portalTabs = [
     { key: 'dashboard', label: 'My Dashboard', icon: Home },
+    { key: 'production', label: 'Production', icon: Package },
     { key: 'stock', label: 'Stock Updates', icon: Warehouse },
     { key: 'assigned', label: 'Assigned Visits', icon: MapPin },
     { key: 'self', label: 'Self Visits', icon: MapPinned },
@@ -792,6 +809,308 @@ export default function StaffPortalPage() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+
+
+      {/* ===== PRODUCTION ORDERS TAB ===== */}
+      {tab === 'production' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold text-foreground flex items-center gap-2">
+              <Package className="w-5 h-5 text-accent" /> My Production Orders
+            </h3>
+            <button
+              onClick={() => {
+                setProductionLoading(true);
+                getStaffProductionOrders(loggedInStaff.id).then(res => {
+                  if (res.success) setProductionOrders(res.data);
+                  setProductionLoading(false);
+                });
+              }}
+              className="px-3 py-1.5 text-xs text-muted hover:text-foreground border border-border rounded-lg hover:bg-surface-hover transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+
+          {productionLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-pulse text-sm text-muted">Loading production orders...</div>
+            </div>
+          ) : productionOrders.length === 0 ? (
+            <div className="glass-card p-8 sm:p-12 text-center">
+              <Package className="w-10 h-10 text-muted mx-auto mb-3" />
+              <p className="text-sm font-medium text-foreground mb-1">No Production Orders Assigned</p>
+              <p className="text-xs text-muted">When your manager assigns production work to you, it will appear here.</p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {productionOrders.map(order => {
+                const totalSteps = order.productionSteps?.length || 0;
+                const doneSteps = order.productionSteps?.filter(s => s.status === 'DONE').length || 0;
+                const inProgressSteps = order.productionSteps?.filter(s => s.status === 'IN_PROGRESS').length || 0;
+                const qtyPct = order.plannedQty > 0 ? Math.round((order.actualQty / order.plannedQty) * 100) : 0;
+
+                // Determine current phase
+                let currentPhase = 'planned';
+                let phaseLabel = 'Planned';
+                let phaseColor = 'text-gray-500 bg-gray-500/10';
+                let phaseIcon = '📋';
+                if (order.status === 'COMPLETED') {
+                  currentPhase = 'completed'; phaseLabel = 'Completed'; phaseColor = 'text-emerald-600 bg-emerald-500/10'; phaseIcon = '✅';
+                } else if (order.status === 'CANCELLED') {
+                  currentPhase = 'cancelled'; phaseLabel = 'Cancelled'; phaseColor = 'text-red-600 bg-red-500/10'; phaseIcon = '❌';
+                } else if (order.status === 'ON_HOLD') {
+                  currentPhase = 'on_hold'; phaseLabel = 'On Hold'; phaseColor = 'text-amber-600 bg-amber-500/10'; phaseIcon = '⏸️';
+                } else if (order.status === 'IN_PROGRESS') {
+                  if (qtyPct >= 100) {
+                    currentPhase = 'quality_check'; phaseLabel = 'Quality Check'; phaseColor = 'text-purple-600 bg-purple-500/10'; phaseIcon = '🔍';
+                  } else if (qtyPct > 0 || inProgressSteps > 0 || doneSteps > 0) {
+                    currentPhase = 'production'; phaseLabel = 'In Production'; phaseColor = 'text-blue-600 bg-blue-500/10'; phaseIcon = '🔨';
+                  } else {
+                    currentPhase = 'material_prep'; phaseLabel = 'Material Prep'; phaseColor = 'text-orange-600 bg-orange-500/10'; phaseIcon = '📦';
+                  }
+                }
+
+                const priorityStyles = {
+                  URGENT: 'border-l-red-500',
+                  HIGH: 'border-l-orange-500',
+                  MEDIUM: 'border-l-amber-400',
+                  LOW: 'border-l-blue-400',
+                };
+
+                return (
+                  <div key={order.id} className={`glass-card overflow-hidden border-l-4 ${priorityStyles[order.priority] || 'border-l-gray-300'}`}>
+
+                    {/* ── Card Header ── */}
+                    <div className="p-4 pb-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-foreground truncate">{order.finishedProduct?.name}</p>
+                          <p className="text-[11px] text-muted mt-0.5">{order.displayId} · {order.bom?.name} v{order.bom?.version}</p>
+                        </div>
+                        <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 flex items-center gap-1 ${phaseColor}`}>
+                          <span>{phaseIcon}</span> {phaseLabel}
+                        </span>
+                      </div>
+
+                      {/* Info row */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11px] text-muted">
+                        {order.dueDate && (
+                          <span className="flex items-center gap-1">
+                            📅 <span className={new Date(order.dueDate) < new Date() && order.status !== 'COMPLETED' ? 'text-red-600 font-semibold' : ''}>
+                              {new Date(order.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            </span>
+                          </span>
+                        )}
+                        {order.workCenter && <span>📍 {order.workCenter.name}</span>}
+                        <span className={`font-medium ${order.priority === 'URGENT' ? 'text-red-500' : order.priority === 'HIGH' ? 'text-orange-500' : ''}`}>
+                          ⚡ {order.priority}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ── Phase Progress Timeline ── */}
+                    {order.status !== 'CANCELLED' && (
+                      <div className="px-4 py-3 bg-surface-hover/30 border-y border-border">
+                        <div className="flex items-center gap-0">
+                          {[
+                            { key: 'planned', label: 'Planned', short: '📋' },
+                            { key: 'material_prep', label: 'Prep', short: '📦' },
+                            { key: 'production', label: 'Production', short: '🔨' },
+                            { key: 'quality_check', label: 'QC', short: '🔍' },
+                            { key: 'completed', label: 'Done', short: '✅' },
+                          ].map((phase, idx, arr) => {
+                            const phaseOrder = ['planned', 'material_prep', 'production', 'quality_check', 'completed'];
+                            const currentIdx = phaseOrder.indexOf(currentPhase);
+                            const thisIdx = phaseOrder.indexOf(phase.key);
+                            const isActive = thisIdx === currentIdx;
+                            const isDone = thisIdx < currentIdx;
+                            const isFuture = thisIdx > currentIdx;
+                            return (
+                              <div key={phase.key} className="flex items-center flex-1 min-w-0">
+                                <div className={`flex flex-col items-center gap-0.5 flex-1 min-w-0 ${isFuture ? 'opacity-30' : ''}`}>
+                                  <div className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-xs
+                                    ${isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-accent text-white ring-2 ring-accent/30 ring-offset-1' : 'bg-surface border border-border text-muted'}`}>
+                                    {isDone ? '✓' : phase.short}
+                                  </div>
+                                  <span className={`text-[9px] sm:text-[10px] truncate max-w-full ${isActive ? 'font-bold text-foreground' : isDone ? 'text-emerald-600 font-medium' : 'text-muted'}`}>
+                                    {phase.label}
+                                  </span>
+                                </div>
+                                {idx < arr.length - 1 && (
+                                  <div className={`h-0.5 flex-shrink-0 w-3 sm:w-5 mt-[-10px] ${isDone ? 'bg-emerald-500' : 'bg-border'}`} />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Quantity Update Section ── */}
+                    {order.status === 'IN_PROGRESS' && (
+                      <div className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-foreground">Units Produced</span>
+                          <span className={`text-xs font-bold ${qtyPct >= 100 ? 'text-emerald-600' : 'text-accent'}`}>{qtyPct}%</span>
+                        </div>
+                        <div className="h-2.5 bg-surface rounded-full overflow-hidden mb-4">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${qtyPct >= 100 ? 'bg-emerald-500' : qtyPct > 50 ? 'bg-accent' : qtyPct > 0 ? 'bg-amber-500' : 'bg-gray-300'}`}
+                            style={{ width: `${Math.min(100, qtyPct)}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            disabled={stepUpdating === `qty-${order.id}` || order.actualQty <= 0}
+                            onClick={async () => {
+                              setStepUpdating(`qty-${order.id}`);
+                              const res = await staffUpdateProductionProgress(loggedInStaff.id, order.id, Math.max(0, order.actualQty - 1));
+                              if (res.success) {
+                                const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                if (refresh.success) setProductionOrders(refresh.data);
+                              } else { alert(res.error); }
+                              setStepUpdating(null);
+                            }}
+                            className="w-12 h-12 rounded-xl bg-red-500/10 text-red-600 font-bold text-xl hover:bg-red-500/20 active:scale-95 disabled:opacity-20 disabled:hover:bg-red-500/10 transition-all flex items-center justify-center border border-red-500/20"
+                          >
+                            −
+                          </button>
+
+                          <div className="flex-1 text-center">
+                            <p className="text-3xl font-black text-foreground">{order.actualQty} <span className="text-base font-medium text-muted">/ {order.plannedQty}</span></p>
+                            <p className="text-[10px] text-muted mt-0.5">units completed</p>
+                          </div>
+
+                          <button
+                            disabled={stepUpdating === `qty-${order.id}` || order.actualQty >= order.plannedQty}
+                            onClick={async () => {
+                              setStepUpdating(`qty-${order.id}`);
+                              const res = await staffUpdateProductionProgress(loggedInStaff.id, order.id, Math.min(order.plannedQty, order.actualQty + 1));
+                              if (res.success) {
+                                const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                if (refresh.success) setProductionOrders(refresh.data);
+                              } else { alert(res.error); }
+                              setStepUpdating(null);
+                            }}
+                            className="w-12 h-12 rounded-xl bg-emerald-500/10 text-emerald-600 font-bold text-xl hover:bg-emerald-500/20 active:scale-95 disabled:opacity-20 disabled:hover:bg-emerald-500/10 transition-all flex items-center justify-center border border-emerald-500/20"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {qtyPct >= 100 && (
+                          <div className="mt-3 p-2.5 bg-emerald-500/10 rounded-lg text-center">
+                            <p className="text-xs font-semibold text-emerald-600">✅ All units produced — awaiting quality check by manager</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Status messages for non-active orders */}
+                    {order.status === 'PLANNED' && (
+                      <div className="px-4 py-3 bg-gray-500/5">
+                        <p className="text-xs text-muted text-center">⏳ Waiting for manager to start this production order</p>
+                      </div>
+                    )}
+                    {order.status === 'ON_HOLD' && (
+                      <div className="px-4 py-3 bg-amber-500/5">
+                        <p className="text-xs text-amber-600 text-center font-medium">⏸️ Production on hold — contact your manager</p>
+                      </div>
+                    )}
+                    {order.status === 'COMPLETED' && (
+                      <div className="px-4 py-3 bg-emerald-500/5">
+                        <p className="text-xs text-emerald-600 text-center font-medium">✅ Production completed — {order.actualQty}/{order.plannedQty} units</p>
+                      </div>
+                    )}
+
+                    {/* ── Manufacturing Steps ── */}
+                    {totalSteps > 0 && (
+                      <div className="border-t border-border">
+                        <div className="px-4 py-2 bg-surface-hover/30 flex items-center justify-between">
+                          <span className="text-[10px] text-muted uppercase tracking-wide font-semibold">Manufacturing Steps</span>
+                          <span className="text-[10px] font-medium text-muted">{doneSteps}/{totalSteps} done</span>
+                        </div>
+                        <div className="divide-y divide-border/50">
+                          {order.productionSteps.map(step => {
+                            const stepIcon = { PENDING: '⏳', IN_PROGRESS: '🔨', DONE: '✅', SKIPPED: '⏭️' };
+                            return (
+                              <div key={step.id} className={`px-4 py-3 ${step.status === 'IN_PROGRESS' ? 'bg-blue-500/5' : step.status === 'DONE' ? 'bg-emerald-500/5' : ''}`}>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-lg flex-shrink-0">{stepIcon[step.status] || '⏳'}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className={`text-sm ${step.status === 'DONE' ? 'line-through text-muted' : 'text-foreground font-medium'}`}>
+                                      {step.stepNumber}. {step.operationName}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted mt-0.5">
+                                      {step.plannedMins > 0 && <span>⏱ {step.plannedMins}m</span>}
+                                      {step.workCenter?.name && <span>📍 {step.workCenter.name}</span>}
+                                      {step.startedAt && <span>Started {new Date(step.startedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+                                      {step.completedAt && <span className="text-emerald-600">Done {new Date(step.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+                                    </div>
+                                  </div>
+
+                                  {/* Action buttons */}
+                                  {order.status === 'IN_PROGRESS' && step.status === 'PENDING' && (
+                                    <button
+                                      disabled={stepUpdating === step.id}
+                                      onClick={async () => {
+                                        setStepUpdating(step.id);
+                                        const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'IN_PROGRESS');
+                                        if (res.success) {
+                                          const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                          if (refresh.success) setProductionOrders(refresh.data);
+                                        } else { alert(res.error); }
+                                        setStepUpdating(null);
+                                      }}
+                                      className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all flex-shrink-0"
+                                    >
+                                      ▶ Start
+                                    </button>
+                                  )}
+                                  {order.status === 'IN_PROGRESS' && step.status === 'IN_PROGRESS' && (
+                                    <button
+                                      disabled={stepUpdating === step.id}
+                                      onClick={async () => {
+                                        setStepUpdating(step.id);
+                                        const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'DONE');
+                                        if (res.success) {
+                                          const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                          if (refresh.success) setProductionOrders(refresh.data);
+                                        } else { alert(res.error); }
+                                        setStepUpdating(null);
+                                      }}
+                                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all flex-shrink-0"
+                                    >
+                                      ✓ Done
+                                    </button>
+                                  )}
+                                  {step.status === 'DONE' && (
+                                    <span className="text-[10px] text-emerald-600 font-semibold flex-shrink-0">Completed</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Notes */}
+                    {order.notes && (
+                      <div className="px-4 py-2.5 border-t border-border bg-surface-hover/20">
+                        <p className="text-[11px] text-muted">📝 {order.notes}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
