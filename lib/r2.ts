@@ -1,24 +1,28 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { randomUUID } from 'crypto'
 
-function getR2Client() {
+// Dynamic import to avoid Turbopack ESM/CJS bundling issues with @aws-sdk
+async function getS3Modules() {
+  const { S3Client, PutObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3')
+  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
+  return { S3Client, PutObjectCommand, DeleteObjectCommand, getSignedUrl }
+}
+
+const BUCKET = process.env.R2_BUCKET_NAME || 'furniture-crm'
+
+function getR2Config() {
   const accountId = process.env.R2_ACCOUNT_ID
   if (!accountId) {
     throw new Error('R2_ACCOUNT_ID is not set')
   }
-
-  return new S3Client({
-    region: 'auto',
+  return {
+    region: 'auto' as const,
     endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
     credentials: {
       accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
     },
-  })
+  }
 }
-
-const BUCKET = process.env.R2_BUCKET_NAME || 'furniture-crm'
 
 export async function uploadFile(
   file: Buffer,
@@ -26,7 +30,8 @@ export async function uploadFile(
   contentType: string,
   folder: string
 ): Promise<string> {
-  const client = getR2Client()
+  const { S3Client, PutObjectCommand } = await getS3Modules()
+  const client = new S3Client(getR2Config())
   const ext = fileName.split('.').pop() || 'bin'
   const key = `${folder}/${randomUUID()}.${ext}`
 
@@ -52,7 +57,8 @@ export async function getPresignedUploadUrl(
   fileName: string,
   contentType: string
 ): Promise<{ url: string; key: string }> {
-  const client = getR2Client()
+  const { S3Client, PutObjectCommand, getSignedUrl } = await getS3Modules()
+  const client = new S3Client(getR2Config())
   const ext = fileName.split('.').pop() || 'bin'
   const key = `${folder}/${randomUUID()}.${ext}`
 
@@ -70,7 +76,8 @@ export async function getPresignedUploadUrl(
 }
 
 export async function deleteFile(key: string): Promise<void> {
-  const client = getR2Client()
+  const { S3Client, DeleteObjectCommand } = await getS3Modules()
+  const client = new S3Client(getR2Config())
   await client.send(
     new DeleteObjectCommand({
       Bucket: BUCKET,
