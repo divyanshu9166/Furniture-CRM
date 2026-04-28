@@ -33,13 +33,13 @@ services:
   app:
     build: .
     restart: always
-    # Bind only to localhost for Nginx reverse proxy
     ports:
       - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
       NEXTAUTH_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
+      AUTH_TRUST_HOST: "true"
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
       R2_ACCOUNT_ID: "${R2_ACCOUNT_ID}"
