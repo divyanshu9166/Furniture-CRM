@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { getToken } from 'next-auth/jwt'
+import { decrypt } from '@/lib/session'
 
 const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/api/walkin', '/api/email-track', '/api/calls/log', '/api/calls/schedule-callback', '/api/appointments/create']
 
@@ -32,17 +32,18 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // Check JWT token
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+  // Check custom session cookie
+  const sessionCookie = req.cookies.get('session')?.value
+  const session = await decrypt(sessionCookie)
 
   // Redirect unauthenticated users to login
-  if (!token) {
+  if (!session) {
     const loginUrl = new URL('/login', req.url)
     loginUrl.searchParams.set('callbackUrl', pathname)
     return NextResponse.redirect(loginUrl)
   }
 
-  const role = token.role as string
+  const role = session.role as string
 
   // Check route-level permissions
   for (const [route, allowedRoles] of Object.entries(routePermissions)) {
@@ -57,8 +58,8 @@ export async function proxy(req: NextRequest) {
   // Inject user role into request headers for server components
   const response = NextResponse.next()
   response.headers.set('x-user-role', role)
-  response.headers.set('x-user-id', token.sub || '')
-  response.headers.set('x-user-name', (token.name as string) || '')
+  response.headers.set('x-user-id', session.id || '')
+  response.headers.set('x-user-name', (session.name as string) || '')
 
   return response
 }

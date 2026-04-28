@@ -12,7 +12,7 @@ export async function getAppointments() {
 
   return {
     success: true,
-    data: appointments.map(a => ({
+    data: appointments.map((a: any) => ({
       id: a.id,
       customer: a.contact.name,
       phone: a.contact.phone,

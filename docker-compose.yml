@@ -37,9 +37,7 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
-      NEXTAUTH_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
-      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
-      AUTH_TRUST_HOST: "true"
+      SESSION_SECRET: "${SESSION_SECRET}"
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
       R2_ACCOUNT_ID: "${R2_ACCOUNT_ID}"
@@ -54,7 +52,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/auth/session"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/auth/me"]
       interval: 30s
       timeout: 10s
       retries: 3

@@ -12,7 +12,7 @@ import {
   ChevronLeft, ChevronRight, Fingerprint,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession } from '@/components/AuthProvider';
 import Modal from '@/components/Modal';
 import { getStaff, clockIn as serverClockIn, clockOut as serverClockOut, staffStockUpdate, getMonthAttendance, verifyStaffPortalPassword } from '@/app/actions/staff';
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';

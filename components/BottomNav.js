@@ -12,7 +12,7 @@ import {
   KeyRound
 } from 'lucide-react';
 import { useState } from 'react';
-import { useSession } from 'next-auth/react';
+import { useSession } from '@/components/AuthProvider';
 
 const navItems = [
   { href: '/', label: 'Home', icon: LayoutDashboard },
