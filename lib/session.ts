@@ -18,7 +18,7 @@ function sign(payload: string, secret: string) {
 }
 
 export async function encrypt(payload: SessionPayload) {
-  const data = JSON.stringify(payload)
+  const data = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const signature = sign(data, SESSION_SECRET)
   return `${data}.${signature}`
 }
@@ -41,7 +41,7 @@ export async function decrypt(session: string | undefined): Promise<SessionPaylo
   }
 
   try {
-    const payload = JSON.parse(data) as SessionPayload
+    const payload = JSON.parse(Buffer.from(data, 'base64url').toString()) as SessionPayload
     if (new Date(payload.expiresAt) < new Date()) {
       return null
     }
