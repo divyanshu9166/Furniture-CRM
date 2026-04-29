@@ -33,7 +33,7 @@ import {
   Calculator,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
+import { useSession } from '@/components/AuthProvider';
 import { useSidebarContext } from './SidebarContext';
 import { getStoreSettings } from '@/app/actions/settings';
 

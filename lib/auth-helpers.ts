@@ -1,13 +1,23 @@
-import { auth } from './auth'
+import { getSession as getCustomSession } from './session'
 import type { UserRole } from '@prisma/client'
 
 export async function getSession() {
-  const session = await auth()
-  return session
+  const session = await getCustomSession()
+  if (!session) return null
+  
+  return {
+    user: {
+      id: session.id,
+      email: session.email,
+      name: session.name,
+      role: session.role as UserRole,
+      staffId: session.staffId,
+    }
+  }
 }
 
 export async function requireAuth() {
-  const session = await auth()
+  const session = await getSession()
   if (!session?.user) {
     throw new Error('Unauthorized')
   }

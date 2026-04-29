@@ -56,7 +56,7 @@ export async function sendEmail(options: {
   if (!config) return { success: false, error: 'SMTP not configured. Go to Settings → Email Setup.' }
 
   const transporter = createTransporter(config)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
 
   // Inject tracking pixel if recipientId provided
   let html = options.html
@@ -95,7 +95,7 @@ export async function sendBulkEmails(emails: {
   if (!config) return { sent: 0, failed: emails.length, errors: ['SMTP not configured'] }
 
   const transporter = createTransporter(config)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
 
   let sent = 0
   let failed = 0

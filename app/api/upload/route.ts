@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { writeFile, mkdir } from 'fs/promises'
-import { join } from 'path'
-import { randomUUID } from 'crypto'
+import { uploadFile } from '@/lib/r2'
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
 export async function POST(req: NextRequest) {
-  // Auth is handled by middleware — all non-public routes require login
   try {
     const formData = await req.formData()
 
@@ -30,9 +27,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Maximum 5 files per upload' }, { status: 400 })
     }
 
-    const uploadDir = join(process.cwd(), 'public', 'uploads', folder)
-    await mkdir(uploadDir, { recursive: true })
-
     const urls: string[] = []
 
     for (const file of files) {
@@ -49,12 +43,11 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      const ext = file.name.split('.').pop() || 'jpg'
-      const fileName = `${randomUUID()}.${ext}`
-      const filePath = join(uploadDir, fileName)
       const bytes = await file.arrayBuffer()
-      await writeFile(filePath, Buffer.from(bytes))
-      urls.push(`/uploads/${folder}/${fileName}`)
+      const buffer = Buffer.from(bytes)
+      
+      const url = await uploadFile(buffer, file.name, file.type, folder)
+      urls.push(url)
     }
 
     return NextResponse.json({ success: true, urls })

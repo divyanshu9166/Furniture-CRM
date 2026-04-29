@@ -4,8 +4,7 @@ import pg from 'pg'
 import bcrypt from 'bcryptjs'
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
-// @ts-expect-error - pg type mismatch between @types/pg versions
-const adapter = new PrismaPg(pool)
+const adapter = new PrismaPg(pool as any)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {

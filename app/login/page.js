@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getStaff } from '@/app/actions/staff';
 
@@ -44,12 +43,20 @@ function LoginContent() {
     setError('');
     setLoading(true);
     try {
-      const result = await signIn('credentials', { email, password, redirect: false });
-      if (result?.error) {
-        setError('Invalid email or password');
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, type: 'credentials' }),
+      });
+      
+      const result = await res.json();
+      
+      if (!res.ok) {
+        setError(result.error || 'Invalid email or password');
       } else {
-        router.push(callbackUrl);
-        router.refresh();
+        // Full page reload so AuthProvider re-mounts and fetches the fresh session
+        // (router.push + refresh doesn't unmount client components, leaving the role stale)
+        window.location.href = callbackUrl;
       }
     } catch {
       setError('Something went wrong. Please try again.');
@@ -67,16 +74,23 @@ function LoginContent() {
     }
     setLoading(true);
     try {
-      const result = await signIn('staff-pin', {
-        staffId: selectedStaffId,
-        pin,
-        redirect: false,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staffId: selectedStaffId,
+          pin,
+          type: 'staff-pin',
+        }),
       });
-      if (result?.error) {
-        setError('Invalid PIN. Use last 4 digits of your phone number.');
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        setError(result.error || 'Invalid PIN. Use last 4 digits of your phone number.');
       } else {
-        router.push('/staff-portal');
-        router.refresh();
+        // Full page reload so AuthProvider re-mounts and fetches the fresh session
+        window.location.href = '/staff-portal';
       }
     } catch {
       setError('Something went wrong. Please try again.');

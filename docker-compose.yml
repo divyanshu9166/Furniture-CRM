@@ -1,28 +1,29 @@
 services:
   db:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-furniturecrm}
+    # Map port for local dev
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
       retries: 5
 
-  # Run migrations + seed on first start (exits after completion)
+  # Run migrations on start (exits after completion)
   migrate:
     build:
       context: .
       target: builder
     command: >
-      sh -c "npx prisma db push --skip-generate && npx tsx prisma/seed.ts"
+      sh -c "npx prisma migrate deploy"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
     depends_on:
@@ -31,24 +32,33 @@ services:
 
   app:
     build: .
-    restart: unless-stopped
+    restart: always
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
-      NEXTAUTH_URL: "http://localhost:3000"
-      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET:-change-me-in-production}"
-      R2_ACCOUNT_ID: "${R2_ACCOUNT_ID:-}"
-      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-}"
-      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
+      CRM_API_SECRET: "${CRM_API_SECRET}"
+      R2_ACCOUNT_ID: "${R2_ACCOUNT_ID}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY}"
       R2_BUCKET_NAME: "${R2_BUCKET_NAME:-furniture-crm}"
-      R2_PUBLIC_URL: "${R2_PUBLIC_URL:-}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      R2_PUBLIC_URL: "${R2_PUBLIC_URL}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    volumes:
+      - uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/auth/me"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   pgdata:
+  uploads:

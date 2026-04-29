@@ -8,8 +8,7 @@ const globalForPrisma = globalThis as unknown as {
 
 function createPrismaClient() {
   const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
-  // @ts-expect-error - pg type mismatch between @types/pg versions
-  const adapter = new PrismaPg(pool)
+  const adapter = new PrismaPg(pool as any)
   return new PrismaClient({ adapter })
 }
 

@@ -850,6 +850,7 @@ export default function InventoryPage() {
             godownId: selectedGodownId,
           });
           if (res.success) { setShowAddModal(false); setProductImages([]); refreshProducts(); if (godownStocks.length > 0) loadLocationData(); }
+          else if (res.error) alert(res.error);
           setAddingProduct(false);
         }}>
           {/* Product Images */}

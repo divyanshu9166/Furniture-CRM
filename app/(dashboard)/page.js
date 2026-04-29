@@ -172,7 +172,17 @@ export default function Dashboard() {
           <div className="space-y-3">
             {stats.lowStockItems.map((item) => (
               <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-hover transition-colors">
-                <span className="text-2xl">{item.image}</span>
+                <div className="w-10 h-10 rounded-lg bg-surface-hover flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {item.image && item.image.includes('/') ? (
+                    <img 
+                      src={item.image.split(',')[0]} 
+                      alt={item.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-2xl">{item.image || '📦'}</span>
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
                   <p className="text-xs text-muted">{item.category}</p>

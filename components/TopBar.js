@@ -2,7 +2,7 @@
 
 import { Bell, Search, Menu, ChevronDown, LogOut, User, Shield, MessageSquare, CalendarClock, AlertTriangle, Package, MapPin, FileText } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession, signOut } from '@/components/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useSidebarContext } from './SidebarContext';
 import {

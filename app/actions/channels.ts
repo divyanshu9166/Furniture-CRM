@@ -33,7 +33,7 @@ export async function upsertChannelConfig(data: {
   const { channel, enabled, config } = data
 
   // Generate webhook URL based on channel
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
   const webhookUrl = `${baseUrl}/api/webhooks/${channel.toLowerCase().replace(/\s+/g, '')}`
 
   const result = await prisma.channelConfig.upsert({
