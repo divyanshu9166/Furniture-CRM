@@ -68,17 +68,31 @@ export async function createProduct(data: unknown) {
     warehouseId = wh.id
   }
 
+  // Check for duplicate SKU before creating
+  const existingSku = await prisma.product.findUnique({ where: { sku: rest.sku } })
+  if (existingSku) {
+    return { success: false, error: `A product with SKU "${rest.sku}" already exists. Please use a unique SKU.` }
+  }
+
   // Create the product with stock = 0 initially (sync engine will set it)
   const initialStock = rest.stock || 0
-  const product = await prisma.product.create({
-    data: {
-      ...rest,
-      stock: 0, // Will be set by sync engine
-      unitOfMeasure: unitOfMeasure || 'PCS',
-      categoryId: cat.id,
-      warehouseId,
-    },
-  })
+  let product
+  try {
+    product = await prisma.product.create({
+      data: {
+        ...rest,
+        stock: 0, // Will be set by sync engine
+        unitOfMeasure: unitOfMeasure || 'PCS',
+        categoryId: cat.id,
+        warehouseId,
+      },
+    })
+  } catch (err: any) {
+    if (err.code === 'P2002') {
+      return { success: false, error: `A product with SKU "${rest.sku}" already exists. Please use a unique SKU.` }
+    }
+    return { success: false, error: err.message || 'Failed to create product' }
+  }
 
   // Allocate initial stock to the selected godown (like Odoo's stock.move on receipt)
   if (initialStock > 0) {
