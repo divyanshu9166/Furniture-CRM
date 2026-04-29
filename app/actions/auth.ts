@@ -110,10 +110,17 @@ export async function updateAccountCredentials(data: unknown) {
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const userId = Number(session.user.id)
-  if (!Number.isFinite(userId)) return { success: false, error: 'Invalid session user' }
+  const sessionEmail = session.user.email?.toLowerCase()
 
-  const user = await prisma.user.findUnique({ where: { id: userId } })
-  if (!user) return { success: false, error: 'User not found' }
+  let user = Number.isFinite(userId)
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : null
+
+  if (!user && sessionEmail) {
+    user = await prisma.user.findUnique({ where: { email: sessionEmail } })
+  }
+
+  if (!user) return { success: false, error: 'User not found. Please log in again.' }
 
   const valid = await bcrypt.compare(parsed.data.currentPassword, user.hashedPassword)
   if (!valid) return { success: false, error: 'Incorrect current password' }
