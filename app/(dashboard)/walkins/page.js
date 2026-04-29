@@ -8,7 +8,10 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { getWalkins, createWalkin, updateWalkinStatus } from '@/app/actions/walkins';
+import { createLead } from '@/app/actions/leads';
 import { getStaff } from '@/app/actions/staff';
+import { useAlertToast } from '@/components/AlertToastProvider';
+import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 
 const walkinStatuses = ['All', 'Browsing', 'Interested', 'Follow-up', 'Converted', 'Left'];
@@ -22,6 +25,9 @@ const statusConfig = {
 };
 
 export default function WalkinsPage() {
+  const router = useRouter();
+  const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
+  
   const [walkins, setWalkins] = useState([]);
   const [staff, setStaff] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -154,11 +160,36 @@ export default function WalkinsPage() {
         if (refreshed.success) setWalkins(refreshed.data);
         setForm({ name: '', phone: '', email: '', requirement: '', budget: '', assignedToId: '', notes: '' });
         setShowRegisterModal(false);
+        alertToast.notify?.('Walk-in registered successfully', 'success');
       }
     } catch (err) {
       console.error('Failed to register walk-in:', err);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleConvertToLead = async () => {
+    if (!selectedWalkin) return;
+    try {
+      const res = await createLead({
+        name: selectedWalkin.name,
+        phone: selectedWalkin.phone,
+        email: selectedWalkin.email || undefined,
+        source: 'Showroom Visit',
+        interest: selectedWalkin.requirement,
+        budget: selectedWalkin.budget || '',
+        notes: `Converted from walk-in: ${selectedWalkin.notes || ''}`,
+      });
+      if (res.success) {
+        await handleStatusUpdate(selectedWalkin.id, 'Converted');
+        alertToast.notify?.('Converted to lead successfully!', 'success');
+      } else {
+        alertToast.notify?.(res.error || 'Failed to convert to lead', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      alertToast.notify?.('Error converting to lead', 'error');
     }
   };
 
@@ -409,14 +440,14 @@ export default function WalkinsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-2 pt-2">
-                <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <a href={`tel:${selectedWalkin.phone}`} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
                   <Phone className="w-4 h-4" /> Call
-                </button>
-                <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
+                </a>
+                <button onClick={handleConvertToLead} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
                   <ArrowRight className="w-4 h-4" /> Convert to Lead
                 </button>
-                <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-xl text-sm font-medium hover:bg-blue-500/20 transition-colors">
+                <button onClick={() => router.push(`/orders?customer=${encodeURIComponent(selectedWalkin.name)}&phone=${encodeURIComponent(selectedWalkin.phone)}`)} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-xl text-sm font-medium hover:bg-blue-500/20 transition-colors">
                   <ShoppingBag className="w-4 h-4" /> Create Order
                 </button>
               </div>

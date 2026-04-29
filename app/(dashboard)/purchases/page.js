@@ -346,21 +346,21 @@ export default function PurchasesPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Purchase Management</h1>
           <p className="text-muted text-sm mt-1">Manage suppliers, purchase orders & returns</p>
         </div>
-        <div className="flex gap-2">
-          {tab === 'orders' && <button onClick={openCreatePOModal} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New PO</button>}
-          {tab === 'suppliers' && <button onClick={openCreateSupplierModal} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>}
-          {tab === 'returns' && <button onClick={() => setShowReturnModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New Return</button>}
+        <div className="flex gap-2 w-full md:w-auto flex-wrap">
+          {tab === 'orders' && <button onClick={openCreatePOModal} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> New PO</button>}
+          {tab === 'suppliers' && <button onClick={openCreateSupplierModal} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>}
+          {tab === 'returns' && <button onClick={() => setShowReturnModal(true)} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> New Return</button>}
         </div>
       </div>
 
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-3 xl:grid-cols-5 md:gap-4">
           {[
             { label: 'Total POs', value: stats.totalPOs, icon: FileText, color: 'text-blue-400' },
             { label: 'Open Payables', value: `₹${(stats.outstandingPayables || 0).toLocaleString('en-IN')}`, icon: Truck, color: 'text-emerald-400' },
@@ -368,7 +368,7 @@ export default function PurchasesPage() {
             { label: 'Overdue POs', value: stats.overduePOs, icon: AlertTriangle, color: 'text-red-400' },
             { label: 'Suppliers', value: stats.totalSuppliers || stats.suppliers, icon: Users, color: 'text-purple-400' },
           ].map((s, i) => (
-            <div key={i} className="glass-card p-4">
+            <div key={i} className="glass-card p-4 min-w-[160px] flex-shrink-0 md:min-w-0 md:flex-shrink">
               <div className="flex items-center gap-3">
                 <s.icon className={`w-5 h-5 ${s.color}`} />
                 <div>
@@ -382,23 +382,25 @@ export default function PurchasesPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1">
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => { setTab(t.id); setSearch(''); setStatusFilter('All') }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
-            <t.icon className="w-4 h-4" /> {t.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto hide-scrollbar -mx-4 md:mx-0 px-4 md:px-0">
+        <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 w-max">
+          {tabs.map(t => (
+            <button key={t.id} onClick={() => { setTab(t.id); setSearch(''); setStatusFilter('All') }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+              <t.icon className="w-4 h-4" /> {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Search */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
+      <div className="flex flex-col sm:flex-row items-center gap-3">
+        <div className="relative w-full sm:flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50" />
         </div>
         {tab === 'orders' && (
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="w-full sm:w-auto px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50">
             {['All', 'DRAFT', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Status' : s.replace(/_/g, ' ')}</option>)}
           </select>
         )}
@@ -406,8 +408,8 @@ export default function PurchasesPage() {
 
       {/* Purchase Orders Tab */}
       {tab === 'orders' && (
-        <div className="glass-card overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="glass-card overflow-x-auto">
+          <table className="w-full text-sm whitespace-nowrap md:whitespace-normal">
             <thead><tr className="border-b border-border">
               {['PO #', 'Supplier', 'Date', 'Expected', 'Items', 'Total', 'Paid', 'Balance', 'Compliance', 'Status', 'Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
             </tr></thead>
@@ -514,8 +516,8 @@ export default function PurchasesPage() {
 
       {/* Returns Tab */}
       {tab === 'returns' && (
-        <div className="glass-card overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="glass-card overflow-x-auto">
+          <table className="w-full text-sm whitespace-nowrap md:whitespace-normal">
             <thead><tr className="border-b border-border">
               {['Return #', 'PO Ref', 'Supplier', 'Reason', 'Amount', 'Date', 'Status'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
             </tr></thead>
@@ -550,18 +552,19 @@ export default function PurchasesPage() {
       <Modal isOpen={showDetailModal} onClose={() => setShowDetailModal(false)} title={`Purchase Order: ${selectedPO?.displayId}`} size="lg">
         {selectedPO && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="text-muted">Supplier:</span> <span className="text-foreground font-medium ml-1">{selectedPO.supplier?.name}</span></div>
-              <div><span className="text-muted">Date:</span> <span className="text-foreground ml-1">{new Date(selectedPO.date).toLocaleDateString('en-IN')}</span></div>
-              <div><span className="text-muted">Expected:</span> <span className="text-foreground ml-1">{selectedPO.expectedDate ? new Date(selectedPO.expectedDate).toLocaleDateString('en-IN') : '—'}</span></div>
-              <div><span className="text-muted">Status:</span> <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${poStatusColors[selectedPO.status]}`}>{selectedPO.status}</span></div>
-              <div><span className="text-muted">ITC:</span> <span className="text-foreground ml-1">{selectedPO.itcEligible ? selectedPO.itcCategory?.replace(/_/g, ' ') : 'Ineligible'}</span></div>
-              <div><span className="text-muted">RCM:</span> <span className="text-foreground ml-1">{selectedPO.isRCM ? 'Yes' : 'No'}</span></div>
-              <div><span className="text-muted">Total:</span> <span className="text-foreground font-medium ml-1">₹{selectedPO.total?.toLocaleString('en-IN')}</span></div>
-              <div><span className="text-muted">Balance:</span> <span className="text-foreground font-medium ml-1">₹{selectedPO.balanceDue?.toLocaleString('en-IN')}</span></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="flex gap-2"><span className="text-muted w-20">Supplier:</span> <span className="text-foreground font-medium truncate">{selectedPO.supplier?.name}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">Date:</span> <span className="text-foreground">{new Date(selectedPO.date).toLocaleDateString('en-IN')}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">Expected:</span> <span className="text-foreground">{selectedPO.expectedDate ? new Date(selectedPO.expectedDate).toLocaleDateString('en-IN') : '—'}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">Status:</span> <span className={`px-2 py-0.5 rounded-full text-xs ${poStatusColors[selectedPO.status]}`}>{selectedPO.status}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">ITC:</span> <span className="text-foreground">{selectedPO.itcEligible ? selectedPO.itcCategory?.replace(/_/g, ' ') : 'Ineligible'}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">RCM:</span> <span className="text-foreground">{selectedPO.isRCM ? 'Yes' : 'No'}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">Total:</span> <span className="text-foreground font-medium">₹{selectedPO.total?.toLocaleString('en-IN')}</span></div>
+              <div className="flex gap-2"><span className="text-muted w-20">Balance:</span> <span className="text-foreground font-medium">₹{selectedPO.balanceDue?.toLocaleString('en-IN')}</span></div>
             </div>
-            <table className="w-full text-sm border border-border rounded-lg overflow-hidden">
-              <thead><tr className="bg-surface-hover">
+            <div className="overflow-x-auto border border-border rounded-lg">
+              <table className="w-full text-sm whitespace-nowrap">
+                <thead><tr className="bg-surface-hover">
                 {['Product', 'SKU', 'Qty', 'Received', 'Unit Cost', 'Amount'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)}
               </tr></thead>
               <tbody>
@@ -577,10 +580,11 @@ export default function PurchasesPage() {
                 ))}
               </tbody>
             </table>
-            <div className="grid grid-cols-3 gap-4 text-sm pt-2 border-t border-border">
-              <div><span className="text-muted">Subtotal:</span> <span className="font-medium ml-1">₹{selectedPO.subtotal?.toLocaleString('en-IN')}</span></div>
-              <div><span className="text-muted">GST:</span> <span className="font-medium ml-1">₹{selectedPO.gst?.toLocaleString('en-IN')}</span></div>
-              <div><span className="text-muted">Discount:</span> <span className="font-medium ml-1">₹{selectedPO.discount?.toLocaleString('en-IN')}</span></div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm pt-2 border-t border-border">
+              <div className="flex justify-between sm:justify-start"><span className="text-muted">Subtotal:</span> <span className="font-medium ml-1">₹{selectedPO.subtotal?.toLocaleString('en-IN')}</span></div>
+              <div className="flex justify-between sm:justify-start"><span className="text-muted">GST:</span> <span className="font-medium ml-1">₹{selectedPO.gst?.toLocaleString('en-IN')}</span></div>
+              <div className="flex justify-between sm:justify-start"><span className="text-muted">Discount:</span> <span className="font-medium ml-1">₹{selectedPO.discount?.toLocaleString('en-IN')}</span></div>
             </div>
 
             <div className="border-t border-border pt-3 space-y-2">
@@ -690,7 +694,7 @@ export default function PurchasesPage() {
         size="lg"
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
             <label className="text-sm text-muted mb-1 block">Supplier *</label>
             <select value={poForm.supplierId} onChange={e => setPOForm(p => ({ ...p, supplierId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
@@ -744,20 +748,22 @@ export default function PurchasesPage() {
               <button onClick={addPOItem} className="text-xs text-accent hover:underline">+ Add Item</button>
             </div>
             {poForm.items.map((item, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 mb-2">
-                <select value={item.productId} onChange={e => { const v = [...poForm.items]; v[i].productId = e.target.value; const prod = products.find(p => p.id === Number(e.target.value)); if (prod) v[i].unitCost = prod.costPrice || 0; setPOForm(f => ({ ...f, items: v })) }} className="col-span-6 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+              <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 mb-4 sm:mb-2 bg-surface sm:bg-transparent border border-border sm:border-none p-3 sm:p-0 rounded-lg sm:rounded-none relative">
+                <button type="button" onClick={() => setPOForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="absolute top-2 right-2 sm:static sm:col-span-1 text-red-400 hover:text-red-300 text-lg flex sm:items-center sm:justify-center">×</button>
+                <select value={item.productId} onChange={e => { const v = [...poForm.items]; v[i].productId = e.target.value; const prod = products.find(p => p.id === Number(e.target.value)); if (prod) v[i].unitCost = prod.costPrice || 0; setPOForm(f => ({ ...f, items: v })) }} className="col-span-5 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground w-full mt-6 sm:mt-0">
                   <option value="">Select Product</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
-                <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...poForm.items]; v[i].quantity = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="col-span-2 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="col-span-2 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <input type="number" min="0" max="100" value={item.gstRate || 18} onChange={e => { const v = [...poForm.items]; v[i].gstRate = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="GST%" className="col-span-1 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <button onClick={() => setPOForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-lg">×</button>
+                <div className="flex gap-2 col-span-6">
+                  <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...poForm.items]; v[i].quantity = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                  <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                  <input type="number" min="0" max="100" value={item.gstRate || 18} onChange={e => { const v = [...poForm.items]; v[i].gstRate = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="GST%" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
               </div>
             ))}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-muted mb-1 block">Order Discount (₹)</label>
               <input
@@ -790,7 +796,7 @@ export default function PurchasesPage() {
       {/* Record Payment Modal */}
       <Modal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Record PO Payment">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-muted mb-1 block">Payment Date *</label>
               <input
@@ -854,7 +860,7 @@ export default function PurchasesPage() {
       {/* Create Return Modal */}
       <Modal isOpen={showReturnModal} onClose={() => setShowReturnModal(false)} title="Create Purchase Return" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">Supplier *</label>
               <select value={returnForm.supplierId} onChange={e => setReturnForm(p => ({ ...p, supplierId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
@@ -880,14 +886,16 @@ export default function PurchasesPage() {
               <button onClick={addReturnItem} className="text-xs text-accent hover:underline">+ Add Item</button>
             </div>
             {returnForm.items.map((item, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 mb-2">
-                <select value={item.productId} onChange={e => { const v = [...returnForm.items]; v[i].productId = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} className="col-span-6 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+              <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 mb-4 sm:mb-2 bg-surface sm:bg-transparent border border-border sm:border-none p-3 sm:p-0 rounded-lg sm:rounded-none relative">
+                <button type="button" onClick={() => setReturnForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="absolute top-2 right-2 sm:static sm:col-span-1 text-red-400 hover:text-red-300 text-lg flex sm:items-center sm:justify-center">×</button>
+                <select value={item.productId} onChange={e => { const v = [...returnForm.items]; v[i].productId = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} className="col-span-6 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground w-full mt-6 sm:mt-0">
                   <option value="">Select Product</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
-                <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...returnForm.items]; v[i].quantity = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="col-span-2 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...returnForm.items]; v[i].unitCost = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="col-span-3 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <button onClick={() => setReturnForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-lg">×</button>
+                <div className="flex flex-row gap-2 col-span-5 w-full">
+                  <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...returnForm.items]; v[i].quantity = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="flex-1 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                  <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...returnForm.items]; v[i].unitCost = e.target.value; setReturnForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="flex-1 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                </div>
               </div>
             ))}
           </div>

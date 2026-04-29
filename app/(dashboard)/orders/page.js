@@ -8,11 +8,13 @@ import {
 } from 'lucide-react';
 import { getOrders, createOrder } from '@/app/actions/orders';
 import { getMarketplaceChannels } from '@/app/actions/settings';
+import { Suspense } from 'react';
 import { getProducts } from '@/app/actions/products';
 import { getGodowns } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
+import { useSearchParams } from 'next/navigation';
 
 const orderStatuses = ['All', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
 const orderSources = ['All', 'Store', 'Shopify'];
@@ -62,6 +64,15 @@ function getInitialSlipTemplate() {
 }
 
 export default function OrdersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-muted">Loading orders...</div>}>
+      <OrdersPageInner />
+    </Suspense>
+  );
+}
+
+function OrdersPageInner() {
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('orders');
@@ -101,8 +112,15 @@ export default function OrdersPage() {
         setSelectedGodownId(defaultGodown ? String(defaultGodown.id) : '');
       }
       setLoading(false);
+      
+      const prefillCustomer = searchParams.get('customer');
+      const prefillPhone = searchParams.get('phone');
+      if (prefillCustomer && prefillPhone) {
+        setOrderCustomer({ name: prefillCustomer, phone: prefillPhone });
+        setShowCreateModal(true);
+      }
     });
-  }, []);
+  }, [searchParams]);
 
   const resetOfflineOrderForm = () => {
     const defaultGodown = godowns.find(g => g.isDefault) || godowns[0];

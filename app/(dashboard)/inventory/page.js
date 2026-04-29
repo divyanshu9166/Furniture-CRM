@@ -494,27 +494,28 @@ export default function InventoryPage() {
               </div>
 
               <div className="glass-card overflow-hidden">
-                <table className="crm-table">
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th>SKU</th>
-                      <th>Current Stock</th>
-                      <th>Reorder Level</th>
-                      <th>Shortfall</th>
-                      <th>Warehouse</th>
-                      <th>Last Restocked</th>
-                      <th>Priority</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {needsReorder.map(product => {
-                      const shortfall = product.reorderLevel - product.stock;
-                      const isOut = product.stock === 0;
-                      return (
-                        <tr key={product.id}>
-                          <td>
+                <div className="overflow-x-auto">
+                  <table className="crm-table">
+                    <thead>
+                      <tr>
+                        <th className="whitespace-nowrap">Product</th>
+                        <th className="whitespace-nowrap">SKU</th>
+                        <th className="whitespace-nowrap">Current Stock</th>
+                        <th className="whitespace-nowrap">Reorder Level</th>
+                        <th className="whitespace-nowrap">Shortfall</th>
+                        <th className="whitespace-nowrap">Warehouse</th>
+                        <th className="whitespace-nowrap">Last Restocked</th>
+                        <th className="whitespace-nowrap">Priority</th>
+                        <th className="whitespace-nowrap">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {needsReorder.map(product => {
+                        const shortfall = product.reorderLevel - product.stock;
+                        const isOut = product.stock === 0;
+                        return (
+                          <tr key={product.id}>
+                            <td className="whitespace-nowrap">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
                                 {product.image && !product.image.includes('/') ? (
@@ -531,20 +532,20 @@ export default function InventoryPage() {
                               </div>
                             </div>
                           </td>
-                          <td className="font-mono text-xs text-muted">{product.sku}</td>
-                          <td className={`font-bold ${isOut ? 'text-danger' : 'text-warning'}`}>{product.stock}</td>
-                          <td className="text-muted">{product.reorderLevel}</td>
-                          <td className="text-danger font-medium">
+                          <td className="font-mono text-xs text-muted whitespace-nowrap">{product.sku}</td>
+                          <td className={`font-bold whitespace-nowrap ${isOut ? 'text-danger' : 'text-warning'}`}>{product.stock}</td>
+                          <td className="text-muted whitespace-nowrap">{product.reorderLevel}</td>
+                          <td className="text-danger font-medium whitespace-nowrap">
                             {shortfall > 0 ? `Need ${shortfall} more` : 'Restocked'}
                           </td>
-                          <td className="text-xs text-muted">{product.warehouse}</td>
-                          <td className="text-xs text-muted">{product.lastRestocked}</td>
-                          <td>
+                          <td className="text-xs text-muted whitespace-nowrap">{product.warehouse}</td>
+                          <td className="text-xs text-muted whitespace-nowrap">{product.lastRestocked}</td>
+                          <td className="whitespace-nowrap">
                             <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${isOut ? 'bg-red-500/10 text-red-700 border-red-500/20' : 'bg-amber-500/10 text-amber-700 border-amber-500/20'}`}>
                               {isOut ? 'Urgent' : 'Low'}
                             </span>
                           </td>
-                          <td>
+                          <td className="whitespace-nowrap">
                             <button
                               onClick={() => setShowStockModal(product)}
                               className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
@@ -557,6 +558,7 @@ export default function InventoryPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
               </div>
             </>
           )}
@@ -615,25 +617,27 @@ export default function InventoryPage() {
           </div>
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
             <div className="glass-card overflow-hidden">
-              <table className="w-full text-sm">
-                <thead><tr className="border-b border-border">
-                  {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {batches.map(b => (
-                    <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                      <td className="px-4 py-3 text-foreground font-medium">{b.product?.name}</td>
-                      <td className="px-4 py-3 text-muted font-mono text-xs">{b.product?.sku}</td>
-                      <td className="px-4 py-3 text-foreground">{b.batchNumber}</td>
-                      <td className="px-4 py-3 text-muted">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
-                      <td className="px-4 py-3 text-muted">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
-                      <td className="px-4 py-3 text-foreground">{b.quantity}</td>
-                      <td className="px-4 py-3"><span className={`font-medium ${b.remainingQty <= 0 ? 'text-red-400' : b.remainingQty < b.quantity * 0.2 ? 'text-amber-400' : 'text-emerald-400'}`}>{b.remainingQty}</span></td>
-                      <td className="px-4 py-3 text-foreground">₹{b.costPrice?.toLocaleString('en-IN')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-border">
+                    {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {batches.map(b => (
+                      <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                        <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{b.product?.name}</td>
+                        <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{b.product?.sku}</td>
+                        <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.batchNumber}</td>
+                        <td className="px-4 py-3 text-muted whitespace-nowrap">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
+                        <td className="px-4 py-3 text-muted whitespace-nowrap">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
+                        <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.quantity}</td>
+                        <td className="px-4 py-3 whitespace-nowrap"><span className={`font-medium ${b.remainingQty <= 0 ? 'text-red-400' : b.remainingQty < b.quantity * 0.2 ? 'text-amber-400' : 'text-emerald-400'}`}>{b.remainingQty}</span></td>
+                        <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{b.costPrice?.toLocaleString('en-IN')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {batches.length === 0 && <div className="text-center py-12 text-muted">No batch records found</div>}
             </div>
           )}
@@ -716,32 +720,34 @@ export default function InventoryPage() {
                     })}
                   </div>
                   <div className="glass-card overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead><tr className="border-b border-border">
-                        {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {agingData.map((a, i) => (
-                          <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                            <td className="px-4 py-3 text-foreground font-medium">{a.product?.name}</td>
-                            <td className="px-4 py-3 text-muted font-mono text-xs">{a.product?.sku}</td>
-                            <td className="px-4 py-3 text-muted">{a.product?.category?.name || '—'}</td>
-                            <td className="px-4 py-3 text-foreground">{a.batchNumber}</td>
-                            <td className="px-4 py-3 text-foreground">{a.ageDays}</td>
-                            <td className="px-4 py-3">
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
-                                a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
-                                a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
-                                'bg-emerald-500/10 text-emerald-400'
-                              }`}>{a.bracket}</span>
-                            </td>
-                            <td className="px-4 py-3 text-foreground">{a.remainingQty}</td>
-                            <td className="px-4 py-3 text-foreground">₹{a.value?.toLocaleString('en-IN')}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead><tr className="border-b border-border">
+                          {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                        </tr></thead>
+                        <tbody>
+                          {agingData.map((a, i) => (
+                            <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                              <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{a.product?.name}</td>
+                              <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{a.product?.sku}</td>
+                              <td className="px-4 py-3 text-muted whitespace-nowrap">{a.product?.category?.name || '—'}</td>
+                              <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.batchNumber}</td>
+                              <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.ageDays}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
+                                  a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
+                                  a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
+                                  'bg-emerald-500/10 text-emerald-400'
+                                }`}>{a.bracket}</span>
+                              </td>
+                              <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.remainingQty}</td>
+                              <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{a.value?.toLocaleString('en-IN')}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </>
               ) : (
@@ -786,30 +792,32 @@ export default function InventoryPage() {
                           })}
                         </div>
                         <div className="glass-card overflow-hidden">
-                          <table className="w-full text-sm">
-                            <thead><tr className="border-b border-border">
-                              {['Product', 'SKU', 'Category', 'Last Restocked', 'Age (Days)', 'Bracket', 'Stock', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
-                            </tr></thead>
-                            <tbody>
-                              {productAging.length === 0
-                                ? <tr><td colSpan={8} className="text-center py-12 text-muted">No in-stock products found.</td></tr>
-                                : productAging.map((p, i) => (
-                                  <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                                    <td className="px-4 py-3 text-foreground font-medium">{p.name}</td>
-                                    <td className="px-4 py-3 text-muted font-mono text-xs">{p.sku}</td>
-                                    <td className="px-4 py-3 text-muted">{p.category || '—'}</td>
-                                    <td className="px-4 py-3 text-muted">{p.lastRestocked ? new Date(p.lastRestocked).toLocaleDateString('en-IN') : 'Not recorded'}</td>
-                                    <td className="px-4 py-3 text-foreground">{p.ageDays}d</td>
-                                    <td className="px-4 py-3">
-                                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${bracketBg[p.bracket]} ${bracketColors[p.bracket]}`}>{p.bracket}</span>
-                                    </td>
-                                    <td className="px-4 py-3 text-foreground">{p.stock}</td>
-                                    <td className="px-4 py-3 text-foreground">₹{p.value.toLocaleString('en-IN')}</td>
-                                  </tr>
-                                ))
-                              }
-                            </tbody>
-                          </table>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead><tr className="border-b border-border">
+                                {['Product', 'SKU', 'Category', 'Last Restocked', 'Age (Days)', 'Bracket', 'Stock', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                              </tr></thead>
+                              <tbody>
+                                {productAging.length === 0
+                                  ? <tr><td colSpan={8} className="text-center py-12 text-muted">No in-stock products found.</td></tr>
+                                  : productAging.map((p, i) => (
+                                    <tr key={i} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                                      <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{p.name}</td>
+                                      <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{p.sku}</td>
+                                      <td className="px-4 py-3 text-muted whitespace-nowrap">{p.category || '—'}</td>
+                                      <td className="px-4 py-3 text-muted whitespace-nowrap">{p.lastRestocked ? new Date(p.lastRestocked).toLocaleDateString('en-IN') : 'Not recorded'}</td>
+                                      <td className="px-4 py-3 text-foreground whitespace-nowrap">{p.ageDays}d</td>
+                                      <td className="px-4 py-3 whitespace-nowrap">
+                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${bracketBg[p.bracket]} ${bracketColors[p.bracket]}`}>{p.bracket}</span>
+                                      </td>
+                                      <td className="px-4 py-3 text-foreground whitespace-nowrap">{p.stock}</td>
+                                      <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{p.value.toLocaleString('en-IN')}</td>
+                                    </tr>
+                                  ))
+                                }
+                              </tbody>
+                            </table>
+                          </div>
                         </div>
                       </>
                     );

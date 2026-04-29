@@ -7,7 +7,7 @@ import {
   Receipt, CreditCard, Banknote, ChevronDown, ChevronRight, CheckCircle2,
   XCircle, Clock, AlertTriangle, RefreshCw, Settings2, Repeat, Edit3,
   ArrowUpRight, ArrowDownRight, X, ChevronLeft, Check, Eye,
-  TreePine, Truck, Package, Coffee, Fuel, Home, Zap, Wrench,
+  TreePine, Truck, Package, Coffee, Fuel, Home, Zap, Wrench, Paperclip,
   FileText, Megaphone, Factory, Store, HardHat, Landmark,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
@@ -68,11 +68,13 @@ export default function ExpensesPage() {
   const [budgetVal, setBudgetVal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [cashSaved, setCashSaved] = useState(false);
+  const [receiptUploading, setReceiptUploading] = useState(false);
+  const [receiptError, setReceiptError] = useState('');
 
   // New expense form
   const [expForm, setExpForm] = useState({
     date: today(), categoryId: '', amount: '', description: '',
-    paymentMode: 'Cash', reference: '', vendor: '', notes: '',
+    paymentMode: 'Cash', reference: '', vendor: '', notes: '', receipt: '',
   });
 
   // New category form
@@ -151,8 +153,35 @@ export default function ExpensesPage() {
 
   // ─── HANDLERS ──────────────────────────────────
 
+  const handleReceiptUpload = async (file) => {
+    if (!file) return;
+    setReceiptError('');
+    setReceiptUploading(true);
+    const formData = new FormData();
+    formData.set('folder', 'receipts');
+    formData.append('file', file);
+    try {
+      const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+      const uploadData = await uploadRes.json();
+      if (uploadRes.ok && uploadData?.success && uploadData.urls?.length > 0) {
+        setExpForm(f => ({ ...f, receipt: uploadData.urls[0] }));
+      } else {
+        setReceiptError(uploadData?.error || 'Receipt upload failed.');
+      }
+    } catch (err) {
+      setReceiptError('Receipt upload failed. Please try again.');
+    } finally {
+      setReceiptUploading(false);
+    }
+  };
+
+  const clearReceipt = () => {
+    setExpForm(f => ({ ...f, receipt: '' }));
+    setReceiptError('');
+  };
+
   const handleAddExpense = async () => {
-    if (!expForm.categoryId || !expForm.amount || !expForm.description) return;
+    if (!expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading) return;
     setSubmitting(true);
     const res = await createExpense({
       ...expForm,
@@ -161,7 +190,8 @@ export default function ExpensesPage() {
     });
     if (res.success) {
       setShowAddExpense(false);
-      setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '' });
+      setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '', receipt: '' });
+      setReceiptError('');
       await loadData(dateRange.from, dateRange.to);
       // Refresh analytics/budget if they were loaded
       if (summary) {
@@ -353,12 +383,12 @@ export default function ExpensesPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex overflow-x-auto hide-scrollbar bg-surface rounded-xl border border-border p-0.5 w-fit">
+      <div className="flex flex-wrap gap-2 w-full">
         {tabs.map(t => {
           const Icon = t.icon;
           return (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap ${tab === t.key ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+              className={`flex items-center justify-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all border ${tab === t.key ? 'bg-accent text-white border-accent shadow-sm' : 'bg-surface text-muted border-border hover:border-accent/30 hover:text-foreground'}`}>
               <Icon className="w-3.5 h-3.5" /> {t.label}
             </button>
           );
@@ -373,13 +403,13 @@ export default function ExpensesPage() {
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
               <Plus className="w-4 h-4 text-accent" /> Quick Add Today&apos;s Expense
             </h3>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
               <select value={expForm.categoryId} onChange={e => setExpForm(f => ({ ...f, categoryId: e.target.value }))}
-                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm flex-1 min-w-[140px] focus:outline-none focus:border-accent/50">
+                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm w-full sm:col-span-3 focus:outline-none focus:border-accent/50">
                 <option value="">Category</option>
                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <div className="relative flex-1 min-w-[120px]">
+              <div className="relative w-full sm:col-span-2">
                 <IndianRupee className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
                 <input type="number" placeholder="Amount" min="1" value={expForm.amount}
                   onChange={e => setExpForm(f => ({ ...f, amount: e.target.value }))}
@@ -387,19 +417,51 @@ export default function ExpensesPage() {
               </div>
               <input type="text" placeholder="Description (e.g. Teak wood 50kg)" value={expForm.description}
                 onChange={e => setExpForm(f => ({ ...f, description: e.target.value }))}
-                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm flex-[2] min-w-[180px] focus:outline-none focus:border-accent/50" />
+                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm w-full sm:col-span-4 focus:outline-none focus:border-accent/50" />
               <select value={expForm.paymentMode} onChange={e => setExpForm(f => ({ ...f, paymentMode: e.target.value }))}
-                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm min-w-[110px] focus:outline-none focus:border-accent/50">
+                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm w-full sm:col-span-2 focus:outline-none focus:border-accent/50">
                 {PAYMENT_MODES.map(m => <option key={m}>{m}</option>)}
               </select>
               <input type="text" placeholder="Vendor (optional)" value={expForm.vendor}
                 onChange={e => setExpForm(f => ({ ...f, vendor: e.target.value }))}
-                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm flex-1 min-w-[130px] focus:outline-none focus:border-accent/50" />
-              <button onClick={handleAddExpense} disabled={!expForm.categoryId || !expForm.amount || !expForm.description || submitting}
-                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 flex items-center gap-1.5">
+                className="px-3 py-2 bg-surface border border-border rounded-xl text-sm w-full sm:col-span-3 focus:outline-none focus:border-accent/50" />
+              <div className="flex items-center gap-2 w-full sm:col-span-3">
+                <label className={`px-3 py-2 bg-surface border border-dashed border-border rounded-xl text-xs font-medium text-muted flex items-center gap-2 cursor-pointer transition-colors ${receiptUploading ? 'opacity-60 cursor-not-allowed' : 'hover:border-accent/50 hover:text-foreground'}`}>
+                  {receiptUploading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Paperclip className="w-3.5 h-3.5" />}
+                  <span>{expForm.receipt ? 'Receipt attached' : 'Attach receipt'}</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={receiptUploading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      handleReceiptUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+                {expForm.receipt && (
+                  <div className="flex items-center gap-1.5">
+                    <a href={expForm.receipt} target="_blank" rel="noreferrer"
+                      className="px-2 py-1 rounded-lg text-[11px] font-medium text-accent hover:text-accent-hover border border-border hover:border-accent/40 flex items-center gap-1">
+                      <Eye className="w-3 h-3" /> View
+                    </a>
+                    <button type="button" onClick={clearReceipt}
+                      className="p-1.5 rounded-lg border border-border text-muted hover:text-red-600 hover:border-red-500/40 transition-colors">
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button onClick={handleAddExpense} disabled={!expForm.categoryId || !expForm.amount || !expForm.description || submitting || receiptUploading}
+                className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 flex items-center justify-center gap-1.5 w-full sm:col-span-2 sm:w-auto">
                 <Plus className="w-3.5 h-3.5" /> Add
               </button>
             </div>
+            {receiptError && (
+              <p className="text-[11px] text-red-600 mt-2">{receiptError}</p>
+            )}
           </div>
 
           {/* Today's list */}
@@ -419,22 +481,35 @@ export default function ExpensesPage() {
                 {todayExpenses.map(exp => {
                   const PayIcon = PAYMENT_ICONS[exp.paymentMode] || Receipt;
                   return (
-                    <div key={exp.id} className="flex items-center gap-3 px-5 py-3 hover:bg-surface-hover transition-colors">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${exp.categoryColor}20` }}>
-                        <CatIcon name={exp.categoryIcon} className="w-4 h-4" style={{ color: exp.categoryColor }} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{exp.description}</p>
-                        <div className="flex items-center gap-2 text-[11px] text-muted">
-                          <span>{exp.categoryName}</span>
-                          {exp.vendor && <><span className="text-border">·</span><span>{exp.vendor}</span></>}
+                    <div key={exp.id} className="flex flex-col gap-2 px-5 py-3 hover:bg-surface-hover transition-colors sm:flex-row sm:items-center">
+                      <div className="flex items-start gap-3 min-w-0 sm:flex-1">
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${exp.categoryColor}20` }}>
+                          <CatIcon name={exp.categoryIcon} className="w-4 h-4" style={{ color: exp.categoryColor }} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{exp.description}</p>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+                            <span className="truncate max-w-[160px] sm:max-w-[240px]">{exp.categoryName}</span>
+                            {exp.vendor && (
+                              <>
+                                <span className="text-border">·</span>
+                                <span className="truncate max-w-[160px] sm:max-w-[240px]">{exp.vendor}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2 sm:ml-auto sm:flex-nowrap">
                         <span className="px-2 py-0.5 rounded-lg text-[10px] font-medium bg-surface border border-border text-muted flex items-center gap-1">
                           <PayIcon className="w-3 h-3" /> {exp.paymentMode}
                         </span>
                         <span className="text-sm font-bold text-red-600 w-24 text-right">{formatCurrency(exp.amount)}</span>
+                        {exp.receipt && (
+                          <a href={exp.receipt} target="_blank" rel="noreferrer"
+                            className="p-1 text-muted hover:text-accent transition-colors" title="View receipt">
+                            <Eye className="w-3.5 h-3.5" />
+                          </a>
+                        )}
                         <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-muted hover:text-red-600 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -561,9 +636,17 @@ export default function ExpensesPage() {
                         </td>
                         <td className="text-sm font-bold text-red-600">{formatCurrency(exp.amount)}</td>
                         <td>
-                          <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-muted hover:text-red-600 transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {exp.receipt && (
+                              <a href={exp.receipt} target="_blank" rel="noreferrer"
+                                className="p-1 text-muted hover:text-accent transition-colors" title="View receipt">
+                                <Eye className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                            <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-muted hover:text-red-600 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1062,6 +1145,45 @@ export default function ExpensesPage() {
             </div>
           </div>
           <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Receipt (optional)</label>
+            <div className="flex items-center gap-3 flex-wrap">
+              {expForm.receipt && (
+                <div className="relative w-20 h-20 rounded-xl overflow-hidden border border-border">
+                  <img src={expForm.receipt} alt="Receipt preview" className="w-full h-full object-cover" />
+                  <button type="button" onClick={clearReceipt}
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              <label className={`w-28 h-20 rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center text-[11px] text-muted cursor-pointer transition-colors ${receiptUploading ? 'opacity-60 cursor-not-allowed' : 'hover:border-accent/50 hover:text-foreground'}`}>
+                {receiptUploading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Paperclip className="w-4 h-4" />}
+                <span className="mt-1">{expForm.receipt ? 'Replace' : 'Upload'}</span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={receiptUploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    handleReceiptUpload(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              {expForm.receipt && (
+                <a href={expForm.receipt} target="_blank" rel="noreferrer"
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-accent hover:text-accent-hover border border-border hover:border-accent/40 flex items-center gap-1">
+                  <Eye className="w-3.5 h-3.5" /> View
+                </a>
+              )}
+            </div>
+            <p className="text-[10px] text-muted mt-1">JPG, PNG, WebP up to 10MB.</p>
+            {receiptError && (
+              <p className="text-[11px] text-red-600 mt-1">{receiptError}</p>
+            )}
+          </div>
+          <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Notes (optional)</label>
             <textarea rows={2} placeholder="Additional notes..." value={expForm.notes}
               onChange={e => setExpForm(f => ({ ...f, notes: e.target.value }))}
@@ -1069,7 +1191,7 @@ export default function ExpensesPage() {
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setShowAddExpense(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
-            <button onClick={handleAddExpense} disabled={submitting || !expForm.categoryId || !expForm.amount || !expForm.description}
+            <button onClick={handleAddExpense} disabled={submitting || !expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40">
               {submitting ? 'Adding...' : 'Add Expense'}
             </button>
