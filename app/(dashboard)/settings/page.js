@@ -1,13 +1,15 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw } from 'lucide-react';
+import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings';
 import { getStaff, createStaff, assignStaffLogin, updateStaffMember } from '@/app/actions/staff';
 import { getChannelConfigs, upsertChannelConfig } from '@/app/actions/channels';
 import { testSmtp, sendSmtpTestEmail } from '@/app/actions/email-campaigns';
 import { runStockCheck } from '@/app/actions/notifications';
+import { updateAccountCredentials } from '@/app/actions/auth';
+import { useSession } from '@/components/AuthProvider';
 
 const channelDefinitions = [
   {
@@ -90,6 +92,7 @@ const getInitialEditForm = () => ({
 });
 
 export default function SettingsPage() {
+  const { data: session, update: refreshSession } = useSession();
   const [activeTab, setActiveTab] = useState('store');
   const [loading, setLoading] = useState(true);
   const [storeSettings, setStoreSettings] = useState(null);
@@ -116,6 +119,21 @@ export default function SettingsPage() {
   const [gpsDetected, setGpsDetected] = useState(null); // { lat, lng, address }
   const [stockCheckRunning, setStockCheckRunning] = useState(false);
   const [stockCheckResult, setStockCheckResult] = useState(null);
+
+  const [accountForm, setAccountForm] = useState({
+    currentPassword: '',
+    newUsername: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountError, setAccountError] = useState('');
+  const [accountSuccess, setAccountSuccess] = useState('');
+  const [showAccountPasswords, setShowAccountPasswords] = useState({
+    current: false,
+    new: false,
+    confirm: false,
+  });
 
   // Channel integration state
   const [channelConfigs, setChannelConfigs] = useState({});
@@ -432,8 +450,63 @@ export default function SettingsPage() {
     }
   };
 
+  const handleAccountUpdate = async (e) => {
+    e.preventDefault();
+    setAccountError('');
+    setAccountSuccess('');
+
+    const currentPassword = accountForm.currentPassword.trim();
+    const newUsername = accountForm.newUsername.trim();
+    const newPassword = accountForm.newPassword;
+    const confirmPassword = accountForm.confirmPassword;
+
+    if (!currentPassword) {
+      setAccountError('Current password is required');
+      return;
+    }
+
+    if (!newUsername && !newPassword) {
+      setAccountError('Enter a new username or a new password');
+      return;
+    }
+
+    if (newPassword && newPassword.length < 6) {
+      setAccountError('New password must be at least 6 characters');
+      return;
+    }
+
+    if (newPassword && newPassword !== confirmPassword) {
+      setAccountError('New passwords do not match');
+      return;
+    }
+
+    setAccountSaving(true);
+    try {
+      const res = await updateAccountCredentials({
+        currentPassword,
+        newUsername,
+        newPassword,
+      });
+
+      if (!res.success) {
+        setAccountError(res.error || 'Failed to update credentials');
+        return;
+      }
+
+      setAccountSuccess('Account updated successfully');
+      setAccountForm({ currentPassword: '', newUsername: '', newPassword: '', confirmPassword: '' });
+      await refreshSession();
+    } catch (err) {
+      console.error('Account update error:', err);
+      setAccountError('Failed to update credentials. Please try again.');
+    } finally {
+      setAccountSaving(false);
+    }
+  };
+
   const tabs = [
     { key: 'store', label: 'Store Profile', icon: Store },
+    { key: 'account', label: 'Account', icon: User },
     { key: 'team', label: 'Team', icon: Users },
     { key: 'integrations', label: 'Integrations', icon: Link2 },
     { key: 'email', label: 'Email Setup', icon: Mail },
@@ -590,6 +663,117 @@ export default function SettingsPage() {
                     </span>
                   )}
                 </div>
+              </form>
+            </div>
+          )}
+
+          {activeTab === 'account' && (
+            <div className="glass-card p-4 sm:p-6">
+              <h2 className="text-lg font-semibold text-foreground mb-1">Account Security</h2>
+              <p className="text-xs text-muted mb-4">Update your login username and password. Current password is required for any changes.</p>
+
+              <form onSubmit={handleAccountUpdate} className="space-y-4 max-w-lg">
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Current Username</label>
+                  <input
+                    type="text"
+                    value={session?.user?.email || ''}
+                    disabled
+                    className="w-full bg-surface-hover text-muted"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1.5">New Username (optional)</label>
+                  <input
+                    type="text"
+                    value={accountForm.newUsername}
+                    onChange={(e) => setAccountForm(prev => ({ ...prev, newUsername: e.target.value }))}
+                    placeholder="e.g. admin123 or name@example.com"
+                    autoComplete="username"
+                    className="w-full"
+                  />
+                  <p className="text-[11px] text-muted mt-1">Usernames can be a valid email or a simple handle like <strong>admin123</strong>.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Current Password</label>
+                  <div className="relative">
+                    <input
+                      type={showAccountPasswords.current ? 'text' : 'password'}
+                      value={accountForm.currentPassword}
+                      onChange={(e) => setAccountForm(prev => ({ ...prev, currentPassword: e.target.value }))}
+                      autoComplete="current-password"
+                      required
+                      className="w-full pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAccountPasswords(prev => ({ ...prev, current: !prev.current }))}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                    >
+                      {showAccountPasswords.current ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">New Password (optional)</label>
+                    <div className="relative">
+                      <input
+                        type={showAccountPasswords.new ? 'text' : 'password'}
+                        value={accountForm.newPassword}
+                        onChange={(e) => setAccountForm(prev => ({ ...prev, newPassword: e.target.value }))}
+                        autoComplete="new-password"
+                        placeholder="Minimum 6 characters"
+                        className="w-full pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAccountPasswords(prev => ({ ...prev, new: !prev.new }))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                      >
+                        {showAccountPasswords.new ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Confirm New Password</label>
+                    <div className="relative">
+                      <input
+                        type={showAccountPasswords.confirm ? 'text' : 'password'}
+                        value={accountForm.confirmPassword}
+                        onChange={(e) => setAccountForm(prev => ({ ...prev, confirmPassword: e.target.value }))}
+                        autoComplete="new-password"
+                        placeholder="Re-enter new password"
+                        className="w-full pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAccountPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-foreground"
+                      >
+                        {showAccountPasswords.confirm ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {accountError && (
+                  <p className="text-xs text-danger">{accountError}</p>
+                )}
+                {accountSuccess && (
+                  <p className="text-xs text-success">{accountSuccess}</p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={accountSaving}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
+                >
+                  {accountSaving ? 'Updating...' : 'Update Account'}
+                </button>
               </form>
             </div>
           )}

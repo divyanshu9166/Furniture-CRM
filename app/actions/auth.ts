@@ -4,7 +4,20 @@ import { prisma } from '@/lib/db'
 import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import type { UserRole } from '@prisma/client'
-import { requireRole } from '@/lib/auth-helpers'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
+import { createSession } from '@/lib/session'
+
+const emailSchema = z.string().email()
+const loginUsernameSchema = z
+  .string()
+  .trim()
+  .min(3, 'Login username must be at least 3 characters')
+  .max(64, 'Login username must be at most 64 characters')
+  .refine((value) => {
+    const isEmail = emailSchema.safeParse(value).success
+    const isUsername = /^[A-Za-z0-9._-]+$/.test(value)
+    return isEmail || isUsername
+  }, 'Login username must be a valid email or username')
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -18,6 +31,12 @@ const updatePasswordSchema = z.object({
   userId: z.number(),
   oldPassword: z.string(),
   newPassword: z.string().min(6),
+})
+
+const updateAccountSchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  newUsername: z.string().optional(),
+  newPassword: z.string().optional(),
 })
 
 export async function createUser(data: unknown) {
@@ -81,6 +100,68 @@ export async function listUsers() {
   })
 
   return { success: true, data: users }
+}
+
+export async function updateAccountCredentials(data: unknown) {
+  let session
+  try { session = await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
+
+  const parsed = updateAccountSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  const userId = Number(session.user.id)
+  if (!Number.isFinite(userId)) return { success: false, error: 'Invalid session user' }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) return { success: false, error: 'User not found' }
+
+  const valid = await bcrypt.compare(parsed.data.currentPassword, user.hashedPassword)
+  if (!valid) return { success: false, error: 'Incorrect current password' }
+
+  const rawUsername = parsed.data.newUsername?.trim() || ''
+  const normalizedUsername = rawUsername ? rawUsername.toLowerCase() : ''
+  const trimmedPassword = parsed.data.newPassword?.trim() || ''
+
+  if (!normalizedUsername && !trimmedPassword) {
+    return { success: false, error: 'Provide a new username or new password' }
+  }
+
+  const updates: { email?: string; hashedPassword?: string } = {}
+
+  if (normalizedUsername && normalizedUsername !== user.email) {
+    const usernameParsed = loginUsernameSchema.safeParse(normalizedUsername)
+    if (!usernameParsed.success) return { success: false, error: usernameParsed.error.issues[0].message }
+
+    const existing = await prisma.user.findUnique({ where: { email: normalizedUsername } })
+    if (existing && existing.id !== user.id) {
+      return { success: false, error: 'Login username is already in use' }
+    }
+    updates.email = normalizedUsername
+  }
+
+  if (trimmedPassword) {
+    if (trimmedPassword.length < 6) return { success: false, error: 'New password must be at least 6 characters' }
+    updates.hashedPassword = await bcrypt.hash(trimmedPassword, 12)
+  }
+
+  if (!Object.keys(updates).length) {
+    return { success: false, error: 'No changes detected' }
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: updates,
+  })
+
+  await createSession({
+    id: String(updated.id),
+    email: updated.email,
+    name: updated.name,
+    role: updated.role,
+    staffId: updated.staffId,
+  })
+
+  return { success: true, data: { email: updated.email } }
 }
 
 export async function toggleUserActive(userId: number) {
