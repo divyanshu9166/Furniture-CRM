@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import {
-  Search, Plus, Truck, Users, RotateCcw, CheckCircle, XCircle,
+  Search, Plus, Truck, Users, RotateCcw, CheckCircle, XCircle, Trash2,
   Eye, FileText, ArrowDownCircle, Clock, AlertTriangle
 } from 'lucide-react'
 import {
@@ -12,6 +12,7 @@ import {
   sendPurchaseOrderToSupplier, updatePurchaseOrder
 } from '@/app/actions/purchases'
 import { getProducts } from '@/app/actions/products'
+import { movePurchaseOrderToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
 
 const poStatusColors = {
@@ -263,6 +264,13 @@ export default function PurchasesPage() {
     else alert(res.error)
   }
 
+  const handleMovePOToDraft = async (id) => {
+    if (!confirm('Move this purchase order to drafts? It will be permanently deleted after 30 days.')) return
+    const res = await movePurchaseOrderToDraft(id)
+    if (res.success) loadData()
+    else alert(res.error)
+  }
+
   const handleSendPOToSupplier = async (id) => {
     const res = await sendPurchaseOrderToSupplier(id)
     if (res.success) {
@@ -467,6 +475,7 @@ export default function PurchasesPage() {
                           <span className="text-sm font-bold">₹</span>
                         </button>
                       )}
+                      {po.status !== 'CANCELLED' && <button onClick={() => handleMovePOToDraft(po.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-400" title="Move to Draft"><Trash2 className="w-4 h-4" /></button>}
                       {po.status === 'DRAFT' && <button onClick={() => handleCancelPO(po.id)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-4 h-4" /></button>}
                     </div>
                   </td>
@@ -641,6 +650,17 @@ export default function PurchasesPage() {
                     className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20"
                   >
                     Cancel PO
+                  </button>
+                )}
+                {selectedPO.status !== 'CANCELLED' && (
+                  <button
+                    onClick={() => {
+                      handleMovePOToDraft(selectedPO.id)
+                      setShowDetailModal(false)
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 text-xs font-medium hover:bg-red-500/20"
+                  >
+                    Move to Draft
                   </button>
                 )}
               </div>

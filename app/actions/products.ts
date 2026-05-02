@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createProductSchema, updateStockSchema } from '@/lib/validations/product'
+import { moveProductToDraft } from './drafts'
 
 export async function getProducts() {
   const products = await prisma.product.findMany({
@@ -219,30 +220,5 @@ export async function getLowStockProducts() {
 }
 
 export async function deleteProduct(id: number) {
-  try {
-    // Check if product is used in any BOM items
-    const bomUsage = await prisma.bomItem.count({ where: { rawMaterialId: id } })
-    if (bomUsage > 0) {
-      return { success: false, error: `Cannot delete: this material is used in ${bomUsage} BOM(s). Remove it from those BOMs first.` }
-    }
-
-    // Check if product is a finished product in any BOM
-    const bomFinished = await prisma.billOfMaterials.count({ where: { finishedProductId: id } })
-    if (bomFinished > 0) {
-      return { success: false, error: 'Cannot delete: this product is used as a finished product in a BOM.' }
-    }
-
-    // Check if product is in any production order
-    const prodUsage = await prisma.productionOrder.count({ where: { finishedProductId: id } })
-    if (prodUsage > 0) {
-      return { success: false, error: 'Cannot delete: this product is tied to production orders.' }
-    }
-
-    await prisma.product.delete({ where: { id } })
-    revalidatePath('/inventory')
-    revalidatePath('/manufacturing')
-    return { success: true }
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to delete product' }
-  }
+  return moveProductToDraft(id)
 }

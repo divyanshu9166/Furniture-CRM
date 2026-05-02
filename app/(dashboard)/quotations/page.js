@@ -15,9 +15,11 @@ import {
   Printer,
   Search,
   Upload,
+  Trash2,
   User,
   X,
 } from 'lucide-react'
+import { moveQuotationToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
 import { createQuotation, getQuotationStats, getQuotations, updateQuotation, updateQuotationStatus } from '@/app/actions/quotations'
 import { getProducts } from '@/app/actions/products'
@@ -820,6 +822,21 @@ export default function QuotationsPage() {
     }
   }
 
+  const handleMoveToDraft = async quotation => {
+    if (!confirm('Move this quotation to drafts? It will be permanently deleted after 30 days.')) return
+
+    const result = await moveQuotationToDraft(quotation.dbId)
+    if (!result.success) {
+      alert(result.error || 'Failed to move quotation to drafts')
+      return
+    }
+
+    await loadData()
+    if (selectedQuotation?.dbId === quotation.dbId) {
+      setSelectedQuotation(null)
+    }
+  }
+
   const handlePrint = quotation => {
     const printWindow = window.open('', '_blank', 'width=900,height=1200')
     if (!printWindow) return
@@ -978,6 +995,13 @@ export default function QuotationsPage() {
                         title="Print"
                       >
                         <Printer className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleMoveToDraft(quotation)}
+                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-600 transition-colors"
+                        title="Move to Draft"
+                      >
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </td>
@@ -1438,6 +1462,12 @@ export default function QuotationsPage() {
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-accent hover:border-accent/40"
                 >
                   <Printer className="w-3.5 h-3.5" /> Print
+                </button>
+                <button
+                  onClick={() => handleMoveToDraft(selectedQuotation)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-500/20 text-xs text-red-700 hover:bg-red-500/10"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Move to Draft
                 </button>
               </div>
             </div>

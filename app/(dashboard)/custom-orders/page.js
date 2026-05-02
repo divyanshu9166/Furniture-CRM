@@ -13,7 +13,7 @@ import {
 import Modal from '@/components/Modal';
 import {
   getCustomOrders, createCustomOrder, updateCustomOrderStatus,
-  scheduleVisit, updateMeasurements, updateReferenceImages,
+  scheduleVisit, updateMeasurements, updateMeasurementsWithPhotos, updateReferenceImages,
   addTimelineEntry, sendProgressNotification,
 } from '@/app/actions/custom-orders';
 import { moveCustomOrderToDraft } from '@/app/actions/drafts';
@@ -79,6 +79,9 @@ export default function CustomOrdersPage() {
   // Measurements modal
   const [showMeasurements, setShowMeasurements] = useState(false);
   const [measurementOrderId, setMeasurementOrderId] = useState(null);
+  const [measurementPhotos, setMeasurementPhotos] = useState([]);
+  const [uploadingMeasurementPhotos, setUploadingMeasurementPhotos] = useState(false);
+  const measurementPhotoInputRef = useRef(null);
 
   // Reference image upload
   const [uploadingRef, setUploadingRef] = useState(false);
@@ -168,26 +171,86 @@ export default function CustomOrdersPage() {
     e.preventDefault();
     const form = new FormData(e.target);
     setSaving(true);
-    const res = await updateMeasurements({
-      customOrderId: measurementOrderId,
-      measurements: {
-        length: form.get('length') || undefined,
-        width: form.get('width') || undefined,
-        height: form.get('height') || undefined,
-        depth: form.get('depth') || undefined,
-        countertop: form.get('countertop') || undefined,
-        notes: form.get('notes') || undefined,
-      },
-    });
-    if (res.success) {
-      await reload();
-      if (selectedOrder?.dbId === measurementOrderId) {
-        const updated = (await getCustomOrders()).data?.find(o => o.dbId === measurementOrderId);
-        if (updated) setSelectedOrder(updated);
+    
+    const measurements = {
+      length: form.get('length') || undefined,
+      width: form.get('width') || undefined,
+      height: form.get('height') || undefined,
+      depth: form.get('depth') || undefined,
+      countertop: form.get('countertop') || undefined,
+      notes: form.get('notes') || undefined,
+    };
+
+    try {
+      // If there are photos to upload, upload them first
+      if (measurementPhotos.length > 0) {
+        setUploadingMeasurementPhotos(true);
+        const photoFormData = new FormData();
+        photoFormData.set('folder', 'custom-orders/measurements');
+        measurementPhotos.forEach(p => {
+          if (p.file) photoFormData.append('files', p.file);
+        });
+        
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: photoFormData });
+        const uploadData = await uploadRes.json();
+        
+        if (uploadData.success && uploadData.urls?.length > 0) {
+          // Update measurements with photos
+          const res = await updateMeasurementsWithPhotos(measurementOrderId, measurements, uploadData.urls);
+          if (res.success) {
+            await reload();
+            if (selectedOrder?.dbId === measurementOrderId) {
+              const updated = (await getCustomOrders()).data?.find(o => o.dbId === measurementOrderId);
+              if (updated) setSelectedOrder(updated);
+            }
+            setShowMeasurements(false);
+            setMeasurementPhotos([]);
+          }
+        } else {
+          alert(uploadData.error || 'Photo upload failed. Measurements saved without photos.');
+          // Still save measurements without photos
+          const res = await updateMeasurements({ customOrderId: measurementOrderId, measurements });
+          if (res.success) {
+            await reload();
+            if (selectedOrder?.dbId === measurementOrderId) {
+              const updated = (await getCustomOrders()).data?.find(o => o.dbId === measurementOrderId);
+              if (updated) setSelectedOrder(updated);
+            }
+            setShowMeasurements(false);
+            setMeasurementPhotos([]);
+          }
+        }
+      } else {
+        // No photos, just update measurements
+        const res = await updateMeasurements({ customOrderId: measurementOrderId, measurements });
+        if (res.success) {
+          await reload();
+          if (selectedOrder?.dbId === measurementOrderId) {
+            const updated = (await getCustomOrders()).data?.find(o => o.dbId === measurementOrderId);
+            if (updated) setSelectedOrder(updated);
+          }
+          setShowMeasurements(false);
+        }
       }
-      setShowMeasurements(false);
+    } finally {
+      setSaving(false);
+      setUploadingMeasurementPhotos(false);
     }
-    setSaving(false);
+  };
+
+  const handleMeasurementPhotoAdd = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    const newPhotos = files.map(file => ({ file, preview: URL.createObjectURL(file) }));
+    setMeasurementPhotos(prev => [...prev, ...newPhotos].slice(0, 5));
+    e.target.value = '';
+  };
+
+  const removeMeasurementPhoto = (idx) => {
+    setMeasurementPhotos(prev => {
+      URL.revokeObjectURL(prev[idx].preview);
+      return prev.filter((_, i) => i !== idx);
+    });
   };
 
   // ─── REFERENCE IMAGE UPLOAD ───────────────────────────
@@ -586,6 +649,16 @@ export default function CustomOrdersPage() {
                       ))}
                     </div>
                     {meas.notes && <p className="text-xs text-muted mt-3 pt-2 border-t border-border">{meas.notes}</p>}
+                    {selectedOrder?.photos?.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-border">
+                        <p className="text-[10px] text-muted mb-2">Measurement Photos ({selectedOrder.photos.length})</p>
+                        <div className="flex gap-2 flex-wrap">
+                          {selectedOrder.photos.map((url, idx) => (
+                            <img key={idx} src={url} alt="" className="w-16 h-16 rounded-lg object-cover border border-border" />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <p className="text-xs text-muted">No measurements recorded yet</p>
@@ -784,7 +857,7 @@ export default function CustomOrdersPage() {
       {/* ═══════════════════════════════════════════════════
           UPDATE MEASUREMENTS MODAL
           ═══════════════════════════════════════════════════ */}
-      <Modal isOpen={showMeasurements} onClose={() => setShowMeasurements(false)} title="Update Measurements" size="md">
+      <Modal isOpen={showMeasurements} onClose={() => { setShowMeasurements(false); setMeasurementPhotos([]); }} title="Update Measurements" size="md">
         {(() => {
           const order = customOrders.find(o => o.dbId === measurementOrderId);
           const meas = order?.measurements || {};
@@ -816,10 +889,30 @@ export default function CustomOrdersPage() {
                 <label className="block text-xs text-muted mb-1">Measurement Notes</label>
                 <textarea name="notes" rows={2} defaultValue={meas.notes || ''} placeholder="Additional details..." className="w-full px-3 py-2.5 rounded-xl text-sm resize-none" />
               </div>
+              <div className="border-t border-border pt-3">
+                <label className="block text-xs font-medium text-muted mb-2">Measurement Photos (optional, max 5)</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {measurementPhotos.map((photo, idx) => (
+                    <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border group">
+                      <img src={photo.preview} alt="" className="w-full h-full object-cover" />
+                      <button type="button" onClick={() => removeMeasurementPhoto(idx)} className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                        <X className="w-4 h-4 text-white" />
+                      </button>
+                    </div>
+                  ))}
+                  {measurementPhotos.length < 5 && (
+                    <button type="button" onClick={() => measurementPhotoInputRef?.current?.click()} className="w-16 h-16 rounded-lg border-2 border-dashed border-border hover:border-accent/50 flex flex-col items-center justify-center gap-1 text-muted hover:text-accent transition-colors">
+                      <Camera className="w-4 h-4" />
+                      <span className="text-[9px]">Add</span>
+                    </button>
+                  )}
+                </div>
+                <input ref={measurementPhotoInputRef} type="file" accept="image/*" multiple onChange={handleMeasurementPhotoAdd} className="hidden" />
+              </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowMeasurements(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
-                <button type="submit" disabled={saving} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
-                  {saving ? 'Saving...' : 'Save Measurements'}
+                <button type="button" onClick={() => { setShowMeasurements(false); setMeasurementPhotos([]); }} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
+                <button type="submit" disabled={saving || uploadingMeasurementPhotos} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
+                  {uploadingMeasurementPhotos ? 'Uploading...' : saving ? 'Saving...' : 'Save Measurements'}
                 </button>
               </div>
             </form>

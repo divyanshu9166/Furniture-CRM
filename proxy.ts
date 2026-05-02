@@ -6,6 +6,7 @@ const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/a
 
 // Role-based route restrictions
 const routePermissions: Record<string, string[]> = {
+  '/staff-portal': ['STAFF'],
   '/settings': ['ADMIN'],
   '/staff': ['ADMIN', 'MANAGER'],
   '/payroll': ['ADMIN', 'MANAGER'],

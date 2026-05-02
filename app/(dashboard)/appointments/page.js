@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Calendar as CalIcon, Plus, Clock, User, Check, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalIcon, Plus, Clock, User, Check, X, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { getAppointments, createAppointment, updateAppointmentStatus, cancelAppointment } from '@/app/actions/appointments';
+import { moveAppointmentToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
 
 const statusColors = {
@@ -59,6 +60,13 @@ export default function AppointmentsPage() {
     if (!confirm('Cancel this appointment?')) return;
     await cancelAppointment(id);
     await refresh();
+  };
+
+  const handleMoveToDraft = async (id) => {
+    if (!confirm('Move this appointment to drafts? It will be permanently deleted after 30 days.')) return;
+    const res = await moveAppointmentToDraft(id);
+    if (res.success) await refresh();
+    else alert(res.error || 'Failed to move appointment to drafts');
   };
 
   if (loading) {
@@ -157,6 +165,10 @@ export default function AppointmentsPage() {
                         className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-success-light text-success text-xs font-medium hover:bg-success/20 transition-colors">
                         <Check className="w-3.5 h-3.5" /> Complete
                       </button>
+                      <button onClick={() => handleMoveToDraft(apt.id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-red-500/10 text-red-700 text-xs font-medium hover:bg-red-500/20 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" /> Draft
+                      </button>
                       <button onClick={() => handleCancel(apt.id)}
                         className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-danger-light text-danger text-xs font-medium hover:bg-danger/20 transition-colors">
                         <X className="w-3.5 h-3.5" /> Cancel
@@ -209,6 +221,10 @@ export default function AppointmentsPage() {
                         <button onClick={() => handleComplete(apt.id)} title="Mark Complete"
                           className="p-1.5 rounded-lg bg-success-light text-success hover:bg-success/20 transition-colors">
                           <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleMoveToDraft(apt.id)} title="Move to Draft"
+                          className="p-1.5 rounded-lg bg-red-500/10 text-red-700 hover:bg-red-500/20 transition-colors">
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => handleCancel(apt.id)} title="Cancel"
                           className="p-1.5 rounded-lg bg-danger-light text-danger hover:bg-danger/20 transition-colors">

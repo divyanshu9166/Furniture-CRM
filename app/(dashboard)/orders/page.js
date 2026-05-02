@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Search, Truck, Package, Clock, DollarSign,
   RefreshCw, Plus, Printer, X, Settings2, Edit3, Check,
-  Store, Unlink, Link2, ExternalLink, Download,
+  Store, Unlink, Link2, ExternalLink, Download, Trash2,
 } from 'lucide-react';
 import { getOrders, createOrder } from '@/app/actions/orders';
 import { getMarketplaceChannels } from '@/app/actions/settings';
@@ -14,6 +14,7 @@ import { getGodowns } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
+import { moveOrderToDraft } from '@/app/actions/drafts';
 import { useSearchParams } from 'next/navigation';
 
 const orderStatuses = ['All', 'Confirmed', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
@@ -279,6 +280,17 @@ function OrdersPageInner() {
     }
   };
 
+  const handleMoveOrderToDraft = async (order) => {
+    if (!confirm('Move this order to drafts? It will be permanently deleted after 30 days.')) return;
+    const res = await moveOrderToDraft(order.dbId);
+    if (!res?.success) {
+      alert(res?.error || 'Failed to move order to drafts');
+      return;
+    }
+    const refreshed = await getOrders();
+    if (refreshed.success) setOrders(refreshed.data);
+  };
+
   const selectOrderCustomer = async (contact) => {
     setOrderCustomer({ name: contact.name, phone: contact.phone });
     setShowOrderCustomerDropdown(false);
@@ -422,6 +434,10 @@ function OrdersPageInner() {
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
                       <Printer className="w-3.5 h-3.5" />
                     </button>
+                    <button onClick={() => handleMoveOrderToDraft(order)} title="Move to Draft"
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-700 hover:bg-red-500/20 transition-all">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -459,10 +475,16 @@ function OrdersPageInner() {
                     <td><span className={`badge ${paymentColors[order.payment]}`}>{order.payment}</span></td>
                     <td className="text-muted">{order.date}</td>
                     <td>
-                      <button onClick={() => openSlipModal(order)} title="Print Packaging Slip"
-                        className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
-                        <Printer className="w-3.5 h-3.5" /> Slip
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => openSlipModal(order)} title="Print Packaging Slip"
+                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
+                          <Printer className="w-3.5 h-3.5" /> Slip
+                        </button>
+                        <button onClick={() => handleMoveOrderToDraft(order)} title="Move to Draft"
+                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-red-500/10 border border-red-500/20 text-red-700 hover:bg-red-500/20 transition-all">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

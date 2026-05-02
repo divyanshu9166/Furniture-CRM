@@ -5,7 +5,7 @@ import {
   Search, Plus, Receipt, CreditCard, Banknote,
   FileText, Printer, ShoppingBag,
   Percent, Calculator, CheckCircle2, Clock, AlertCircle,
-  X, Package, User, Phone, Minus, IndianRupee,
+  X, Package, User, Phone, Minus, IndianRupee, MapPin,
   Trash2, Tag, Calendar, Download, Ban,
   ArrowUpRight, ArrowDownRight, TrendingUp,
   RotateCcw, PauseCircle, PlayCircle, ChevronDown,
@@ -20,6 +20,7 @@ import {
   cancelInvoice, createCreditNote, finalizeHeldInvoice,
   searchContacts, getInvoiceStats, getCustomerProfile,
 } from '@/app/actions/invoices';
+import { moveInvoiceToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
 import { getStaff } from '@/app/actions/staff';
 import { getStoreSettings } from '@/app/actions/settings';
@@ -90,7 +91,7 @@ export default function BillingPage() {
 
   // POS state
   const [posItems, setPosItems] = useState([]);
-  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '' });
+  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
   const [posDiscount, setPosDiscount] = useState(0);
   const [posDiscountType, setPosDiscountType] = useState('flat');
   const [posTransportCost, setPosTransportCost] = useState(0);
@@ -169,7 +170,7 @@ export default function BillingPage() {
   }, []);
 
   const selectCustomer = async (contact) => {
-    setPosCustomer({ name: contact.name, phone: contact.phone });
+    setPosCustomer({ name: contact.name, phone: contact.phone, address: contact.address || '' });
     setShowCustomerDropdown(false);
     setCustomerSuggestions([]);
     setCustomerProfileLoading(true);
@@ -256,7 +257,7 @@ export default function BillingPage() {
 
   const clearPOS = () => {
     setPosItems([]);
-    setPosCustomer({ name: '', phone: '' });
+    setPosCustomer({ name: '', phone: '', address: '' });
     setCustomerProfile(null);
     setPosDiscount(0);
     setPosDiscountType('flat');
@@ -312,6 +313,7 @@ export default function BillingPage() {
       const res = await createInvoice({
         customer: posCustomer.name,
         phone: posCustomer.phone,
+        address: posCustomer.address || undefined,
         items: posItems.map(i => ({ productId: i.id, name: i.name, sku: i.sku || '', quantity: i.qty, price: i.price })),
         discount: posDiscount,
         discountType: posDiscountType === 'flat' ? 'flat' : 'percent',
@@ -379,6 +381,26 @@ export default function BillingPage() {
         await loadData();
       } else {
         alert(res.error || 'Failed to cancel invoice');
+      }
+    } catch {
+      alert('Something went wrong');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleMoveInvoiceToDraft = async () => {
+    if (!selectedInvoice) return;
+    if (!confirm('Move this invoice to drafts? It will be permanently deleted after 30 days.')) return;
+    setSubmitting(true);
+    try {
+      const res = await moveInvoiceToDraft(selectedInvoice.dbId);
+      if (res.success) {
+        setShowCancelConfirm(false);
+        setSelectedInvoice(null);
+        await loadData();
+      } else {
+        alert(res.error || 'Failed to move invoice to drafts');
       }
     } catch {
       alert('Something went wrong');
@@ -487,7 +509,7 @@ export default function BillingPage() {
         ${inv.invoiceStatus !== 'ACTIVE' ? `<div style="font-size:12px;color:#b91c1c;text-align:right;font-weight:600;margin-top:4px">${inv.invoiceStatus}</div>` : ''}</div>
       </div>
       <div class="meta">
-        <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div></div>
+        <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}</div>
         <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
         ${inv.salesperson ? `<div style="font-size:12px;color:#888;margin-top:2px">Salesperson: ${inv.salesperson}</div>` : ''}
         ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
@@ -995,6 +1017,13 @@ export default function BillingPage() {
                     onChange={e => handleCustomerSearch(e.target.value, 'phone')}
                     className="w-full pl-9 pr-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50" />
                 </div>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-3 w-3.5 h-3.5 text-muted" />
+                  <textarea placeholder="Address (Optional)" value={posCustomer.address || ''}
+                    onChange={e => setPosCustomer({ ...posCustomer, address: e.target.value })}
+                    rows={2}
+                    className="w-full pl-9 pr-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
+                </div>
                 {/* Customer suggestions dropdown */}
                 {showCustomerDropdown && customerSuggestions.length > 0 && (
                   <div className="bg-surface border border-border rounded-xl shadow-lg max-h-[180px] overflow-y-auto">
@@ -1297,6 +1326,7 @@ export default function BillingPage() {
                   <p className="text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">Bill To</p>
                   <p className="text-sm font-medium text-foreground">{selectedInvoice.customer}</p>
                   <p className="text-xs text-muted">{selectedInvoice.phone}</p>
+                  {selectedInvoice.address && <p className="text-xs text-muted mt-0.5">{selectedInvoice.address}</p>}
                 </div>
                 <div className="text-right">
                   {selectedInvoice.salesperson && (
@@ -1426,6 +1456,10 @@ export default function BillingPage() {
                   <button onClick={() => { setCreditNoteData({ amount: '', reason: '' }); setShowCreditNoteModal(true); }}
                     className="flex items-center justify-center gap-2 px-4 py-2.5 bg-surface border border-border text-muted rounded-xl text-sm font-medium hover:text-purple-700 hover:border-purple-700/30 transition-colors">
                     <RotateCcw className="w-4 h-4" /> Credit Note
+                  </button>
+                  <button onClick={handleMoveInvoiceToDraft}
+                    className="flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500/10 border border-red-500/20 text-red-700 rounded-xl text-sm font-medium hover:bg-red-500/20 transition-colors">
+                    <Trash2 className="w-4 h-4" /> Move to Draft
                   </button>
                   <button onClick={() => setShowCancelConfirm(true)}
                     className="flex items-center justify-center gap-2 px-4 py-2.5 bg-surface border border-border text-muted rounded-xl text-sm font-medium hover:text-red-600 hover:border-red-600/30 transition-colors">

@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, ChevronRight, Bot, Clock, Trash2, Store } from 'lucide-react';
-import { getLeads, createLead, updateLeadStatus, deleteLead, addFollowUp } from '@/app/actions/leads';
+import { getLeads, createLead, updateLeadStatus, addFollowUp } from '@/app/actions/leads';
+import { moveLeadToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
 
 const pipelineStages = ['New', 'Contacted', 'Showroom Visit', 'Quotation', 'Won', 'Lost'];
@@ -83,10 +84,12 @@ export default function LeadsPage() {
   };
 
   const handleDelete = async (leadId) => {
-    if (!confirm('Delete this lead? This cannot be undone.')) return;
-    await deleteLead(leadId);
-    setSelectedLead(null);
-    await refresh();
+    if (!confirm('Move this lead to drafts? It will be permanently deleted after 30 days.')) return;
+    const res = await moveLeadToDraft(leadId);
+    if (res?.success) {
+      setSelectedLead(null);
+      await refresh();
+    }
   };
 
   const handleAddFollowUp = async () => {
@@ -355,7 +358,7 @@ export default function LeadsPage() {
             <div className="flex justify-end pt-2 border-t border-border">
               <button onClick={() => handleDelete(selectedLead.id)}
                 className="flex items-center gap-1.5 text-xs text-danger hover:text-danger/80 font-medium transition-colors">
-                <Trash2 className="w-3.5 h-3.5" /> Delete Lead
+                <Trash2 className="w-3.5 h-3.5" /> Move to Draft
               </button>
             </div>
           </div>

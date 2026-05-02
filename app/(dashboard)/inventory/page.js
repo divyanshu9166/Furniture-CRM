@@ -4,9 +4,10 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, Package, AlertTriangle, TrendingUp, Grid3x3, List,
   Warehouse, QrCode, RefreshCw, ArrowDown, ArrowUp, Bell,
-  CheckCircle2, XCircle, Clock, Layers, Boxes, Timer, MapPin, FileText
+  CheckCircle2, XCircle, Clock, Layers, Boxes, Timer, MapPin, FileText, Trash2
 } from 'lucide-react';
 import { getProducts, getCategories, getWarehouses, createProduct, updateStock } from '@/app/actions/products';
+import { moveProductToDraft } from '@/app/actions/drafts';
 import { getStockGroups, createStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
@@ -38,6 +39,17 @@ export default function InventoryPage() {
   const [batches, setBatches] = useState([]);
   const [agingData, setAgingData] = useState([]);
   const [showGroupModal, setShowGroupModal] = useState(false);
+
+  const handleMoveProductToDraft = async (productId) => {
+    if (!confirm('Move this product to drafts? It will be permanently deleted after 30 days.')) return;
+    const res = await moveProductToDraft(productId);
+    if (!res?.success) {
+      alert(res?.error || 'Failed to move product to drafts');
+      return;
+    }
+    const refreshed = await getProducts();
+    if (refreshed.success) setProducts(refreshed.data);
+  };
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [groupForm, setGroupForm] = useState({ name: '', parentId: '' });
   const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
@@ -253,6 +265,9 @@ export default function InventoryPage() {
                         <span className="absolute top-2 left-2 badge bg-accent text-white text-[10px]">Best Seller</span>
                       )}
                       <span className="absolute top-2 right-2 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors opacity-0 group-hover:opacity-100" title="Move to Draft">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                     <div className="p-4">
                       <div className="flex items-start justify-between mb-1">
@@ -341,9 +356,14 @@ export default function InventoryPage() {
                           <td>{product.sold}</td>
                           <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
                           <td>
-                            <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
-                              Update Stock
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
+                                Update Stock
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors" title="Move to Draft">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

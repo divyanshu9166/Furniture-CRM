@@ -4,6 +4,7 @@ import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createLeadSchema, updateLeadStatusSchema, addFollowUpSchema } from '@/lib/validations/lead'
 import type { LeadStatus } from '@prisma/client'
+import { moveLeadToDraft } from './drafts'
 
 const statusMap: Record<string, LeadStatus> = {
   'New': 'NEW',
@@ -120,9 +121,7 @@ export async function updateLead(id: number, data: Partial<{
 }
 
 export async function deleteLead(id: number) {
-  await prisma.lead.delete({ where: { id } })
-  revalidatePath('/leads')
-  return { success: true }
+  return moveLeadToDraft(id)
 }
 
 export async function addFollowUp(data: unknown) {

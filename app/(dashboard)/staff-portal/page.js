@@ -14,7 +14,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/components/AuthProvider';
 import Modal from '@/components/Modal';
-import { getStaff, clockIn as serverClockIn, clockOut as serverClockOut, staffStockUpdate, getMonthAttendance, verifyStaffPortalPassword } from '@/app/actions/staff';
+import { getStaff, getStaffPortalProfile, clockIn as serverClockIn, clockOut as serverClockOut, staffStockUpdate, getMonthAttendance, verifyStaffPortalPassword } from '@/app/actions/staff';
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';
 import { moveSelfVisitToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
@@ -42,9 +42,11 @@ const stockActionColors = {
 export default function StaffPortalPage() {
   const router = useRouter();
   const { data: session } = useSession();
+  const userRole = session?.user?.role || 'STAFF';
   const [staff, setStaff] = useState([]);
   const [products, setProducts] = useState([]);
   const [staffLoading, setStaffLoading] = useState(true);
+  const [autoLoginLoading, setAutoLoginLoading] = useState(false);
   const [loggedInStaff, setLoggedInStaff] = useState(null);
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [accessKey, setAccessKey] = useState('');
@@ -92,10 +94,16 @@ export default function StaffPortalPage() {
 
   // Auto-login into the local portal context when authenticated staff user enters this page
   useEffect(() => {
-    if (!session?.user?.staffId || loggedInStaff || staff.length === 0) return;
-    const found = staff.find(s => s.id === Number(session.user.staffId));
-    if (found) applyStaffLogin(found);
-  }, [session, staff, loggedInStaff]);
+    if (!session?.user?.staffId || loggedInStaff) return;
+    let active = true;
+    setAutoLoginLoading(true);
+    getStaffPortalProfile(Number(session.user.staffId)).then(res => {
+      if (!active) return;
+      if (res.success) applyStaffLogin(res.data);
+      setAutoLoginLoading(false);
+    });
+    return () => { active = false; };
+  }, [session, loggedInStaff]);
 
   // Re-fetch assigned visits when switching to assigned/dashboard tabs so manager updates are visible
   useEffect(() => {
@@ -472,7 +480,18 @@ export default function StaffPortalPage() {
   };
 
   // ========== LOADING ==========
-  if (staffLoading) {
+  if (userRole === 'ADMIN') {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center">
+        <div className="glass-card p-8 text-center max-w-md">
+          <h1 className="text-lg font-semibold text-foreground">Staff Portal is for staff accounts only</h1>
+          <p className="text-sm text-muted mt-2">Please use your staff login to access attendance, visits, and updates.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (staffLoading || (session?.user?.staffId && autoLoginLoading && !loggedInStaff)) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center animate-pulse">
         <div className="w-full max-w-md">
@@ -568,8 +587,8 @@ export default function StaffPortalPage() {
   const upcomingVisits = me.fieldVisits.filter(v => v.status === 'Scheduled' || v.status === 'In Progress');
 
   const portalTabs = [
-    { key: 'dashboard', label: 'My Dashboard', icon: Home },
-    { key: 'production', label: 'Production', icon: Package },
+    { key: 'dashboard', label: 'Staff Portal', icon: Home },
+    { key: 'production', label: 'Dashboard', icon: Package },
     { key: 'stock', label: 'Stock Updates', icon: Warehouse },
     { key: 'assigned', label: 'Assigned Visits', icon: MapPin },
     { key: 'self', label: 'Self Visits', icon: MapPinned },

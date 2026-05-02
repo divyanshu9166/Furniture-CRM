@@ -37,9 +37,9 @@ const moreCategories = [
     label: 'Operations',
     items: [
       { href: '/purchases', label: 'Purchases', icon: Truck, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/godowns', label: 'Godowns', icon: Warehouse, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/manufacturing', label: 'Manufacturing', icon: Factory, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/expenses', label: 'Expenses', icon: Calculator, roles: ['ADMIN', 'MANAGER'] },
+      { href: '/godowns', label: 'Godowns', icon: Warehouse, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
+      { href: '/manufacturing', label: 'Manufacturing', icon: Factory, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
+      { href: '/expenses', label: 'Expenses', icon: Calculator, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
       { href: '/payroll', label: 'Payroll', icon: Wallet, roles: ['ADMIN'] },
     ],
   },
@@ -63,8 +63,8 @@ const moreCategories = [
   {
     label: 'System',
     items: [
+      { href: '/staff-portal', label: 'Staff Portal', icon: KeyRound, roles: ['STAFF'] },
       { href: '/staff', label: 'Staff', icon: Users, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/staff-portal', label: 'Staff Portal', icon: KeyRound },
       { href: '/settings', label: 'Settings', icon: Settings, roles: ['ADMIN'] },
     ],
   },

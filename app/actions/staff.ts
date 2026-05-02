@@ -7,71 +7,93 @@ import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import bcrypt from 'bcryptjs'
 import type { UserRole } from '@prisma/client'
 
+const staffPortalInclude = {
+  attendance: { orderBy: { date: 'desc' }, take: 7 },
+  activities: { orderBy: { date: 'desc' }, take: 10 },
+  fieldVisits: { orderBy: { date: 'desc' }, take: 5 },
+  stockUpdates: { orderBy: { date: 'desc' }, take: 5 },
+  user: { select: { email: true, isActive: true } },
+  _count: { select: { leads: true, invoices: true, customOrders: true } },
+}
+
+const mapStaffForPortal = (s: any) => ({
+  id: s.id,
+  name: s.name,
+  role: s.role,
+  phone: s.phone,
+  email: s.email,
+  loginUsername: s.user?.email || null,
+  hasLogin: !!s.user,
+  loginActive: s.user?.isActive ?? false,
+  status: s.status,
+  joinDate: s.joinDate ? s.joinDate.toISOString().split('T')[0] : null,
+  avatar: s.avatar,
+  stats: s.stats,
+  target: s.target,
+  commission: s.commission,
+  attendance: s.attendance.map((a: any) => ({
+    date: a.date.toISOString().split('T')[0],
+    clockIn: a.clockIn,
+    clockOut: a.clockOut,
+    hours: a.hours,
+    status: a.status,
+  })),
+  activities: s.activities.map((a: any) => ({
+    type: a.type,
+    text: a.text,
+    time: a.time,
+    date: a.date.toISOString().split('T')[0],
+  })),
+  fieldVisits: s.fieldVisits.map((fv: any) => ({
+    id: fv.displayId,
+    customer: fv.customer,
+    address: fv.address,
+    date: fv.date.toISOString().split('T')[0],
+    time: fv.time,
+    status: fv.status,
+    type: fv.type,
+    notes: fv.notes,
+    measurements: fv.measurements,
+    photos: fv.photos,
+  })),
+  stockUpdates: s.stockUpdates.map((su: any) => ({
+    product: su.product,
+    warehouse: su.warehouse,
+    action: su.action,
+    qty: su.quantity,
+    date: su.date.toISOString().split('T')[0],
+    time: su.time,
+  })),
+})
+
 export async function getStaff() {
   const staff = await prisma.staff.findMany({
-    include: {
-      attendance: { orderBy: { date: 'desc' }, take: 7 },
-      activities: { orderBy: { date: 'desc' }, take: 10 },
-      fieldVisits: { orderBy: { date: 'desc' }, take: 5 },
-      stockUpdates: { orderBy: { date: 'desc' }, take: 5 },
-      user: { select: { email: true, isActive: true } },
-      _count: { select: { leads: true, invoices: true, customOrders: true } },
-    },
+    include: staffPortalInclude,
     orderBy: { name: 'asc' },
   })
 
   return {
     success: true,
-    data: staff.map(s => ({
-      id: s.id,
-      name: s.name,
-      role: s.role,
-      phone: s.phone,
-      email: s.email,
-      loginUsername: s.user?.email || null,
-      hasLogin: !!s.user,
-      loginActive: s.user?.isActive ?? false,
-      status: s.status,
-      joinDate: s.joinDate.toISOString().split('T')[0],
-      avatar: s.avatar,
-      stats: s.stats,
-      target: s.target,
-      commission: s.commission,
-      attendance: s.attendance.map(a => ({
-        date: a.date.toISOString().split('T')[0],
-        clockIn: a.clockIn,
-        clockOut: a.clockOut,
-        hours: a.hours,
-        status: a.status,
-      })),
-      activities: s.activities.map(a => ({
-        type: a.type,
-        text: a.text,
-        time: a.time,
-        date: a.date.toISOString().split('T')[0],
-      })),
-      fieldVisits: s.fieldVisits.map(fv => ({
-        id: fv.displayId,
-        customer: fv.customer,
-        address: fv.address,
-        date: fv.date.toISOString().split('T')[0],
-        time: fv.time,
-        status: fv.status,
-        type: fv.type,
-        notes: fv.notes,
-        measurements: fv.measurements,
-        photos: fv.photos,
-      })),
-      stockUpdates: s.stockUpdates.map(su => ({
-        product: su.product,
-        warehouse: su.warehouse,
-        action: su.action,
-        qty: su.quantity,
-        date: su.date.toISOString().split('T')[0],
-        time: su.time,
-      })),
-    })),
+    data: staff.map(mapStaffForPortal),
   }
+}
+
+export async function getStaffPortalProfile(staffId: number) {
+  let session
+  try { session = await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
+
+  if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER' && session.user.staffId !== staffId) {
+    return { success: false, error: 'Forbidden' }
+  }
+
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    include: staffPortalInclude,
+  })
+
+  if (!staff) return { success: false, error: 'Staff not found' }
+
+  return { success: true, data: mapStaffForPortal(staff) }
 }
 
 export async function getStaffMember(id: number) {

@@ -18,6 +18,37 @@ export default function DraftsPage() {
   const [selectedDraft, setSelectedDraft] = useState(null);
   const [saving, setSaving] = useState(false);
 
+  const sourceTypeLabels = {
+    CustomOrder: 'Custom Orders',
+    FieldVisit: 'Self Visits',
+    Lead: 'Leads',
+    Walkin: 'Walk-ins',
+    Appointment: 'Appointments',
+    Order: 'Orders',
+    Quotation: 'Quotations',
+    Invoice: 'Invoices',
+    PurchaseOrder: 'Purchase Orders',
+    Expense: 'Expenses',
+    Product: 'Products',
+  };
+
+  const sourceTypeActionLabels = {
+    CustomOrder: 'Custom Order',
+    FieldVisit: 'Self Visit',
+    Lead: 'Lead',
+    Walkin: 'Walk-in',
+    Appointment: 'Appointment',
+    Order: 'Order',
+    Quotation: 'Quotation',
+    Invoice: 'Invoice',
+    PurchaseOrder: 'Purchase Order',
+    Expense: 'Expense',
+    Product: 'Product',
+  };
+
+  const getDraftLabel = sourceType => sourceTypeLabels[sourceType] || sourceType;
+  const getDraftActionLabel = sourceType => sourceTypeActionLabels[sourceType] || sourceType;
+
   const reload = async () => {
     const res = await getDrafts();
     if (res.success) setDrafts(res.data);
@@ -31,7 +62,7 @@ export default function DraftsPage() {
 
   const handleRestore = async (draftId) => {
     const draft = drafts.find(d => d.id === draftId);
-    const label = draft?.sourceType === 'FieldVisit' ? 'visit' : 'order';
+    const label = draft ? (draft.sourceType === 'FieldVisit' ? 'visit' : getDraftActionLabel(draft.sourceType).toLowerCase()) : 'item';
     if (!confirm(`Restore this ${label}? It will be re-created.`)) return;
     setSaving(true);
     const res = await restoreFromDraft(draftId);
@@ -109,13 +140,13 @@ export default function DraftsPage() {
           />
         </div>
         <div className="flex gap-1.5">
-          {['All', 'CustomOrder', 'FieldVisit'].map(f => (
+          {['All', 'CustomOrder', 'FieldVisit', 'Lead', 'Walkin', 'Appointment', 'Order', 'Quotation', 'Invoice', 'PurchaseOrder', 'Expense', 'Product'].map(f => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${filter === f ? 'bg-accent text-white' : 'bg-surface text-muted hover:text-foreground border border-border'}`}
             >
-              {f === 'CustomOrder' ? 'Custom Orders' : f === 'FieldVisit' ? 'Self Visits' : f}
+              {f === 'All' ? 'All' : getDraftLabel(f)}
             </button>
           ))}
         </div>
@@ -148,7 +179,7 @@ export default function DraftsPage() {
                         Deleted
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-surface-hover text-muted">
-                        {draft.sourceType === 'CustomOrder' ? 'Custom Order' : draft.sourceType === 'FieldVisit' ? 'Self Visit' : draft.sourceType}
+                        {getDraftActionLabel(draft.sourceType)}
                       </span>
                     </div>
                     <p className="text-sm font-semibold text-foreground">{data.customer}</p>
@@ -458,7 +489,7 @@ export default function DraftsPage() {
                   disabled={saving}
                   className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50"
                 >
-                  {saving ? 'Restoring...' : selectedDraft.sourceType === 'FieldVisit' ? 'Restore Visit' : 'Restore Order'}
+                  {saving ? 'Restoring...' : `Restore ${getDraftActionLabel(selectedDraft.sourceType)}`}
                 </button>
               </div>
             </div>

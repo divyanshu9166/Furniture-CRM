@@ -12,13 +12,14 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import {
-  getExpenses, createExpense, deleteExpense,
+  getExpenses, createExpense,
   getExpenseCategories, createExpenseCategory, updateCategoryBudget, deleteExpenseCategory,
   seedExpenseCategories,
   getRecurringExpenses, createRecurringExpense, toggleRecurringExpense, deleteRecurringExpense,
   getCashRegister, updateCashRegister,
   getExpenseSummary, getBudgetVsActual,
 } from '@/app/actions/expenses';
+import { moveExpenseToDraft } from '@/app/actions/drafts';
 
 const ICON_MAP = {
   TreePine, Truck, Package, Coffee, Fuel, Home, Zap, Wrench,
@@ -210,8 +211,8 @@ export default function ExpensesPage() {
   };
 
   const handleDeleteExpense = async (id) => {
-    if (!confirm('Delete this expense?')) return;
-    await deleteExpense(id);
+    if (!confirm('Move this expense to drafts? It will be permanently deleted after 30 days.')) return;
+    await moveExpenseToDraft(id);
     await loadData(dateRange.from, dateRange.to);
     // Refresh analytics/budget if they were loaded
     if (summary) {

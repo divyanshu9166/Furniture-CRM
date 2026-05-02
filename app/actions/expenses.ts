@@ -8,6 +8,7 @@ import {
   createRecurringSchema,
   cashRegisterSchema,
 } from '@/lib/validations/expenses'
+import { moveExpenseToDraft } from './drafts'
 
 // ─── DEFAULT CATEGORIES (furniture-specific) ─────────
 
@@ -175,21 +176,7 @@ export async function createExpense(data: unknown) {
 }
 
 export async function deleteExpense(id: number) {
-  const expense = await prisma.expense.findUnique({ where: { id } })
-  if (!expense) return { success: false, error: 'Not found' }
-
-  // Reverse cash register if was cash
-  if (expense.paymentMode === 'Cash') {
-    const dateOnly = new Date(expense.date.toISOString().split('T')[0] + 'T00:00:00')
-    await prisma.dailyCashRegister.updateMany({
-      where: { date: dateOnly },
-      data: { cashOut: { decrement: expense.amount } },
-    })
-  }
-
-  await prisma.expense.delete({ where: { id } })
-  revalidatePath('/expenses')
-  return { success: true }
+  return moveExpenseToDraft(id)
 }
 
 export async function approveExpense(id: number, approvedBy: string) {

@@ -27,6 +27,7 @@ export async function getInvoices() {
       customer: inv.contact.name,
       phone: inv.contact.phone,
       email: inv.contact.email,
+      address: inv.contact.address,
       items: inv.items.map(i => ({
         name: i.name,
         sku: i.sku,
@@ -96,15 +97,18 @@ export async function createInvoice(data: unknown) {
   const parsed = createInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { customer, phone, items, discount, discountType, payments, salespersonId, notes, dueDate, isHeld, transportCost } = parsed.data
+  const { customer, phone, address, items, discount, discountType, payments, salespersonId, notes, dueDate, isHeld, transportCost } = parsed.data
 
   // Find or create contact
   let contact = await prisma.contact.findFirst({ where: { phone } })
   if (!contact) {
-    contact = await prisma.contact.create({ data: { name: customer, phone } })
-  } else if (contact.name !== customer) {
-    // Update name if changed
-    await prisma.contact.update({ where: { id: contact.id }, data: { name: customer } })
+    contact = await prisma.contact.create({ data: { name: customer, phone, address } })
+  } else if (contact.name !== customer || (address && contact.address !== address)) {
+    // Update name or address if changed
+    await prisma.contact.update({ 
+      where: { id: contact.id }, 
+      data: { name: customer, ...(address ? { address } : {}) } 
+    })
   }
 
   // Get GST rate from store settings (not hardcoded)

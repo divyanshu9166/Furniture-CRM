@@ -4,11 +4,12 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, UserPlus, Users, Clock, TrendingUp, CheckCircle2,
   Phone, Mail, DollarSign, Eye, Filter, ShoppingBag, ArrowRight,
-  X, UserCheck, UserX, Timer, QrCode, Download, Printer,
+  X, UserCheck, UserX, Timer, QrCode, Download, Printer, Trash2,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { getWalkins, createWalkin, updateWalkinStatus } from '@/app/actions/walkins';
 import { createLead } from '@/app/actions/leads';
+import { moveWalkinToDraft } from '@/app/actions/drafts';
 import { getStaff } from '@/app/actions/staff';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import { useRouter } from 'next/navigation';
@@ -190,6 +191,19 @@ export default function WalkinsPage() {
     } catch (err) {
       console.error(err);
       alertToast.notify?.('Error converting to lead', 'error');
+    }
+  };
+
+  const handleMoveToDraft = async () => {
+    if (!selectedWalkin) return;
+    if (!confirm('Move this walk-in to drafts? It will be permanently deleted after 30 days.')) return;
+    const res = await moveWalkinToDraft(selectedWalkin.id);
+    if (res?.success) {
+      setSelectedWalkin(null);
+      const refreshed = await getWalkins();
+      if (refreshed.success) setWalkins(refreshed.data);
+    } else {
+      alertToast.notify?.(res?.error || 'Failed to move walk-in to drafts', 'error');
     }
   };
 
@@ -449,6 +463,9 @@ export default function WalkinsPage() {
                 </button>
                 <button onClick={() => router.push(`/orders?customer=${encodeURIComponent(selectedWalkin.name)}&phone=${encodeURIComponent(selectedWalkin.phone)}`)} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-xl text-sm font-medium hover:bg-blue-500/20 transition-colors">
                   <ShoppingBag className="w-4 h-4" /> Create Order
+                </button>
+                <button onClick={handleMoveToDraft} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-500/10 text-red-700 border border-red-500/20 rounded-xl text-sm font-medium hover:bg-red-500/20 transition-colors">
+                  <Trash2 className="w-4 h-4" /> Move to Draft
                 </button>
               </div>
             </div>

@@ -370,6 +370,39 @@ export async function updateMeasurements(data: unknown) {
   return { success: true }
 }
 
+// ─── UPDATE MEASUREMENTS WITH PHOTOS ────────────────────
+
+export async function updateMeasurementsWithPhotos(customOrderId: number, measurements: unknown, photoUrls: string[]) {
+  const order = await prisma.customOrder.findUnique(
+    { where: { id: customOrderId }, select: { photos: true } }
+  )
+  if (!order) return { success: false, error: 'Order not found' }
+
+  const updatedPhotos = [...(order.photos || []), ...photoUrls]
+
+  await prisma.customOrder.update({
+    where: { id: customOrderId },
+    data: {
+      measurements,
+      photos: updatedPhotos,
+    },
+  })
+
+  await prisma.customOrderTimeline.create({
+    data: {
+      customOrderId,
+      date: new Date(),
+      event: 'Measurements updated with photos',
+      status: 'done',
+      updatedBy: 'Manager',
+    },
+  })
+
+  revalidatePath('/custom-orders')
+  revalidatePath('/staff-portal')
+  return { success: true }
+}
+
 // ─── UPDATE VISIT (Staff) ───────────────────────────────
 
 export async function updateFieldVisit(data: unknown) {
