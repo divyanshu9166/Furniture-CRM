@@ -12,6 +12,7 @@ import { getStockGroups, createStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 
 const stockBadge = (stock, reorderLevel) => {
   if (stock === 0) return { text: 'Out of Stock', cls: 'bg-danger-light text-danger' };
@@ -40,15 +41,38 @@ export default function InventoryPage() {
   const [agingData, setAgingData] = useState([]);
   const [showGroupModal, setShowGroupModal] = useState(false);
 
-  const handleMoveProductToDraft = async (productId) => {
-    if (!confirm('Move this product to drafts? It will be permanently deleted after 30 days.')) return;
-    const res = await moveProductToDraft(productId);
-    if (!res?.success) {
-      alert(res?.error || 'Failed to move product to drafts');
-      return;
+  const { notify } = useAlertToast();
+
+  const [productToDelete, setProductToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleMoveProductToDraft = (productId) => {
+    const product = products.find(p => p.id === productId) || { id: productId, name: 'this product' };
+    setProductToDelete(product);
+  };
+
+  const confirmMoveToDraft = async () => {
+    if (!productToDelete) return;
+    setDeleting(true);
+    try {
+      const res = await moveProductToDraft(productToDelete.id);
+      if (!res?.success) {
+        notify(res?.error || 'Failed to move product to drafts', { variant: 'danger' });
+        return;
+      }
+      const refreshed = await getProducts();
+      if (refreshed.success) setProducts(refreshed.data);
+      notify('Product moved to drafts', { variant: 'success' });
+    } catch (err) {
+      notify(err?.message || 'Failed to move product to drafts', { variant: 'danger' });
+    } finally {
+      setDeleting(false);
+      setProductToDelete(null);
     }
-    const refreshed = await getProducts();
-    if (refreshed.success) setProducts(refreshed.data);
+  };
+
+  const cancelMoveToDraft = () => {
+    setProductToDelete(null);
   };
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [groupForm, setGroupForm] = useState({ name: '', parentId: '' });
@@ -264,8 +288,8 @@ export default function InventoryPage() {
                       {isBestSeller && (
                         <span className="absolute top-2 left-2 badge bg-accent text-white text-[10px]">Best Seller</span>
                       )}
-                      <span className="absolute top-2 right-2 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
-                      <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors opacity-0 group-hover:opacity-100" title="Move to Draft">
+                      <span className="absolute top-2 right-12 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
+                      <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="absolute top-2 right-2 p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -360,7 +384,7 @@ export default function InventoryPage() {
                               <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
                                 Update Stock
                               </button>
-                              <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-colors" title="Move to Draft">
+                              <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
                             </div>
@@ -986,6 +1010,21 @@ export default function InventoryPage() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Confirm Move to Draft Modal */}
+      <Modal isOpen={!!productToDelete} onClose={cancelMoveToDraft} title="Move to Draft" size="sm">
+        {productToDelete && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Are you sure you want to move <strong className="text-foreground">{productToDelete.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveToDraft} disabled={deleting} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">
+                {deleting ? 'Moving...' : 'Move to Draft'}
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Stock Update Modal */}

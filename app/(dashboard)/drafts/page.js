@@ -8,6 +8,7 @@ import {
   MapPinned, User,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 import { getDrafts, restoreFromDraft, permanentlyDeleteDraft } from '@/app/actions/drafts';
 
 export default function DraftsPage() {
@@ -60,28 +61,52 @@ export default function DraftsPage() {
     reload().finally(() => setLoading(false));
   }, []);
 
-  const handleRestore = async (draftId) => {
+  const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
+
+  const [confirmAction, setConfirmAction] = useState({ open: false, type: null, draftId: null, message: '' });
+
+  const openConfirm = (type, draftId, message) => setConfirmAction({ open: true, type, draftId, message });
+  const closeConfirm = () => setConfirmAction({ open: false, type: null, draftId: null, message: '' });
+
+  const handleRestore = (draftId) => {
     const draft = drafts.find(d => d.id === draftId);
     const label = draft ? (draft.sourceType === 'FieldVisit' ? 'visit' : getDraftActionLabel(draft.sourceType).toLowerCase()) : 'item';
-    if (!confirm(`Restore this ${label}? It will be re-created.`)) return;
-    setSaving(true);
-    const res = await restoreFromDraft(draftId);
-    if (res.success) {
-      setSelectedDraft(null);
-      await reload();
-    }
-    setSaving(false);
+    openConfirm('restore', draftId, `Restore this ${label}? It will be re-created.`);
   };
 
-  const handlePermanentDelete = async (draftId) => {
-    if (!confirm('Permanently delete this draft? This cannot be undone.')) return;
+  const handlePermanentDelete = (draftId) => {
+    openConfirm('delete', draftId, 'Permanently delete this draft? This cannot be undone.');
+  };
+
+  const runConfirmed = async () => {
+    if (!confirmAction.open || !confirmAction.type) return;
     setSaving(true);
-    const res = await permanentlyDeleteDraft(draftId);
-    if (res.success) {
-      setSelectedDraft(null);
-      await reload();
+    try {
+      if (confirmAction.type === 'restore') {
+        const res = await restoreFromDraft(confirmAction.draftId);
+        if (res.success) {
+          setSelectedDraft(null);
+          await reload();
+          alertToast.notify?.('Restored successfully', 'success');
+        } else {
+          alertToast.notify?.(res.error || 'Failed to restore', 'error');
+        }
+      } else if (confirmAction.type === 'delete') {
+        const res = await permanentlyDeleteDraft(confirmAction.draftId);
+        if (res.success) {
+          setSelectedDraft(null);
+          await reload();
+          alertToast.notify?.('Draft deleted permanently', 'success');
+        } else {
+          alertToast.notify?.(res.error || 'Failed to delete', 'error');
+        }
+      }
+    } catch (err) {
+      alertToast.notify?.(err?.message || 'Action failed', 'error');
+    } finally {
+      setSaving(false);
+      closeConfirm();
     }
-    setSaving(false);
   };
 
   const filtered = drafts.filter(d => {
@@ -495,6 +520,16 @@ export default function DraftsPage() {
             </div>
           );
         })()}
+      </Modal>
+      {/* Confirmation Modal for restore / delete */}
+      <Modal isOpen={confirmAction.open} onClose={closeConfirm} title={confirmAction.type === 'delete' ? 'Confirm Deletion' : 'Confirm Action'} size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">{confirmAction.message}</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={closeConfirm} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+            <button onClick={runConfirmed} disabled={saving} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{saving ? 'Processing...' : (confirmAction.type === 'delete' ? 'Delete Forever' : 'Confirm')}</button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

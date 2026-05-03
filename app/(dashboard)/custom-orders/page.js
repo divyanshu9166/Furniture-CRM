@@ -11,6 +11,7 @@ import {
   Bell, MessageSquare, Mail, Send, CheckCheck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 import {
   getCustomOrders, createCustomOrder, updateCustomOrderStatus,
   scheduleVisit, updateMeasurements, updateMeasurementsWithPhotos, updateReferenceImages,
@@ -69,6 +70,9 @@ export default function CustomOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showNewOrderModal, setShowNewOrderModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const { notify } = useAlertToast();
+  const [customOrderToDraft, setCustomOrderToDraft] = useState(null);
+  const [deletingCustomOrder, setDeletingCustomOrder] = useState(false);
 
   // Schedule visit modal
   const [showScheduleVisit, setShowScheduleVisit] = useState(false);
@@ -285,16 +289,34 @@ export default function CustomOrdersPage() {
 
   // ─── MOVE TO DRAFT HANDLER ──────────────────────────────
 
-  const handleMoveToDraft = async (orderId) => {
-    if (!confirm('Move this order to drafts? It will be permanently deleted after 30 days.')) return;
-    setSaving(true);
-    const res = await moveCustomOrderToDraft(orderId);
-    if (res.success) {
-      setSelectedOrder(null);
-      await reload();
-    }
-    setSaving(false);
+  const handleMoveToDraft = (orderId) => {
+    const order = customOrders.find(o => o.dbId === orderId) || { dbId: orderId };
+    setCustomOrderToDraft(order);
   };
+
+  const confirmMoveToDraft = async () => {
+    if (!customOrderToDraft) return;
+    setDeletingCustomOrder(true);
+    setSaving(true);
+    try {
+      const res = await moveCustomOrderToDraft(customOrderToDraft.dbId);
+      if (res.success) {
+        setSelectedOrder(null);
+        await reload();
+        notify('Order moved to drafts', { variant: 'success' });
+      } else {
+        notify(res.error || 'Failed to move order to drafts', { variant: 'danger' });
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to move order to drafts', { variant: 'danger' });
+    } finally {
+      setDeletingCustomOrder(false);
+      setSaving(false);
+      setCustomOrderToDraft(null);
+    }
+  };
+
+  const cancelMoveToDraft = () => setCustomOrderToDraft(null);
 
   // ─── NOTIFY CUSTOMER HANDLER ──────────────────────────
 
@@ -792,6 +814,19 @@ export default function CustomOrdersPage() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* Confirm Move Custom Order To Draft Modal */}
+      <Modal isOpen={!!customOrderToDraft} onClose={cancelMoveToDraft} title="Move Order to Draft" size="sm">
+        {customOrderToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Move <strong className="text-foreground">{customOrderToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveToDraft} disabled={deletingCustomOrder} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingCustomOrder ? 'Moving...' : 'Move to Draft'}</button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ═══════════════════════════════════════════════════

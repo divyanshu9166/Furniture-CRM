@@ -13,6 +13,7 @@ import {
   Phone,
   Plus,
   Printer,
+  QrCode,
   Search,
   Upload,
   Trash2,
@@ -21,9 +22,10 @@ import {
 } from 'lucide-react'
 import { moveQuotationToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
+import { useAlertToast } from '@/components/AlertToastProvider'
 import { createQuotation, getQuotationStats, getQuotations, updateQuotation, updateQuotationStatus } from '@/app/actions/quotations'
 import { getProducts } from '@/app/actions/products'
-import { getStoreSettings } from '@/app/actions/settings'
+import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings'
 
 const statusColors = {
   DRAFT: 'bg-gray-500/10 text-gray-700 border-gray-500/20',
@@ -65,6 +67,20 @@ const createBlankBankDetails = () => ({
   upiId: '',
 })
 
+function getProductAutoDescription(product) {
+  if (!product) return ''
+
+  const directDescription = String(product.description || '').trim()
+  if (directDescription) return directDescription
+
+  const detailParts = []
+  if (product.material?.trim()) detailParts.push(`Material: ${product.material.trim()}`)
+  if (product.color?.trim()) detailParts.push(`Color: ${product.color.trim()}`)
+  if (product.category?.trim()) detailParts.push(`Category: ${product.category.trim()}`)
+
+  return detailParts.join(' | ')
+}
+
 function loadSavedBankDetails() {
   try {
     const saved = localStorage.getItem(BANK_DETAILS_KEY)
@@ -91,6 +107,8 @@ const createInitialForm = () => ({
   roadPermit: 'REQUIRED',
   contactPerson: '',
   installationPercent: 5,
+  discountType: 'PERCENT',
+  discountValue: 0,
   freightCharge: 0,
   loadingCharge: 0,
   gstPercent: 18,
@@ -144,6 +162,8 @@ function buildFormFromQuotation(quotation) {
     roadPermit: quotation?.roadPermit || 'REQUIRED',
     contactPerson: quotation?.contactPerson || '',
     installationPercent: Number(quotation?.installationPercent) || 0,
+    discountType: quotation?.discountType === 'FLAT' ? 'FLAT' : 'PERCENT',
+    discountValue: Number(quotation?.discountValue) || 0,
     freightCharge: Number(quotation?.freightCharge) || 0,
     loadingCharge: Number(quotation?.loadingCharge) || 0,
     gstPercent: Number(quotation?.gstPercent) || 18,
@@ -178,7 +198,7 @@ function getItemDisplayImage(item) {
   return referenceImage || productImage || ''
 }
 
-function computeTotals(items, installationPercent, freightCharge, loadingCharge, gstPercent) {
+function computeTotals(items, installationPercent, discountType, discountValue, freightCharge, loadingCharge, gstPercent) {
   const normalizedItems = items.map(item => {
     const quantity = Math.max(1, Number(item.quantity) || 1)
     const rate = Math.max(0, Number(item.rate) || 0)
@@ -191,16 +211,27 @@ function computeTotals(items, installationPercent, freightCharge, loadingCharge,
   })
 
   const subtotal = normalizedItems.reduce((sum, item) => sum + item.amount, 0)
-  const installationCharge = Math.round((subtotal * (Number(installationPercent) || 0)) / 100)
+  const normalizedDiscountType = discountType === 'FLAT' ? 'FLAT' : 'PERCENT'
+  const normalizedDiscountValue = Math.max(0, Number(discountValue) || 0)
+  const rawDiscountAmount = normalizedDiscountType === 'PERCENT'
+    ? Math.round((subtotal * normalizedDiscountValue) / 100)
+    : Math.round(normalizedDiscountValue)
+  const discountAmount = Math.max(0, Math.min(subtotal, rawDiscountAmount))
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount)
+  const installationCharge = Math.round((subtotalAfterDiscount * (Number(installationPercent) || 0)) / 100)
   const freight = Math.max(0, Number(freightCharge) || 0)
   const loading = Math.max(0, Number(loadingCharge) || 0)
-  const totalBeforeTax = subtotal + installationCharge + freight + loading
+  const totalBeforeTax = subtotalAfterDiscount + installationCharge + freight + loading
   const gstAmount = Math.round((totalBeforeTax * (Number(gstPercent) || 0)) / 100)
   const grandTotal = totalBeforeTax + gstAmount
 
   return {
     normalizedItems,
     subtotal,
+    discountType: normalizedDiscountType,
+    discountValue: normalizedDiscountValue,
+    discountAmount,
+    subtotalAfterDiscount,
     installationCharge,
     freight,
     loading,
@@ -230,6 +261,7 @@ function buildPrintHtml(quotation, storeSettings) {
   const storeAddress = storeSettings?.address || ''
   const storePhone = storeSettings?.phone || ''
   const storeEmail = storeSettings?.email || ''
+  const paymentQr = storeSettings?.paymentQr || ''
   const bankRows = [
     { label: 'Account Name', value: quotation?.bankDetails?.accountName },
     { label: 'Bank Name', value: quotation?.bankDetails?.bankName },
@@ -239,6 +271,14 @@ function buildPrintHtml(quotation, storeSettings) {
     { label: 'UPI ID', value: quotation?.bankDetails?.upiId },
   ]
   const populatedBankRows = bankRows.filter(row => String(row.value || '').trim())
+  const paymentQrHtml = paymentQr
+    ? `<img src="${escapeHtml(getAbsoluteImageUrl(paymentQr))}" alt="Payment QR" />`
+    : '<div class="qr-placeholder">PAYMENT QR NOT ADDED</div>'
+  const discountAmount = Number(quotation.discountAmount || 0)
+  const discountTypeLabel = quotation.discountType === 'FLAT'
+    ? `DISCOUNT (Rs. ${Number(quotation.discountValue || 0).toLocaleString('en-IN')})`
+    : `DISCOUNT (${Number(quotation.discountValue || 0)}%)`
+  const subtotalAfterDiscount = Math.max(0, Number(quotation.subtotal || 0) - discountAmount)
 
   const itemRows = quotation.items
     .map((item, idx) => {
@@ -250,10 +290,8 @@ function buildPrintHtml(quotation, storeSettings) {
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td>
-            <div style="font-weight:700;">${escapeHtml(item.name || '-')}</div>
-            ${item.description ? `<div style="font-size:10px;color:#333;white-space:pre-wrap;">${escapeHtml(item.description)}</div>` : ''}
-          </td>
+          <td><div style="font-weight:700;">${escapeHtml(item.name || '-')}</div></td>
+          <td>${item.description ? `<div style="font-size:10px;color:#333;white-space:pre-wrap;">${escapeHtml(item.description)}</div>` : '<span style="color:#666;font-size:10px;">-</span>'}</td>
           <td style="text-align:center;">${img}</td>
           <td style="text-align:center;">${item.quantity}</td>
           <td style="text-align:right;">${Number(item.rate || 0).toLocaleString('en-IN')}</td>
@@ -294,9 +332,14 @@ function buildPrintHtml(quotation, storeSettings) {
           .terms ul { margin: 0; padding: 0; list-style: none; }
           .terms li { margin: 2px 0; }
           .terms li.highlight { background:#0ea5d8; color:#fff; padding:1px 4px; }
-          .bank { margin: 10px 8px 12px; font-size: 11px; color:#6b4d8e; }
+          .bank-wrap { margin: 10px 8px 12px; display:flex; align-items:flex-end; justify-content:space-between; gap: 16px; }
+          .bank { margin: 0; font-size: 11px; color:#6b4d8e; flex:1; min-width: 0; }
           .bank strong.brand { color:#06a9d6; }
           .bank p { margin: 3px 0; }
+          .pay-qr { width: 120px; text-align: center; color: #111; }
+          .pay-qr .pay-title { margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.3px; }
+          .pay-qr img { width: 110px; height: 110px; object-fit: contain; border: 1px solid #999; padding: 4px; background: #fff; }
+          .pay-qr .qr-placeholder { width: 110px; height: 110px; border: 1px dashed #999; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #666; padding: 6px; box-sizing: border-box; }
         </style>
       </head>
       <body>
@@ -339,11 +382,12 @@ function buildPrintHtml(quotation, storeSettings) {
             <thead>
               <tr>
                 <th class="blue" style="width:6%;">S.NO</th>
-                <th class="blue" style="width:42%;">PRODUCT DESCRIPTION</th>
-                <th class="blue" style="width:30%;">IMAGE</th>
+                <th class="blue" style="width:18%;">PRODUCT NAME</th>
+                <th class="blue" style="width:24%;">DESCRIPTION</th>
+                <th class="blue" style="width:27%;">IMAGE</th>
                 <th class="blue" style="width:7%;">QTY.</th>
-                <th class="blue" style="width:7%;">RATE</th>
-                <th class="blue" style="width:8%;">AMOUNT</th>
+                <th class="blue" style="width:8%;">RATE</th>
+                <th class="blue" style="width:10%;">AMOUNT</th>
               </tr>
             </thead>
             <tbody>
@@ -353,6 +397,9 @@ function buildPrintHtml(quotation, storeSettings) {
 
           <table class="totals section">
             <tr class="bar"><td>TOTAL Rs.</td><td>${Number(quotation.subtotal || 0).toLocaleString('en-IN')}</td></tr>
+            ${discountAmount > 0
+              ? `<tr><td>${discountTypeLabel}</td><td>-${discountAmount.toLocaleString('en-IN')}</td></tr><tr><td>DISCOUNTED TOTAL</td><td>${subtotalAfterDiscount.toLocaleString('en-IN')}</td></tr>`
+              : ''}
             ${Number(quotation.installationPercent || 0) > 0
               ? `<tr><td>INSTALLATION @${quotation.installationPercent || 0}%</td><td>${Number(quotation.installationCharge || 0).toLocaleString('en-IN')}</td></tr>`
               : ''}
@@ -368,14 +415,20 @@ function buildPrintHtml(quotation, storeSettings) {
             <ul>${terms}</ul>
           </div>
 
-          <div class="bank">
-            <p><strong>Bank Details</strong></p>
-            <p>Make Cheques in favor of <strong class="brand">${escapeHtml(storeName).toUpperCase()}</strong></p>
-            ${populatedBankRows.length > 0
-              ? populatedBankRows
-                  .map(row => `<p>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</p>`)
-                  .join('')
-              : '<p>No bank details provided for this quotation.</p>'}
+          <div class="bank-wrap">
+            <div class="bank">
+              <p><strong>Bank Details</strong></p>
+              <p>Make Cheques in favor of <strong class="brand">${escapeHtml(storeName).toUpperCase()}</strong></p>
+              ${populatedBankRows.length > 0
+                ? populatedBankRows
+                    .map(row => `<p>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</p>`)
+                    .join('')
+                : '<p>No bank details provided for this quotation.</p>'}
+            </div>
+            <div class="pay-qr">
+              <p class="pay-title">SCAN & PAY</p>
+              ${paymentQrHtml}
+            </div>
           </div>
         </div>
       </body>
@@ -389,6 +442,7 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
     ? quotation.termsAndConditions
     : defaultTerms
   const items = Array.isArray(quotation.items) ? quotation.items : []
+  const paymentQr = storeSettings?.paymentQr || ''
   const bankRows = [
     { label: 'Account Name', value: quotation?.bankDetails?.accountName },
     { label: 'Bank Name', value: quotation?.bankDetails?.bankName },
@@ -397,6 +451,11 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
     { label: 'Branch', value: quotation?.bankDetails?.branchName },
     { label: 'UPI ID', value: quotation?.bankDetails?.upiId },
   ].filter(row => String(row.value || '').trim())
+  const discountAmount = Number(quotation.discountAmount || 0)
+  const discountTypeLabel = quotation.discountType === 'FLAT'
+    ? `DISCOUNT (Rs. ${toINR(quotation.discountValue || 0)})`
+    : `DISCOUNT (${Number(quotation.discountValue || 0)}%)`
+  const subtotalAfterDiscount = Math.max(0, Number(quotation.subtotal || 0) - discountAmount)
 
   return (
     <div className="bg-white text-black border-[3px] border-black rounded-sm overflow-hidden text-[10px]">
@@ -445,21 +504,20 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
         <thead>
           <tr>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[6%]">S.NO</th>
-            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[42%]">PRODUCT DISCRIPTION</th>
-            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[30%]">IMAGE</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[18%]">PRODUCT NAME</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[24%]">DESCRIPTION</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[27%]">IMAGE</th>
             <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[7%]">QTY.</th>
-            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[7%]">RATE</th>
-            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[8%]">AMOUNT</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[8%]">RATE</th>
+            <th className="border border-black bg-[#0ea5d8] text-white font-bold p-1 w-[10%]">AMOUNT</th>
           </tr>
         </thead>
         <tbody>
           {items.map((item, idx) => (
             <tr key={`${item.name}-${idx}`}>
               <td className="border border-black p-1 text-center align-top">{idx + 1}</td>
-              <td className="border border-black p-1 align-top">
-                <p className="font-semibold">{item.name || 'Item name'}</p>
-                {item.description && <p className="whitespace-pre-wrap">{item.description}</p>}
-              </td>
+              <td className="border border-black p-1 align-top font-semibold">{item.name || 'Item name'}</td>
+              <td className="border border-black p-1 align-top whitespace-pre-wrap">{item.description || '-'}</td>
               <td className="border border-black p-1 align-top text-center">
                 {getItemDisplayImage(item) ? (
                   <Image
@@ -488,6 +546,18 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
             <td className="border border-black p-1 text-right font-semibold bg-[#0ea5d8] text-white">TOTAL Rs.</td>
             <td className="border border-black p-1 text-right w-[28%] bg-[#0ea5d8] text-white font-semibold">{toINR(quotation.subtotal)}</td>
           </tr>
+          {discountAmount > 0 && (
+            <>
+              <tr>
+                <td className="border border-black p-1 text-right font-semibold">{discountTypeLabel}</td>
+                <td className="border border-black p-1 text-right">-{toINR(discountAmount)}</td>
+              </tr>
+              <tr>
+                <td className="border border-black p-1 text-right font-semibold">DISCOUNTED TOTAL</td>
+                <td className="border border-black p-1 text-right">{toINR(subtotalAfterDiscount)}</td>
+              </tr>
+            </>
+          )}
           {Number(quotation.installationPercent || 0) > 0 && (
             <tr>
               <td className="border border-black p-1 text-right font-semibold">INSTALLATION @{Number(quotation.installationPercent || 0)}%</td>
@@ -529,22 +599,46 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
       </div>
 
       <div className="px-2 pb-2 text-[10px] text-[#6b4d8e]">
-        <p>Make Cheques in Favor of <span className="text-[#06a9d6] font-bold">{(storeSettings?.storeName || 'Furniture Store').toUpperCase()}</span>.</p>
-        {bankRows.length > 0 ? (
-          <div className="mt-1 space-y-0.5">
-            {bankRows.map(row => (
-              <p key={row.label}>{row.label}: {row.value}</p>
-            ))}
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p>Make Cheques in Favor of <span className="text-[#06a9d6] font-bold">{(storeSettings?.storeName || 'Furniture Store').toUpperCase()}</span>.</p>
+            {bankRows.length > 0 ? (
+              <div className="mt-1 space-y-0.5">
+                {bankRows.map(row => (
+                  <p key={row.label}>{row.label}: {row.value}</p>
+                ))}
+              </div>
+            ) : (
+              <p>No bank details provided for this quotation.</p>
+            )}
           </div>
-        ) : (
-          <p>No bank details provided for this quotation.</p>
-        )}
+          <div className="w-28 shrink-0 text-center text-black">
+            <p className="text-[9px] font-bold tracking-wide">SCAN & PAY</p>
+            {paymentQr ? (
+              <Image
+                src={paymentQr}
+                alt="Payment QR"
+                width={96}
+                height={96}
+                unoptimized
+                className="mt-1 mx-auto w-24 h-24 object-contain border border-black p-1 bg-white"
+              />
+            ) : (
+              <div className="mt-1 mx-auto w-24 h-24 border border-dashed border-gray-500 text-[8px] text-gray-600 px-1 flex items-center justify-center">
+                PAYMENT QR NOT ADDED
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )
 }
 
 export default function QuotationsPage() {
+  const { notify } = useAlertToast()
+  const [quotationToDraft, setQuotationToDraft] = useState(null)
+  const [deletingQuotation, setDeletingQuotation] = useState(false)
   const [quotations, setQuotations] = useState([])
   const [products, setProducts] = useState([])
   const [storeSettings, setStoreSettings] = useState(null)
@@ -557,6 +651,7 @@ export default function QuotationsPage() {
   const [editingQuotationId, setEditingQuotationId] = useState(null)
   const [selectedQuotation, setSelectedQuotation] = useState(null)
   const [uploadingIndex, setUploadingIndex] = useState(null)
+  const [uploadingPaymentQr, setUploadingPaymentQr] = useState(false)
   const [form, setForm] = useState(createInitialForm())
 
   const loadData = useCallback(async () => {
@@ -580,8 +675,16 @@ export default function QuotationsPage() {
   }, [loadData])
 
   const computed = useMemo(
-    () => computeTotals(form.items, form.installationPercent, form.freightCharge, form.loadingCharge, form.gstPercent),
-    [form.items, form.installationPercent, form.freightCharge, form.loadingCharge, form.gstPercent]
+    () => computeTotals(
+      form.items,
+      form.installationPercent,
+      form.discountType,
+      form.discountValue,
+      form.freightCharge,
+      form.loadingCharge,
+      form.gstPercent
+    ),
+    [form.items, form.installationPercent, form.discountType, form.discountValue, form.freightCharge, form.loadingCharge, form.gstPercent]
   )
 
   const previewQuotation = useMemo(() => {
@@ -603,6 +706,10 @@ export default function QuotationsPage() {
       items: computed.normalizedItems,
       subtotal: computed.subtotal,
       installationPercent: Number(form.installationPercent) || 0,
+      discountType: computed.discountType,
+      discountValue: computed.discountValue,
+      discountAmount: computed.discountAmount,
+      subtotalAfterDiscount: computed.subtotalAfterDiscount,
       installationCharge: computed.installationCharge,
       freightCharge: computed.freight,
       loadingCharge: computed.loading,
@@ -691,11 +798,58 @@ export default function QuotationsPage() {
       productId: product.id,
       name: product.name,
       sku: product.sku,
-      description: product.description || '',
+      description: getProductAutoDescription(product),
       rate: product.price,
       productImage: product.image || '',
       imageSource: product.image ? 'PRODUCT' : 'REFERENCE',
     })
+  }
+
+  const handlePaymentQrUpload = async files => {
+    const file = files?.[0]
+    if (!file) return
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      notify('Please upload a JPG, PNG, or WebP image', { variant: 'danger' })
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      notify('File too large. Maximum size is 5MB', { variant: 'danger' })
+      return
+    }
+
+    setUploadingPaymentQr(true)
+    try {
+      const formData = new FormData()
+      formData.set('folder', 'payments')
+      formData.append('files', file)
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await response.json()
+
+      if (!data.success || !data.urls?.[0]) {
+        notify(data.error || 'QR upload failed', { variant: 'danger' })
+        return
+      }
+
+      const paymentQrUrl = data.urls[0]
+      const saveRes = await updateStoreSettings({ paymentQr: paymentQrUrl })
+      if (!saveRes?.success) {
+        notify(saveRes?.error || 'Failed to save payment QR', { variant: 'danger' })
+        return
+      }
+
+      setStoreSettings(prev => ({ ...(prev || {}), paymentQr: paymentQrUrl }))
+      notify('Payment QR saved for all quotations', { variant: 'success' })
+    } catch (error) {
+      console.error(error)
+      notify('QR upload failed. Please try again.', { variant: 'danger' })
+    } finally {
+      setUploadingPaymentQr(false)
+    }
   }
 
   const handleReferenceImageUpload = async (index, files) => {
@@ -753,6 +907,8 @@ export default function QuotationsPage() {
       roadPermit: form.roadPermit.trim(),
       contactPerson: form.contactPerson.trim(),
       installationPercent: Number(form.installationPercent) || 0,
+      discountType: form.discountType === 'FLAT' ? 'FLAT' : 'PERCENT',
+      discountValue: Number(form.discountValue) || 0,
       freightCharge: Number(form.freightCharge) || 0,
       loadingCharge: Number(form.loadingCharge) || 0,
       gstPercent: Number(form.gstPercent) || 0,
@@ -822,18 +978,28 @@ export default function QuotationsPage() {
     }
   }
 
-  const handleMoveToDraft = async quotation => {
-    if (!confirm('Move this quotation to drafts? It will be permanently deleted after 30 days.')) return
+  const handleMoveToDraft = (quotation) => {
+    // open confirmation modal
+    setQuotationToDraft(quotation)
+  }
 
-    const result = await moveQuotationToDraft(quotation.dbId)
-    if (!result.success) {
-      alert(result.error || 'Failed to move quotation to drafts')
-      return
-    }
-
-    await loadData()
-    if (selectedQuotation?.dbId === quotation.dbId) {
-      setSelectedQuotation(null)
+  const confirmMoveQuotationToDraft = async () => {
+    if (!quotationToDraft) return
+    setDeletingQuotation(true)
+    try {
+      const result = await moveQuotationToDraft(quotationToDraft.dbId)
+      if (!result.success) {
+        notify(result.error || 'Failed to move quotation to drafts', { variant: 'danger' })
+      } else {
+        notify('Quotation moved to drafts', { variant: 'success' })
+        await loadData()
+        if (selectedQuotation?.dbId === quotationToDraft.dbId) setSelectedQuotation(null)
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to move quotation to drafts', { variant: 'danger' })
+    } finally {
+      setDeletingQuotation(false)
+      setQuotationToDraft(null)
     }
   }
 
@@ -1015,6 +1181,18 @@ export default function QuotationsPage() {
         </div>
       </div>
 
+      <Modal isOpen={!!quotationToDraft} onClose={() => setQuotationToDraft(null)} title="Move Quotation to Draft" size="sm">
+        {quotationToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Move <strong className="text-foreground">{quotationToDraft.customer || quotationToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setQuotationToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveQuotationToDraft} disabled={deletingQuotation} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingQuotation ? 'Moving...' : 'Move to Draft'}</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal
         isOpen={showGenerator}
         onClose={() => {
@@ -1161,6 +1339,49 @@ export default function QuotationsPage() {
                     />
                   </div>
                 </div>
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-border bg-surface p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-accent" /> Payment QR
+                    </h3>
+                    <p className="text-[11px] text-muted">Set once for all quotations. You can replace it anytime.</p>
+                  </div>
+                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs text-muted hover:text-accent hover:border-accent/40 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5" />
+                    {uploadingPaymentQr ? 'Uploading...' : storeSettings?.paymentQr ? 'Change QR' : 'Upload QR'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      disabled={uploadingPaymentQr}
+                      onChange={e => {
+                        handlePaymentQrUpload(e.target.files)
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                </div>
+
+                {storeSettings?.paymentQr ? (
+                  <div className="flex items-center gap-3">
+                    <Image
+                      src={storeSettings.paymentQr}
+                      alt="Payment QR"
+                      width={96}
+                      height={96}
+                      unoptimized
+                      className="w-24 h-24 rounded-lg border border-border bg-white p-1 object-contain"
+                    />
+                    <p className="text-[11px] text-muted">This QR appears in the quotation preview and print sheet.</p>
+                  </div>
+                ) : (
+                  <div className="w-24 h-24 rounded-lg border border-dashed border-border flex items-center justify-center text-[10px] text-muted text-center px-2">
+                    Payment QR not added
+                  </div>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -1348,6 +1569,37 @@ export default function QuotationsPage() {
                         className="w-full px-3 pr-8 py-2.5 rounded-xl text-sm"
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">%</span>
+                    </div>
+
+                    <div className="pt-2 border-t border-border/60 space-y-2">
+                      <label className="block text-xs font-medium text-muted">Discount</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select
+                          value={form.discountType}
+                          onChange={e => setForm(prev => ({ ...prev, discountType: e.target.value }))}
+                          className="w-full px-2 py-2 rounded-lg text-xs"
+                        >
+                          <option value="PERCENT">Percent (%)</option>
+                          <option value="FLAT">Amount (Rs.)</option>
+                        </select>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            max={form.discountType === 'PERCENT' ? '100' : undefined}
+                            step="0.01"
+                            value={form.discountValue}
+                            onChange={e => setForm(prev => ({ ...prev, discountValue: parseFloat(e.target.value || '0') }))}
+                            className="w-full px-2 pr-8 py-2 rounded-lg text-xs"
+                          />
+                          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted">
+                            {form.discountType === 'PERCENT' ? '%' : 'Rs'}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-muted">
+                        Discount applied: <span className="font-semibold text-foreground">{formatCurrency(computed.discountAmount)}</span>
+                      </p>
                     </div>
 
                     <p className="text-[11px] text-muted">

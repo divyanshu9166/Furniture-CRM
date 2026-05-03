@@ -14,6 +14,7 @@ import {
 import { getProducts } from '@/app/actions/products'
 import { movePurchaseOrderToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
+import { useAlertToast } from '@/components/AlertToastProvider'
 
 const poStatusColors = {
   DRAFT: 'bg-gray-500/10 text-gray-400',
@@ -67,6 +68,11 @@ export default function PurchasesPage() {
   const [editingSupplierId, setEditingSupplierId] = useState(null)
   const [editingPOId, setEditingPOId] = useState(null)
   const [submitting, setSubmitting] = useState(false)
+  const { notify } = useAlertToast()
+  const [poToCancel, setPoToCancel] = useState(null)
+  const [cancelingPo, setCancelingPo] = useState(false)
+  const [poToDraft, setPoToDraft] = useState(null)
+  const [movingPoToDraft, setMovingPoToDraft] = useState(false)
 
   // Forms
   const [supplierForm, setSupplierForm] = useState(createEmptySupplierForm())
@@ -257,18 +263,50 @@ export default function PurchasesPage() {
     else alert(res.error)
   }
 
-  const handleCancelPO = async (id) => {
-    if (!confirm('Cancel this purchase order?')) return
-    const res = await cancelPurchaseOrder(id)
-    if (res.success) loadData()
-    else alert(res.error)
+  const handleCancelPO = (id) => {
+    setPoToCancel(id)
   }
 
-  const handleMovePOToDraft = async (id) => {
-    if (!confirm('Move this purchase order to drafts? It will be permanently deleted after 30 days.')) return
-    const res = await movePurchaseOrderToDraft(id)
-    if (res.success) loadData()
-    else alert(res.error)
+  const confirmCancelPO = async () => {
+    if (!poToCancel) return
+    setCancelingPo(true)
+    try {
+      const res = await cancelPurchaseOrder(poToCancel)
+      if (res.success) {
+        notify('Purchase order cancelled', { variant: 'info' })
+        loadData()
+      } else {
+        notify(res.error || 'Failed to cancel purchase order', { variant: 'danger' })
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to cancel purchase order', { variant: 'danger' })
+    } finally {
+      setCancelingPo(false)
+      setPoToCancel(null)
+    }
+  }
+
+  const handleMovePOToDraft = (id) => {
+    setPoToDraft(id)
+  }
+
+  const confirmMovePOToDraft = async () => {
+    if (!poToDraft) return
+    setMovingPoToDraft(true)
+    try {
+      const res = await movePurchaseOrderToDraft(poToDraft)
+      if (res.success) {
+        notify('Purchase order moved to drafts', { variant: 'success' })
+        loadData()
+      } else {
+        notify(res.error || 'Failed to move purchase order to drafts', { variant: 'danger' })
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to move purchase order to drafts', { variant: 'danger' })
+    } finally {
+      setMovingPoToDraft(false)
+      setPoToDraft(null)
+    }
   }
 
   const handleSendPOToSupplier = async (id) => {
@@ -339,6 +377,12 @@ export default function PurchasesPage() {
     } else alert(res.error)
     setSubmitting(false)
   }
+
+  // Confirm modals
+  
+
+  // Confirm modals
+  
 
   const addPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0, gstRate: 18 }] }))
   const addReturnItem = () => setReturnForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0 }] }))
@@ -674,6 +718,26 @@ export default function PurchasesPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={!!poToCancel} onClose={() => setPoToCancel(null)} title="Cancel Purchase Order" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Are you sure you want to cancel this purchase order?</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setPoToCancel(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">No</button>
+            <button onClick={confirmCancelPO} disabled={cancelingPo} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{cancelingPo ? 'Cancelling...' : 'Yes, Cancel'}</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!poToDraft} onClose={() => setPoToDraft(null)} title="Move Purchase Order to Draft" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Move this purchase order to drafts? It will be permanently deleted after 30 days.</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setPoToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+            <button onClick={confirmMovePOToDraft} disabled={movingPoToDraft} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{movingPoToDraft ? 'Moving...' : 'Move to Draft'}</button>
+          </div>
+        </div>
       </Modal>
 
       {/* Create Supplier Modal */}

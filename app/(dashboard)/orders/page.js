@@ -12,6 +12,7 @@ import { Suspense } from 'react';
 import { getProducts } from '@/app/actions/products';
 import { getGodowns } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
 import { moveOrderToDraft } from '@/app/actions/drafts';
@@ -101,6 +102,11 @@ function OrdersPageInner() {
   const [editingTemplate, setEditingTemplate] = useState(false);
   const [tempTemplate, setTempTemplate] = useState(DEFAULT_SLIP_TEMPLATE);
   const slipRef = useRef(null);
+
+  const { notify } = useAlertToast();
+
+  const [orderToDraft, setOrderToDraft] = useState(null);
+  const [deletingOrder, setDeletingOrder] = useState(false);
 
   useEffect(() => {
     Promise.all([getOrders(), getMarketplaceChannels(), getProducts(), getGodowns()]).then(([ordersRes, channelsRes, productsRes, godownsRes]) => {
@@ -280,16 +286,31 @@ function OrdersPageInner() {
     }
   };
 
-  const handleMoveOrderToDraft = async (order) => {
-    if (!confirm('Move this order to drafts? It will be permanently deleted after 30 days.')) return;
-    const res = await moveOrderToDraft(order.dbId);
-    if (!res?.success) {
-      alert(res?.error || 'Failed to move order to drafts');
-      return;
-    }
-    const refreshed = await getOrders();
-    if (refreshed.success) setOrders(refreshed.data);
+  const handleMoveOrderToDraft = (order) => {
+    setOrderToDraft(order);
   };
+
+  const confirmMoveOrderToDraft = async () => {
+    if (!orderToDraft) return;
+    setDeletingOrder(true);
+    try {
+      const res = await moveOrderToDraft(orderToDraft.dbId);
+      if (!res?.success) {
+        notify(res?.error || 'Failed to move order to drafts', { variant: 'danger' });
+        return;
+      }
+      const refreshed = await getOrders();
+      if (refreshed.success) setOrders(refreshed.data);
+      notify('Order moved to drafts', { variant: 'success' });
+    } catch (err) {
+      notify(err?.message || 'Failed to move order to drafts', { variant: 'danger' });
+    } finally {
+      setDeletingOrder(false);
+      setOrderToDraft(null);
+    }
+  };
+
+  const cancelMoveOrderToDraft = () => setOrderToDraft(null);
 
   const selectOrderCustomer = async (contact) => {
     setOrderCustomer({ name: contact.name, phone: contact.phone });
@@ -803,6 +824,19 @@ function OrdersPageInner() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Confirm Move Order To Draft Modal */}
+      <Modal isOpen={!!orderToDraft} onClose={cancelMoveOrderToDraft} title="Move Order to Draft" size="sm">
+        {orderToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Move <strong className="text-foreground">{orderToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={cancelMoveOrderToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveOrderToDraft} disabled={deletingOrder} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingOrder ? 'Moving...' : 'Move to Draft'}</button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* ─── PACKAGING SLIP MODAL ─── */}

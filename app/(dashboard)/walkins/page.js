@@ -42,6 +42,8 @@ export default function WalkinsPage() {
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [qrUrl, setQrUrl] = useState('');
   const [linkCopied, setLinkCopied] = useState(false);
+  const [walkinToDraft, setWalkinToDraft] = useState(null);
+  const [deletingWalkin, setDeletingWalkin] = useState(false);
 
   useEffect(() => {
     Promise.all([getWalkins(), getStaff()]).then(([walkinsRes, staffRes]) => {
@@ -194,18 +196,33 @@ export default function WalkinsPage() {
     }
   };
 
-  const handleMoveToDraft = async () => {
+  const handleMoveToDraft = () => {
     if (!selectedWalkin) return;
-    if (!confirm('Move this walk-in to drafts? It will be permanently deleted after 30 days.')) return;
-    const res = await moveWalkinToDraft(selectedWalkin.id);
-    if (res?.success) {
-      setSelectedWalkin(null);
-      const refreshed = await getWalkins();
-      if (refreshed.success) setWalkins(refreshed.data);
-    } else {
-      alertToast.notify?.(res?.error || 'Failed to move walk-in to drafts', 'error');
+    setWalkinToDraft(selectedWalkin);
+  };
+
+  const confirmMoveToDraft = async () => {
+    if (!walkinToDraft) return;
+    setDeletingWalkin(true);
+    try {
+      const res = await moveWalkinToDraft(walkinToDraft.id);
+      if (res?.success) {
+        setSelectedWalkin(null);
+        const refreshed = await getWalkins();
+        if (refreshed.success) setWalkins(refreshed.data);
+        alertToast.notify?.('Walk-in moved to drafts', 'success');
+      } else {
+        alertToast.notify?.(res?.error || 'Failed to move walk-in to drafts', 'error');
+      }
+    } catch (err) {
+      alertToast.notify?.(err?.message || 'Failed to move walk-in to drafts', 'error');
+    } finally {
+      setDeletingWalkin(false);
+      setWalkinToDraft(null);
     }
   };
+
+  const cancelMoveToDraft = () => setWalkinToDraft(null);
 
   if (loading) {
     return (
@@ -234,6 +251,18 @@ export default function WalkinsPage() {
           </button>
         </div>
       </div>
+
+        <Modal isOpen={!!walkinToDraft} onClose={cancelMoveToDraft} title="Move Walk-in to Draft" size="sm">
+          {walkinToDraft && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted">Move <strong className="text-foreground">{walkinToDraft.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+              <div className="flex justify-end gap-3">
+                <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+                <button onClick={confirmMoveToDraft} disabled={deletingWalkin} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingWalkin ? 'Moving...' : 'Move to Draft'}</button>
+              </div>
+            </div>
+          )}
+        </Modal>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -273,37 +302,47 @@ export default function WalkinsPage() {
         <div className="overflow-x-auto">
           <table className="crm-table">
             <thead>
-              <tr>
-                <th>Time</th>
-                <th>Customer</th>
-                <th>Phone</th>
-                <th>Requirement</th>
-                <th>Budget</th>
-                <th>Assigned To</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th>Date</th>
-              </tr>
+                <tr>
+                  <th>Time</th>
+                  <th>Customer</th>
+                  <th>Phone</th>
+                  <th>Requirement</th>
+                  <th>Budget</th>
+                  <th>Assigned To</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th className="text-right">Actions</th>
+                </tr>
             </thead>
             <tbody>
               {filtered.map(w => {
                 const sc = statusConfig[w.status] || statusConfig.Browsing;
                 return (
-                  <tr key={w.id} className="cursor-pointer" onClick={() => setSelectedWalkin(w)}>
-                    <td className="text-foreground font-medium">{w.time}</td>
-                    <td className="font-medium text-foreground">{w.name}</td>
-                    <td className="text-muted">{w.phone}</td>
-                    <td>{w.requirement}</td>
-                    <td className="text-accent font-medium">{w.budget}</td>
-                    <td>
-                      <span className="px-2 py-0.5 rounded-full text-xs bg-surface border border-border">{w.assignedTo}</span>
-                    </td>
-                    <td className="text-muted">{w.visitDuration}</td>
-                    <td>
-                      <span className={`px-2 py-0.5 rounded-full text-xs border ${sc.cls}`}>{w.status}</span>
-                    </td>
-                    <td className="text-muted">{w.date}</td>
-                  </tr>
+                          <tr key={w.id} className="cursor-pointer" onClick={() => setSelectedWalkin(w)}>
+                            <td className="text-foreground font-medium">{w.time}</td>
+                            <td className="font-medium text-foreground">{w.name}</td>
+                            <td className="text-muted">{w.phone}</td>
+                            <td>{w.requirement}</td>
+                            <td className="text-accent font-medium">{w.budget}</td>
+                            <td>
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-surface border border-border">{w.assignedTo}</span>
+                            </td>
+                            <td className="text-muted">{w.visitDuration}</td>
+                            <td>
+                              <span className={`px-2 py-0.5 rounded-full text-xs border ${sc.cls}`}>{w.status}</span>
+                            </td>
+                            <td className="text-muted">{w.date}</td>
+                            <td className="w-24 text-right">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setWalkinToDraft(w); }}
+                                className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-400"
+                                title="Move to Draft"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
                 );
               })}
             </tbody>

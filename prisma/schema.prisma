@@ -275,6 +275,9 @@ model Quotation {
   contactPerson        String?
   dispatchAddress      String?
   installationPercent  Float           @default(5)
+  discountType         String          @default("PERCENT") // PERCENT | FLAT
+  discountValue        Float           @default(0)
+  discountAmount       Int             @default(0)
   installationCharge   Int             @default(0)
   freightCharge        Int             @default(0)
   loadingCharge        Int             @default(0)
@@ -793,6 +796,7 @@ model StoreSettings {
   phone          String?
   email          String?
   address        String?
+  paymentQr      String?
   gstNumber      String?
   gstRate        Float    @default(18.0)
   currency       String   @default("INR")

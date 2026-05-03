@@ -1,6 +1,7 @@
 'use server'
 
 import { prisma } from '@/lib/db'
+import { Prisma } from '@prisma/client'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireRole } from '@/lib/auth-helpers'
@@ -10,6 +11,7 @@ const updateSettingsSchema = z.object({
   phone: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
   address: z.string().optional(),
+  paymentQr: z.string().optional(),
   gstNumber: z.string().optional(),
   gstRate: z.number().min(0).max(100).optional(),
   currency: z.string().optional(),
@@ -28,6 +30,26 @@ const updateSettingsSchema = z.object({
   smtpConfigured: z.boolean().optional(),
 })
 
+const supportsStoreSettingsPaymentQr = Boolean(
+  Prisma.dmmf.datamodel.models
+    .find(model => model.name === 'StoreSettings')
+    ?.fields.some(field => field.name === 'paymentQr')
+)
+
+async function readPaymentQrFromDb() {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ paymentQr: string | null }>>`
+      SELECT "paymentQr" as "paymentQr"
+      FROM "StoreSettings"
+      WHERE "id" = 1
+      LIMIT 1
+    `
+    return rows[0]?.paymentQr ?? null
+  } catch {
+    return null
+  }
+}
+
 export async function getStoreSettings() {
   let settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
   if (!settings) {
@@ -36,6 +58,10 @@ export async function getStoreSettings() {
     })
   }
 
+  const paymentQr = supportsStoreSettingsPaymentQr
+    ? ((settings as { paymentQr?: string | null }).paymentQr ?? null)
+    : await readPaymentQrFromDb()
+
   return {
     success: true,
     data: {
@@ -43,6 +69,7 @@ export async function getStoreSettings() {
       phone: settings.phone,
       email: settings.email,
       address: settings.address,
+      paymentQr,
       gstNumber: settings.gstNumber,
       gstRate: settings.gstRate,
       currency: settings.currency,
@@ -68,14 +95,36 @@ export async function updateStoreSettings(data: unknown) {
   const parsed = updateSettingsSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
+  const { paymentQr, ...settingsWithoutPaymentQr } = parsed.data
+  const settingsData = supportsStoreSettingsPaymentQr ? parsed.data : settingsWithoutPaymentQr
+
   const settings = await prisma.storeSettings.upsert({
     where: { id: 1 },
-    update: parsed.data,
-    create: { id: 1, ...parsed.data },
+    update: settingsData,
+    create: { id: 1, ...settingsData },
   })
 
+  if (!supportsStoreSettingsPaymentQr && paymentQr !== undefined) {
+    try {
+      await prisma.$executeRaw`
+        UPDATE "StoreSettings"
+        SET "paymentQr" = ${paymentQr}
+        WHERE "id" = 1
+      `
+    } catch {
+      return {
+        success: false,
+        error: 'Payment QR field is not available yet. Run `npx prisma generate`, `npx prisma db push`, and restart the dev server.',
+      }
+    }
+  }
+
+  const resolvedPaymentQr = supportsStoreSettingsPaymentQr
+    ? ((settings as { paymentQr?: string | null }).paymentQr ?? null)
+    : await readPaymentQrFromDb()
+
   revalidatePath('/settings')
-  return { success: true, data: settings }
+  return { success: true, data: { ...settings, paymentQr: resolvedPaymentQr } }
 }
 
 export async function getMarketplaceChannels() {

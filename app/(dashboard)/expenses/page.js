@@ -11,6 +11,7 @@ import {
   FileText, Megaphone, Factory, Store, HardHat, Landmark,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 import {
   getExpenses, createExpense,
   getExpenseCategories, createExpenseCategory, updateCategoryBudget, deleteExpenseCategory,
@@ -37,6 +38,7 @@ const monthStr = () => new Date().toISOString().slice(0, 7); // YYYY-MM
 const startOfMonth = () => monthStr() + '-01';
 
 export default function ExpensesPage() {
+  const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
   // ─── TAB & CORE STATE ──────────────────────────
   const [tab, setTab] = useState('today');
   const [loading, setLoading] = useState(true);
@@ -66,6 +68,8 @@ export default function ExpensesPage() {
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddRecurring, setShowAddRecurring] = useState(false);
   const [showBudgetEdit, setShowBudgetEdit] = useState(null); // categoryId
+  const [expenseToDraft, setExpenseToDraft] = useState(null);
+  const [deletingExpense, setDeletingExpense] = useState(false);
   const [budgetVal, setBudgetVal] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [cashSaved, setCashSaved] = useState(false);
@@ -210,21 +214,41 @@ export default function ExpensesPage() {
     setSubmitting(false);
   };
 
-  const handleDeleteExpense = async (id) => {
-    if (!confirm('Move this expense to drafts? It will be permanently deleted after 30 days.')) return;
-    await moveExpenseToDraft(id);
-    await loadData(dateRange.from, dateRange.to);
-    // Refresh analytics/budget if they were loaded
-    if (summary) {
-      setAnalyticsLoading(true);
-      getExpenseSummary(dateRange.from, dateRange.to)
-        .then(r => { if (r.success) setSummary(r.data); })
-        .finally(() => setAnalyticsLoading(false));
-    }
-    if (budgetData.length > 0) {
-      getBudgetVsActual(selectedMonth).then(r => { if (r.success) setBudgetData(r.data); });
+  const handleDeleteExpense = (expense) => {
+    if (!expense) return;
+    setExpenseToDraft(expense);
+  };
+
+  const confirmMoveExpenseToDraft = async () => {
+    if (!expenseToDraft) return;
+    setDeletingExpense(true);
+    try {
+      const res = await moveExpenseToDraft(expenseToDraft.id);
+      if (res?.success) {
+        await loadData(dateRange.from, dateRange.to);
+        // Refresh analytics/budget if they were loaded
+        if (summary) {
+          setAnalyticsLoading(true);
+          getExpenseSummary(dateRange.from, dateRange.to)
+            .then(r => { if (r.success) setSummary(r.data); })
+            .finally(() => setAnalyticsLoading(false));
+        }
+        if (budgetData.length > 0) {
+          getBudgetVsActual(selectedMonth).then(r => { if (r.success) setBudgetData(r.data); });
+        }
+        alertToast.notify?.('Expense moved to drafts', 'success');
+      } else {
+        alertToast.notify?.(res?.error || 'Failed to move expense to drafts', 'error');
+      }
+    } catch (err) {
+      alertToast.notify?.(err?.message || 'Failed to move expense to drafts', 'error');
+    } finally {
+      setDeletingExpense(false);
+      setExpenseToDraft(null);
     }
   };
+
+  const cancelMoveExpenseToDraft = () => setExpenseToDraft(null);
 
   const handleAddCategory = async () => {
     if (!catForm.name) return;
@@ -511,7 +535,7 @@ export default function ExpensesPage() {
                             <Eye className="w-3.5 h-3.5" />
                           </a>
                         )}
-                        <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-muted hover:text-red-600 transition-colors">
+                        <button onClick={() => handleDeleteExpense(exp)} className="p-1 text-muted hover:text-red-600 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
@@ -644,7 +668,7 @@ export default function ExpensesPage() {
                                 <Eye className="w-3.5 h-3.5" />
                               </a>
                             )}
-                            <button onClick={() => handleDeleteExpense(exp.id)} className="p-1 text-muted hover:text-red-600 transition-colors">
+                            <button onClick={() => handleDeleteExpense(exp)} className="p-1 text-muted hover:text-red-600 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
@@ -1093,6 +1117,22 @@ export default function ExpensesPage() {
       )}
 
       {/* ═══════ ADD EXPENSE MODAL ═══════ */}
+      <Modal isOpen={!!expenseToDraft} onClose={cancelMoveExpenseToDraft} title="Move Expense to Draft" size="sm">
+        {expenseToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">
+              Move <strong className="text-foreground">{expenseToDraft.description || `Expense #${expenseToDraft.id}`}</strong> to drafts? It will be permanently deleted after 30 days.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button onClick={cancelMoveExpenseToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveExpenseToDraft} disabled={deletingExpense} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">
+                {deletingExpense ? 'Moving...' : 'Move to Draft'}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Modal isOpen={showAddExpense} onClose={() => setShowAddExpense(false)} title="Add Expense">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">

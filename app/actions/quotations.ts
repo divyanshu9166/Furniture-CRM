@@ -99,6 +99,31 @@ function buildNotesWithMetadata(notes?: string | null, bankDetails?: QuotationBa
   return cleanNotes ? `${metadata}\n${cleanNotes}` : metadata
 }
 
+type ProductDescriptionSource = {
+  description?: string | null
+  material?: string | null
+  color?: string | null
+  category?: { name: string } | null
+}
+
+function getPreferredItemDescription(
+  manualDescription?: string | null,
+  product?: ProductDescriptionSource | null
+) {
+  const cleanManualDescription = String(manualDescription || '').trim()
+  if (cleanManualDescription) return cleanManualDescription
+
+  const productDescription = String(product?.description || '').trim()
+  if (productDescription) return productDescription
+
+  const detailParts: string[] = []
+  if (product?.material?.trim()) detailParts.push(`Material: ${product.material.trim()}`)
+  if (product?.color?.trim()) detailParts.push(`Color: ${product.color.trim()}`)
+  if (product?.category?.name?.trim()) detailParts.push(`Category: ${product.category.name.trim()}`)
+
+  return detailParts.length > 0 ? detailParts.join(' | ') : null
+}
+
 function formatQuotation(quotation: QuotationWithRelations) {
   const { bankDetails, cleanNotes } = parseNotesMetadata(quotation.notes)
 
@@ -135,6 +160,9 @@ function formatQuotation(quotation: QuotationWithRelations) {
     contactPerson: quotation.contactPerson,
     subtotal,
     installationPercent: quotation.installationPercent,
+    discountType: quotation.discountType,
+    discountValue: quotation.discountValue,
+    discountAmount: quotation.discountAmount,
     installationCharge: quotation.installationCharge,
     freightCharge: quotation.freightCharge,
     loadingCharge: quotation.loadingCharge,
@@ -195,6 +223,8 @@ export async function createQuotation(data: unknown) {
     roadPermit,
     contactPerson,
     installationPercent,
+    discountType,
+    discountValue,
     freightCharge,
     loadingCharge,
     gstPercent,
@@ -239,7 +269,16 @@ export async function createQuotation(data: unknown) {
   const products = productIds.length
     ? await prisma.product.findMany({
         where: { id: { in: productIds } },
-        select: { id: true, name: true, sku: true, price: true },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          price: true,
+          description: true,
+          material: true,
+          color: true,
+          category: { select: { name: true } },
+        },
       })
     : []
   const productById = new Map(products.map(p => [p.id, p]))
@@ -260,7 +299,7 @@ export async function createQuotation(data: unknown) {
       productId: item.productId,
       name: item.name || product?.name || 'Item',
       sku: item.sku || product?.sku || null,
-      description: item.description,
+      description: getPreferredItemDescription(item.description, product),
       quantity,
       rate,
       amount,
@@ -270,8 +309,15 @@ export async function createQuotation(data: unknown) {
   })
 
   const subtotal = normalizedItems.reduce((sum, item) => sum + item.amount, 0)
-  const installationCharge = Math.round((subtotal * installationPercent) / 100)
-  const totalBeforeTax = subtotal + installationCharge + freightCharge + loadingCharge
+  const normalizedDiscountType = discountType === 'FLAT' ? 'FLAT' : 'PERCENT'
+  const normalizedDiscountValue = Math.max(0, Number(discountValue) || 0)
+  const computedDiscountAmount = normalizedDiscountType === 'PERCENT'
+    ? Math.round((subtotal * normalizedDiscountValue) / 100)
+    : Math.round(normalizedDiscountValue)
+  const discountAmount = Math.max(0, Math.min(subtotal, computedDiscountAmount))
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount)
+  const installationCharge = Math.round((subtotalAfterDiscount * installationPercent) / 100)
+  const totalBeforeTax = subtotalAfterDiscount + installationCharge + freightCharge + loadingCharge
   const gstAmount = Math.round((totalBeforeTax * gstPercent) / 100)
   const grandTotal = totalBeforeTax + gstAmount
   const notesWithMetadata = buildNotesWithMetadata(notes, bankDetails)
@@ -301,6 +347,9 @@ export async function createQuotation(data: unknown) {
       contactPerson,
       dispatchAddress: addressValue,
       installationPercent,
+      discountType: normalizedDiscountType,
+      discountValue: normalizedDiscountValue,
+      discountAmount,
       installationCharge,
       freightCharge,
       loadingCharge,
@@ -342,6 +391,8 @@ export async function updateQuotation(data: unknown) {
     roadPermit,
     contactPerson,
     installationPercent,
+    discountType,
+    discountValue,
     freightCharge,
     loadingCharge,
     gstPercent,
@@ -397,7 +448,16 @@ export async function updateQuotation(data: unknown) {
   const products = productIds.length
     ? await prisma.product.findMany({
         where: { id: { in: productIds } },
-        select: { id: true, name: true, sku: true, price: true },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          price: true,
+          description: true,
+          material: true,
+          color: true,
+          category: { select: { name: true } },
+        },
       })
     : []
   const productById = new Map(products.map(product => [product.id, product]))
@@ -418,7 +478,7 @@ export async function updateQuotation(data: unknown) {
       productId: item.productId,
       name: item.name || product?.name || 'Item',
       sku: item.sku || product?.sku || null,
-      description: item.description,
+      description: getPreferredItemDescription(item.description, product),
       quantity,
       rate,
       amount,
@@ -428,8 +488,15 @@ export async function updateQuotation(data: unknown) {
   })
 
   const subtotal = normalizedItems.reduce((sum, item) => sum + item.amount, 0)
-  const installationCharge = Math.round((subtotal * installationPercent) / 100)
-  const totalBeforeTax = subtotal + installationCharge + freightCharge + loadingCharge
+  const normalizedDiscountType = discountType === 'FLAT' ? 'FLAT' : 'PERCENT'
+  const normalizedDiscountValue = Math.max(0, Number(discountValue) || 0)
+  const computedDiscountAmount = normalizedDiscountType === 'PERCENT'
+    ? Math.round((subtotal * normalizedDiscountValue) / 100)
+    : Math.round(normalizedDiscountValue)
+  const discountAmount = Math.max(0, Math.min(subtotal, computedDiscountAmount))
+  const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount)
+  const installationCharge = Math.round((subtotalAfterDiscount * installationPercent) / 100)
+  const totalBeforeTax = subtotalAfterDiscount + installationCharge + freightCharge + loadingCharge
   const gstAmount = Math.round((totalBeforeTax * gstPercent) / 100)
   const grandTotal = totalBeforeTax + gstAmount
   const { bankDetails: existingBankDetails, cleanNotes: existingCleanNotes } = parseNotesMetadata(existing.notes)
@@ -448,6 +515,9 @@ export async function updateQuotation(data: unknown) {
       contactPerson,
       dispatchAddress: addressValue,
       installationPercent,
+      discountType: normalizedDiscountType,
+      discountValue: normalizedDiscountValue,
+      discountAmount,
       installationCharge,
       freightCharge,
       loadingCharge,

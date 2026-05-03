@@ -14,6 +14,7 @@ import {
   SplitSquareHorizontal, Eye, XCircle, Truck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import {
   getInvoices, createInvoice, recordPayment,
@@ -88,6 +89,9 @@ export default function BillingPage() {
   const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { notify } = useAlertToast();
+  const [invoiceToDraft, setInvoiceToDraft] = useState(null);
+  const [movingInvoiceToDraft, setMovingInvoiceToDraft] = useState(false);
 
   // POS state
   const [posItems, setPosItems] = useState([]);
@@ -389,23 +393,31 @@ export default function BillingPage() {
     }
   };
 
-  const handleMoveInvoiceToDraft = async () => {
+  const handleMoveInvoiceToDraft = () => {
     if (!selectedInvoice) return;
-    if (!confirm('Move this invoice to drafts? It will be permanently deleted after 30 days.')) return;
+    setInvoiceToDraft(selectedInvoice);
+  };
+
+  const confirmMoveInvoiceToDraft = async () => {
+    if (!invoiceToDraft) return;
+    setMovingInvoiceToDraft(true);
     setSubmitting(true);
     try {
-      const res = await moveInvoiceToDraft(selectedInvoice.dbId);
+      const res = await moveInvoiceToDraft(invoiceToDraft.dbId);
       if (res.success) {
         setShowCancelConfirm(false);
         setSelectedInvoice(null);
+        notify('Invoice moved to drafts', { variant: 'success' });
         await loadData();
       } else {
-        alert(res.error || 'Failed to move invoice to drafts');
+        notify(res.error || 'Failed to move invoice to drafts', { variant: 'danger' });
       }
-    } catch {
-      alert('Something went wrong');
+    } catch (err) {
+      notify(err?.message || 'Something went wrong', { variant: 'danger' });
     } finally {
       setSubmitting(false);
+      setMovingInvoiceToDraft(false);
+      setInvoiceToDraft(null);
     }
   };
 
@@ -1579,6 +1591,19 @@ export default function BillingPage() {
                 className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-all disabled:opacity-40 flex items-center justify-center gap-2">
                 {submitting ? 'Cancelling...' : <><Ban className="w-4 h-4" /> Cancel Invoice</>}
               </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ─── MOVE TO DRAFT MODAL ─── */}
+      <Modal isOpen={!!invoiceToDraft} onClose={() => setInvoiceToDraft(null)} title="Move Invoice to Draft" size="sm">
+        {invoiceToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Move invoice <strong className="text-foreground">{invoiceToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setInvoiceToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmMoveInvoiceToDraft} disabled={movingInvoiceToDraft} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{movingInvoiceToDraft ? 'Moving...' : 'Move to Draft'}</button>
             </div>
           </div>
         )}

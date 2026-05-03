@@ -31,6 +31,8 @@ export const createQuotationSchema = z.object({
   roadPermit: z.string().optional(),
   contactPerson: z.string().optional(),
   installationPercent: z.number().min(0).max(100).default(5),
+  discountType: z.enum(['PERCENT', 'FLAT']).default('PERCENT'),
+  discountValue: z.number().min(0).default(0),
   freightCharge: z.number().min(0).default(0),
   loadingCharge: z.number().min(0).default(0),
   gstPercent: z.number().min(0).max(100).default(18),

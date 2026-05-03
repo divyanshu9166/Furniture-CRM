@@ -26,7 +26,7 @@ function LoginContent() {
   const [staffList, setStaffList] = useState([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState('');
-  const [pin, setPin] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
 
   useEffect(() => {
     if (mode === 'staff' && staffList.length === 0) {
@@ -72,6 +72,10 @@ function LoginContent() {
       setError('Please select a staff member');
       return;
     }
+    if (!staffPassword) {
+      setError('Please enter your login password');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
@@ -79,15 +83,15 @@ function LoginContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           staffId: selectedStaffId,
-          pin,
-          type: 'staff-pin',
+          password: staffPassword,
+          type: 'staff-credentials',
         }),
       });
 
       const result = await res.json();
 
       if (!res.ok) {
-        setError(result.error || 'Invalid PIN. Use last 4 digits of your phone number.');
+        setError(result.error || 'Invalid staff credentials.');
       } else {
         // Full page reload so AuthProvider re-mounts and fetches the fresh session
         window.location.href = '/staff-portal';
@@ -163,7 +167,7 @@ function LoginContent() {
               {mode === 'admin' ? 'Admin Login' : 'Staff Login'}
             </h1>
             <p className="text-gray-500 dark:text-gray-400 mt-1">
-              {mode === 'admin' ? 'Sign in with your admin credentials' : 'Select your name and enter PIN'}
+              {mode === 'admin' ? 'Sign in with your admin credentials' : 'Select your name and enter your assigned login password'}
             </p>
           </div>
 
@@ -207,16 +211,16 @@ function LoginContent() {
                   <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} required
                     className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all">
                     <option value="">Choose your name</option>
-                    {staffList.filter(s => s.status === 'Active').map(s => (
+                    {staffList.filter(s => s.status === 'Active' && s.hasLogin && s.loginActive).map(s => (
                       <option key={s.id} value={s.id}>{s.name} — {s.role}</option>
                     ))}
                   </select>
                 )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">PIN</label>
-                <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} required maxLength={4} placeholder="4-digit PIN" inputMode="numeric" pattern="[0-9]*"
-                  className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all tracking-[0.3em] text-center text-lg" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Password</label>
+                <input type="password" value={staffPassword} onChange={(e) => setStaffPassword(e.target.value)} required placeholder="Enter your login password"
+                  className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all" />
               </div>
               <button type="submit" disabled={loading}
                 className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-400 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
@@ -225,7 +229,7 @@ function LoginContent() {
                 ) : 'Enter Staff Portal'}
               </button>
               <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                <p className="text-xs text-amber-600 dark:text-amber-400 text-center">PIN = last 4 digits of your phone number</p>
+                <p className="text-xs text-amber-600 dark:text-amber-400 text-center">Use the login password assigned by admin in Settings / Team.</p>
               </div>
             </form>
           )}

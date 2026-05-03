@@ -5,6 +5,7 @@ import { Calendar as CalIcon, Plus, Clock, User, Check, X, ChevronLeft, ChevronR
 import { getAppointments, createAppointment, updateAppointmentStatus, cancelAppointment } from '@/app/actions/appointments';
 import { moveAppointmentToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 
 const statusColors = {
   Scheduled: 'bg-info-light text-info',
@@ -18,6 +19,11 @@ const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { notify } = useAlertToast();
+  const [appointmentToCancel, setAppointmentToCancel] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [appointmentToDraft, setAppointmentToDraft] = useState(null);
+  const [deletingAppointment, setDeletingAppointment] = useState(false);
   const now = new Date();
   const [currentMonth, setCurrentMonth] = useState(now.getMonth());
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
@@ -56,17 +62,46 @@ export default function AppointmentsPage() {
     await refresh();
   };
 
-  const handleCancel = async (id) => {
-    if (!confirm('Cancel this appointment?')) return;
-    await cancelAppointment(id);
-    await refresh();
+  const handleCancel = (id) => {
+    setAppointmentToCancel(id);
   };
 
-  const handleMoveToDraft = async (id) => {
-    if (!confirm('Move this appointment to drafts? It will be permanently deleted after 30 days.')) return;
-    const res = await moveAppointmentToDraft(id);
-    if (res.success) await refresh();
-    else alert(res.error || 'Failed to move appointment to drafts');
+  const confirmCancel = async () => {
+    if (!appointmentToCancel) return;
+    setCancelling(true);
+    try {
+      await cancelAppointment(appointmentToCancel);
+      await refresh();
+      notify('Appointment cancelled', { variant: 'info' });
+    } catch (err) {
+      notify(err?.message || 'Failed to cancel appointment', { variant: 'danger' });
+    } finally {
+      setCancelling(false);
+      setAppointmentToCancel(null);
+    }
+  };
+
+  const handleMoveToDraft = (id) => {
+    setAppointmentToDraft(id);
+  };
+
+  const confirmMoveToDraft = async () => {
+    if (!appointmentToDraft) return;
+    setDeletingAppointment(true);
+    try {
+      const res = await moveAppointmentToDraft(appointmentToDraft);
+      if (res.success) {
+        await refresh();
+        notify('Appointment moved to drafts', { variant: 'success' });
+      } else {
+        notify(res.error || 'Failed to move appointment to drafts', { variant: 'danger' });
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to move appointment to drafts', { variant: 'danger' });
+    } finally {
+      setDeletingAppointment(false);
+      setAppointmentToDraft(null);
+    }
   };
 
   if (loading) {
@@ -93,6 +128,26 @@ export default function AppointmentsPage() {
           <Plus className="w-4 h-4" /> Book Appointment
         </button>
       </div>
+
+      <Modal isOpen={!!appointmentToCancel} onClose={() => setAppointmentToCancel(null)} title="Cancel Appointment" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Are you sure you want to cancel this appointment?</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setAppointmentToCancel(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">No</button>
+            <button onClick={confirmCancel} disabled={cancelling} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{cancelling ? 'Cancelling...' : 'Yes, Cancel'}</button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={!!appointmentToDraft} onClose={() => setAppointmentToDraft(null)} title="Move Appointment to Draft" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Move this appointment to drafts? It will be permanently deleted after 30 days.</p>
+          <div className="flex justify-end gap-3">
+            <button onClick={() => setAppointmentToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+            <button onClick={confirmMoveToDraft} disabled={deletingAppointment} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingAppointment ? 'Moving...' : 'Move to Draft'}</button>
+          </div>
+        </div>
+      </Modal>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Calendar */}

@@ -5,6 +5,7 @@ import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, C
 import { getLeads, createLead, updateLeadStatus, addFollowUp } from '@/app/actions/leads';
 import { moveLeadToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
+import { useAlertToast } from '@/components/AlertToastProvider';
 
 const pipelineStages = ['New', 'Contacted', 'Showroom Visit', 'Quotation', 'Won', 'Lost'];
 
@@ -42,6 +43,9 @@ export default function LeadsPage() {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
   const [followUpForm, setFollowUpForm] = useState({ day: 1, message: '', date: '' });
+  const { notify } = useAlertToast();
+  const [leadToDraft, setLeadToDraft] = useState(null);
+  const [deletingLead, setDeletingLead] = useState(false);
 
   const refresh = async () => {
     const res = await getLeads();
@@ -83,14 +87,35 @@ export default function LeadsPage() {
     setUpdatingStatus(false);
   };
 
-  const handleDelete = async (leadId) => {
-    if (!confirm('Move this lead to drafts? It will be permanently deleted after 30 days.')) return;
-    const res = await moveLeadToDraft(leadId);
-    if (res?.success) {
-      setSelectedLead(null);
-      await refresh();
+  const handleDelete = (leadId) => {
+    const lead = leads.find(l => l.id === leadId);
+    // Close detail modal so confirmation modal appears on top.
+    // Delay setting the draft modal until after the detail modal closes to avoid z-index/overlay issues.
+    setSelectedLead(null);
+    setTimeout(() => setLeadToDraft(lead || { id: leadId }), 160);
+  };
+
+  const confirmDelete = async () => {
+    if (!leadToDraft) return;
+    setDeletingLead(true);
+    try {
+      const res = await moveLeadToDraft(leadToDraft.id);
+      if (res?.success) {
+        setSelectedLead(null);
+        await refresh();
+        notify('Lead moved to drafts', { variant: 'success' });
+      } else {
+        notify(res?.error || 'Failed to move lead to drafts', { variant: 'danger' });
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to move lead to drafts', { variant: 'danger' });
+    } finally {
+      setDeletingLead(false);
+      setLeadToDraft(null);
     }
   };
+
+  const cancelDelete = () => setLeadToDraft(null);
 
   const handleAddFollowUp = async () => {
     if (!followUpForm.message || !followUpForm.date) return;
@@ -228,6 +253,18 @@ export default function LeadsPage() {
           </div>
         </div>
       )}
+
+      <Modal isOpen={!!leadToDraft} onClose={cancelDelete} title="Move Lead to Draft" size="sm">
+        {leadToDraft && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted">Move <strong className="text-foreground">{leadToDraft.name || leadToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={cancelDelete} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button onClick={confirmDelete} disabled={deletingLead} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingLead ? 'Moving...' : 'Move to Draft'}</button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Lead Detail Modal */}
       <Modal isOpen={!!selectedLead} onClose={() => { setSelectedLead(null); setShowFollowUpForm(false); }} title="Lead Details" size="lg">
