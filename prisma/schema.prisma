@@ -124,6 +124,7 @@ model Lead {
   updatedAt    DateTime   @updatedAt
 
   followUps FollowUp[]
+  indiaMartLead IndiaMartLead?
 
   @@index([status])
   @@index([date])
@@ -858,6 +859,58 @@ model ChannelConfig {
   webhookUrl  String?  // auto-generated webhook URL for this channel
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// --- INDIA MART LEADS INTEGRATION ---
+
+model IndiaMartConfig {
+  id                Int        @id @default(1)
+  enabled           Boolean    @default(false)
+  pullApiKey        String?
+  autoImportToLeads Boolean    @default(true)
+  defaultLeadStatus LeadStatus @default(NEW)
+  overlapMinutes    Int        @default(5)
+  lastSyncAt        DateTime?
+  lastSyncStart     DateTime?
+  lastSyncEnd       DateTime?
+  lastSyncCode      Int?
+  lastSyncMessage   String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+}
+
+model IndiaMartLead {
+  id               Int       @id @default(autoincrement())
+  uniqueQueryId    String    @unique
+  queryType        String?
+  queryTime        DateTime?
+  senderName       String
+  senderMobile     String?
+  senderEmail      String?
+  senderCompany    String?
+  senderAddress    String?
+  senderCity       String?
+  senderState      String?
+  senderPincode    String?
+  senderCountryIso String?
+  senderMobileAlt  String?
+  senderEmailAlt   String?
+  queryProductName String?
+  queryMessage     String?
+  queryMcatName    String?
+  callDuration     String?
+  receiverMobile   String?
+  rawPayload       Json
+  syncedAt         DateTime  @default(now())
+  leadId           Int?      @unique
+  lead             Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([queryTime])
+  @@index([queryType])
+  @@index([syncedAt])
+  @@index([leadId])
 }
 
 // ─── EMAIL MARKETING ────────────────────────────────

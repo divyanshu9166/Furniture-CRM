@@ -10,6 +10,7 @@ import { testSmtp, sendSmtpTestEmail } from '@/app/actions/email-campaigns';
 import { runStockCheck } from '@/app/actions/notifications';
 import { updateAccountCredentials } from '@/app/actions/auth';
 import { useSession } from '@/components/AuthProvider';
+import IndiaMartIntegrationSettings from './IndiaMartIntegrationSettings';
 
 const channelDefinitions = [
   {
@@ -1265,8 +1266,9 @@ export default function SettingsPage() {
               {/* Non-channel integrations */}
               <div className="mt-6">
                 <h2 className="text-lg font-semibold text-foreground mb-2">Other Integrations</h2>
+                <IndiaMartIntegrationSettings />
                 {nonChannelIntegrations.map((int, i) => (
-                  <div key={i} className="glass-card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between mb-3">
+                  <div key={i} className="glass-card p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-3 sm:justify-between mt-3">
                     <div className="flex items-center gap-3 sm:gap-4">
                       <span className="text-2xl sm:text-3xl flex-shrink-0">{int.icon}</span>
                       <div><p className="text-sm font-semibold text-foreground">{int.name}</p><p className="text-xs text-muted">{int.description}</p></div>

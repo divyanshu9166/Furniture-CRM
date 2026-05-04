@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, ChevronRight, Bot, Clock, Trash2, Store } from 'lucide-react';
+import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, ChevronRight, Bot, Clock, Trash2, Store, Building2 } from 'lucide-react';
 import { getLeads, createLead, updateLeadStatus, addFollowUp } from '@/app/actions/leads';
 import { moveLeadToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
@@ -14,7 +14,7 @@ const stageToEnum = {
   'Quotation': 'QUOTATION', 'Won': 'WON', 'Lost': 'LOST',
 };
 
-const sourceIconMap = { WhatsApp: MessageSquare, Instagram, Facebook, Website: Globe, 'Showroom Visit': Store };
+const sourceIconMap = { WhatsApp: MessageSquare, Instagram, Facebook, Website: Globe, 'Showroom Visit': Store, IndiaMART: Building2 };
 
 const sourceColorMap = {
   WhatsApp: 'text-success bg-success-light',
@@ -22,6 +22,7 @@ const sourceColorMap = {
   Facebook: 'text-info bg-info-light',
   Website: 'text-teal bg-teal-light',
   'Showroom Visit': 'text-amber-700 bg-amber-500/10',
+  IndiaMART: 'text-blue-700 bg-blue-500/10',
 };
 
 const statusColorMap = {
@@ -423,7 +424,7 @@ export default function LeadsPage() {
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Source</label>
               <select name="source" className="w-full">
-                <option>WhatsApp</option><option>Instagram</option><option>Facebook</option><option>Website</option><option>Showroom Visit</option>
+                <option>WhatsApp</option><option>Instagram</option><option>Facebook</option><option>Website</option><option>Showroom Visit</option><option>IndiaMART</option>
               </select>
             </div>
             <div>

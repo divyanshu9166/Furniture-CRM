@@ -74,6 +74,9 @@ Run `crontab -e` and add the following:
 
 # Financial alerts every morning at 10 AM
 0 10 * * * curl -X GET -H "x-api-secret: your_api_secret_for_cron" https://my-crm-project.duckdns.org/api/cron/financial-alerts
+
+# IndiaMART lead sync every 10 minutes
+*/10 * * * * curl -X GET -H "x-api-secret: your_api_secret_for_cron" https://my-crm-project.duckdns.org/api/cron/indiamart-sync
 ```
 
 ## 4. Deployment Commands
