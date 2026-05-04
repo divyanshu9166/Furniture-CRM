@@ -21,6 +21,7 @@ import {
   holdProduction, cancelProductionOrder, deleteProductionOrder,
   completeProduction, recordQualityCheck,
   getMRPAnalysis, getManufacturingStats, updateProductionStep,
+  getManufacturingCustomOrders, getScrapInventory, getCustomOrderInventory,
 } from '@/app/actions/manufacturing'
 import { getProducts, createProduct, deleteProduct, updateProduct } from '@/app/actions/products'
 import Modal from '@/components/Modal'
@@ -60,6 +61,7 @@ function downloadBOMCSV(bom) {
   rows.push(['SKU', bom.finishedProduct?.sku ?? ''])
   rows.push(['Version', bom.version])
   rows.push(['Estimated Days', bom.estimatedDays ?? ''])
+  rows.push(['Standard Time (min)', bom.standardMins ?? (bom.steps?.reduce((s, step) => s + (step.durationMins || 0), 0) ?? 0)])
   rows.push([])
   rows.push(['=== RAW MATERIALS ==='])
   rows.push(['Material', 'SKU', 'Quantity', 'UoM', 'Wastage%', 'Unit Cost (₹)', 'Total Cost (₹)'])
@@ -72,12 +74,12 @@ function downloadBOMCSV(bom) {
       i.unitOfMeasure,
       i.wastagePercent + '%',
       uc,
-      Math.round(i.quantity * uc),
+      Math.round(i.quantity * (1 + (i.wastagePercent || 0) / 100) * uc),
     ])
   })
   const matTotal = bom.items?.reduce((s, i) => {
     const uc = i.unitCost > 0 ? i.unitCost : (i.rawMaterial?.costPrice ?? 0)
-    return s + Math.round(i.quantity * uc)
+    return s + Math.round(i.quantity * (1 + (i.wastagePercent || 0) / 100) * uc)
   }, 0) ?? 0
   rows.push(['', '', '', '', '', 'Total Material Cost', matTotal])
   rows.push([])
@@ -123,6 +125,9 @@ export default function ManufacturingPage() {
   const [staffOptions, setStaffOptions] = useState([])
   const [stats, setStats] = useState(null)
   const [templates, setTemplates] = useState([])
+  const [customOrders, setCustomOrders] = useState([])
+  const [scrapInventory, setScrapInventory] = useState([])
+  const [customInventory, setCustomInventory] = useState([])
 
   // Modals
   const [showBOMModal, setShowBOMModal] = useState(false)
@@ -172,7 +177,7 @@ export default function ManufacturingPage() {
   // Production form
   const [prodForm, setProdForm] = useState({
     bomId: '', plannedQty: 1, priority: 'MEDIUM', dueDate: '', startDate: '',
-    workCenterId: '', assignedStaffId: '', notes: '',
+    workCenterId: '', assignedStaffId: '', customOrderId: '', notes: '',
   })
 
   // Complete form
@@ -180,6 +185,7 @@ export default function ManufacturingPage() {
     productionOrderId: 0, actualQty: 0, totalLabourCost: 0, overheadCost: 0, machineCost: 0,
     scrapQty: 0, scrapReason: '', qualityStatus: 'PASSED', qualityNotes: '', notes: '',
     consumptions: [],
+    stepActuals: [],
   })
 
   // Work center form
@@ -193,9 +199,10 @@ export default function ManufacturingPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
-    const [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes] = await Promise.all([
+    const [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes] = await Promise.all([
       getBOMs(), getProductionOrders(), getProducts(),
       getWorkCenters(), getManufacturingStats(), getBomTemplates(), getAssignableStaff(),
+      getManufacturingCustomOrders(), getScrapInventory(), getCustomOrderInventory(),
     ])
     if (bomRes.success) setBoms(bomRes.data)
     if (ordRes.success) setOrders(ordRes.data)
@@ -204,6 +211,9 @@ export default function ManufacturingPage() {
     if (statsRes.success) setStats(statsRes.data)
     if (tmplRes.success) setTemplates(tmplRes.data)
     if (staffRes.success) setStaffOptions(staffRes.data)
+    if (customRes.success) setCustomOrders(customRes.data)
+    if (scrapRes.success) setScrapInventory(scrapRes.data)
+    if (customInvRes.success) setCustomInventory(customInvRes.data)
     setLoading(false)
   }, [])
 
@@ -291,11 +301,12 @@ export default function ManufacturingPage() {
       startDate: prodForm.startDate || undefined,
       workCenterId: prodForm.workCenterId ? Number(prodForm.workCenterId) : undefined,
       assignedStaffId: prodForm.assignedStaffId ? Number(prodForm.assignedStaffId) : undefined,
+      customOrderId: prodForm.customOrderId ? Number(prodForm.customOrderId) : undefined,
       notes: prodForm.notes || undefined,
     })
     if (res.success) {
       setShowProdModal(false)
-      setProdForm({ bomId: '', plannedQty: 1, priority: 'MEDIUM', dueDate: '', startDate: '', workCenterId: '', assignedStaffId: '', notes: '' })
+      setProdForm({ bomId: '', plannedQty: 1, priority: 'MEDIUM', dueDate: '', startDate: '', workCenterId: '', assignedStaffId: '', customOrderId: '', notes: '' })
       loadData()
     } else alert(res.error)
     setSubmitting(false)
@@ -339,15 +350,25 @@ export default function ManufacturingPage() {
   }
 
   const openCompleteModal = (order) => {
+    const stepActuals = order.productionSteps?.map(s => ({
+      stepId: s.id,
+      stepNumber: s.stepNumber,
+      operationName: s.operationName,
+      plannedMins: s.plannedMins || 0,
+      labourRatePerHour: s.labourRatePerHour || 0,
+      actualMins: s.actualMins || s.plannedMins || 0,
+    })) || []
+    const suggestedLabourCost = stepActuals.reduce((sum, s) => sum + (Number(s.actualMins || 0) / 60) * Number(s.labourRatePerHour || 0), 0)
     setCompleteForm({
       productionOrderId: order.id,
       actualQty: order.plannedQty,
-      totalLabourCost: 0,
+      totalLabourCost: Math.round(suggestedLabourCost),
       overheadCost: 0,
       machineCost: 0,
       scrapQty: 0, scrapReason: '',
       qualityStatus: 'PASSED', qualityNotes: '', notes: '',
-      consumptions: order.consumptions?.map(c => ({ rawMaterialId: c.rawMaterialId, plannedQty: c.plannedQty, actualQty: c.plannedQty })) || [],
+      consumptions: order.consumptions?.map(c => ({ rawMaterialId: c.rawMaterialId, plannedQty: c.plannedQty, actualQty: c.plannedQty, scrapQty: 0, scrapReason: '' })) || [],
+      stepActuals,
     })
     setSelectedOrder(order)
     setShowCompleteModal(true)
@@ -362,7 +383,13 @@ export default function ManufacturingPage() {
       overheadCost: Number(completeForm.overheadCost),
       machineCost: Number(completeForm.machineCost),
       scrapQty: Number(completeForm.scrapQty),
-      consumptions: completeForm.consumptions.map(c => ({ rawMaterialId: c.rawMaterialId, actualQty: Number(c.actualQty) })),
+      consumptions: completeForm.consumptions.map(c => ({
+        rawMaterialId: c.rawMaterialId,
+        actualQty: Number(c.actualQty),
+        scrapQty: Number(c.scrapQty) || 0,
+        scrapReason: c.scrapReason || undefined,
+      })),
+      stepActuals: completeForm.stepActuals.map(s => ({ stepId: s.stepId, actualMins: Number(s.actualMins) || 0 })),
     })
     if (res.success) { setShowCompleteModal(false); loadData() }
     else alert(res.error)
@@ -494,6 +521,8 @@ export default function ManufacturingPage() {
     { id: 'workcenters', label: 'Work Centers', icon: Wrench },
     { id: 'mrp', label: 'MRP Planner', icon: Cpu },
     { id: 'quality', label: 'Quality & Scrap', icon: ShieldCheck },
+    { id: 'scrap', label: 'Scrap Inventory', icon: FlameKindling },
+    { id: 'customInventory', label: 'Custom Inventory', icon: Package },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'costing', label: 'Job Costing', icon: Activity },
   ]
@@ -615,6 +644,7 @@ export default function ManufacturingPage() {
                         <td className="px-4 py-3">
                           <p className="text-foreground font-medium text-xs">{o.finishedProduct?.name}</p>
                           <p className="text-muted text-[10px]">{o.bom?.name} v{o.bom?.version}</p>
+                          {o.customOrder && <p className="text-accent text-[10px]">{o.customOrder.displayId} · {o.customOrder.contact?.name}</p>}
                         </td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${PRIORITY_COLORS[o.priority] || ''}`}>{o.priority}</span>
@@ -782,8 +812,9 @@ export default function ManufacturingPage() {
                 </div>
 
                 {/* Full Cost Breakdown */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                   {[
+                    { label: 'Std Time', value: `${mrpResult.totalStandardMins} min`, color: 'text-cyan-400', icon: Clock },
                     { label: 'Material Cost', value: `₹${mrpResult.totalMaterialCost.toLocaleString('en-IN')}`, color: 'text-foreground', icon: Package },
                     { label: 'Labour Cost', value: `₹${mrpResult.totalLabourCost.toLocaleString('en-IN')}`, color: 'text-blue-400', icon: Clock },
                     { label: 'Machine Cost', value: `₹${mrpResult.totalMachineCost.toLocaleString('en-IN')}`, color: 'text-amber-400', icon: Zap },
@@ -900,8 +931,8 @@ export default function ManufacturingPage() {
             {[
               { label: 'Quality Pass Rate', value: `${stats?.totals?.qualityRate ?? 0}%`, icon: ShieldCheck, color: 'text-emerald-400' },
               { label: 'Avg Yield Rate', value: `${stats?.totals?.avgYield ?? 0}%`, icon: TrendingUp, color: 'text-blue-400' },
-              { label: 'Total Scrap', value: `${stats?.totals?.totalScrap ?? 0} pcs`, icon: FlameKindling, color: 'text-red-400' },
-              { label: 'Completed Orders', value: completedOrders.length, icon: CheckCircle, color: 'text-purple-400' },
+              { label: 'Finished Scrap', value: `${stats?.totals?.totalScrap ?? 0} pcs`, icon: FlameKindling, color: 'text-red-400' },
+              { label: 'Material Scrap', value: `${(stats?.totals?.totalMaterialScrapQty ?? 0).toLocaleString('en-IN')} qty`, icon: Package, color: 'text-orange-400' },
             ].map((s, i) => (
               <div key={i} className="glass-card p-4 flex items-center gap-3">
                 <s.icon className={`w-5 h-5 ${s.color}`} />
@@ -984,6 +1015,127 @@ export default function ManufacturingPage() {
       )}
 
       {/* ── TAB: Analytics ── */}
+      {/* -- TAB: Scrap Inventory -- */}
+      {tab === 'scrap' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Scrap Lots', value: scrapInventory.length, icon: FlameKindling, color: 'text-red-400' },
+              { label: 'Reusable Qty', value: scrapInventory.filter(s => s.status === 'IN_STOCK').reduce((sum, s) => sum + (s.quantity || 0), 0).toLocaleString('en-IN'), icon: Package, color: 'text-emerald-400' },
+              { label: 'Scrap Value', value: `₹${scrapInventory.reduce((sum, s) => sum + (s.estimatedValue || 0), 0).toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-amber-400' },
+              { label: 'Used/Disposed', value: scrapInventory.filter(s => s.status !== 'IN_STOCK').length, icon: CheckCircle, color: 'text-blue-400' },
+            ].map((s, i) => (
+              <div key={i} className="glass-card p-4 flex items-center gap-3">
+                <s.icon className={`w-5 h-5 ${s.color}`} />
+                <div>
+                  <p className="text-xs text-muted">{s.label}</p>
+                  <p className="text-lg font-bold text-foreground">{s.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="glass-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-medium text-foreground">Material Scrap & Offcuts</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[860px]">
+                <thead>
+                  <tr className="border-b border-border bg-surface-hover">
+                    {['Material','Source Order','Qty','Value','Disposition','Status','Reason','Date'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {scrapInventory.map(s => (
+                    <tr key={s.id} className="border-b border-border/50 hover:bg-surface-hover">
+                      <td className="px-4 py-3">
+                        <p className="text-foreground font-medium">{s.rawMaterial?.name}</p>
+                        <p className="text-[10px] text-muted font-mono">{s.rawMaterial?.sku}</p>
+                      </td>
+                      <td className="px-4 py-3 text-muted text-xs">{s.productionOrder?.displayId || '—'}</td>
+                      <td className="px-4 py-3 text-foreground font-semibold">{s.quantity} {s.unitOfMeasure}</td>
+                      <td className="px-4 py-3 text-foreground">₹{(s.estimatedValue || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{s.disposition}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${s.status === 'IN_STOCK' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-500/10 text-gray-400'}`}>{s.status.replace(/_/g, ' ')}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted text-xs">{s.reason || s.notes || '—'}</td>
+                      <td className="px-4 py-3 text-muted text-xs">{s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {scrapInventory.length === 0 && <div className="text-center py-10 text-muted">No material scrap recorded yet</div>}
+          </div>
+        </div>
+      )}
+
+      {/* -- TAB: Custom Inventory -- */}
+      {tab === 'customInventory' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { label: 'Custom Lots', value: customInventory.length, icon: Package, color: 'text-cyan-400' },
+              { label: 'Ready Qty', value: customInventory.filter(i => i.status === 'READY').reduce((sum, i) => sum + (i.quantity || 0), 0), icon: CheckCircle, color: 'text-emerald-400' },
+              { label: 'Inventory Value', value: `₹${customInventory.reduce((sum, i) => sum + (i.totalCost || 0), 0).toLocaleString('en-IN')}`, icon: DollarSign, color: 'text-amber-400' },
+              { label: 'Linked Orders', value: new Set(customInventory.map(i => i.customOrderId)).size, icon: Factory, color: 'text-purple-400' },
+            ].map((s, i) => (
+              <div key={i} className="glass-card p-4 flex items-center gap-3">
+                <s.icon className={`w-5 h-5 ${s.color}`} />
+                <div>
+                  <p className="text-xs text-muted">{s.label}</p>
+                  <p className="text-lg font-bold text-foreground">{s.value}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="glass-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border">
+              <h3 className="text-sm font-medium text-foreground">Finished Goods for Custom Orders</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[860px]">
+                <thead>
+                  <tr className="border-b border-border bg-surface-hover">
+                    {['Custom Order','Customer','Product','Production','Qty','Unit Cost','Total Cost','Status'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {customInventory.map(i => (
+                    <tr key={i.id} className="border-b border-border/50 hover:bg-surface-hover">
+                      <td className="px-4 py-3">
+                        <p className="font-mono text-xs font-semibold text-foreground">{i.customOrder?.displayId}</p>
+                        <p className="text-[10px] text-muted">{i.customOrder?.type}</p>
+                      </td>
+                      <td className="px-4 py-3 text-foreground">{i.customOrder?.contact?.name || '—'}</td>
+                      <td className="px-4 py-3">
+                        <p className="text-foreground font-medium">{i.product?.name}</p>
+                        <p className="text-[10px] text-muted font-mono">{i.product?.sku}</p>
+                      </td>
+                      <td className="px-4 py-3 text-muted text-xs">{i.productionOrder?.displayId || '—'}</td>
+                      <td className="px-4 py-3 text-foreground font-semibold">{i.quantity}</td>
+                      <td className="px-4 py-3 text-foreground">₹{(i.unitCost || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3 text-foreground">₹{(i.totalCost || 0).toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${i.status === 'READY' ? 'bg-emerald-500/10 text-emerald-400' : i.status === 'WIP' ? 'bg-blue-500/10 text-blue-400' : 'bg-gray-500/10 text-gray-400'}`}>{i.status}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {customInventory.length === 0 && <div className="text-center py-10 text-muted">No custom order inventory yet</div>}
+          </div>
+        </div>
+      )}
+
       {tab === 'analytics' && !stats && (
         <div className="text-center py-16 text-muted">Loading analytics data...</div>
       )}
@@ -994,7 +1146,7 @@ export default function ManufacturingPage() {
               { label: 'Total Produced', value: stats.totals.totalProduced.toLocaleString('en-IN'), sub: 'units', icon: Package, color: 'text-blue-400' },
               { label: 'Total Cost', value: `₹${(stats.totals.totalCost / 100000).toFixed(1)}L`, sub: 'incl. overhead', icon: Activity, color: 'text-amber-400' },
               { label: 'Quality Pass Rate', value: `${stats.totals.qualityRate}%`, sub: 'of completed', icon: ShieldCheck, color: 'text-emerald-400' },
-              { label: 'Avg Yield Rate', value: `${stats.totals.avgYield}%`, sub: 'actual/planned', icon: TrendingUp, color: 'text-purple-400' },
+              { label: 'Extra Time Cost', value: `₹${(stats.totals.totalTimeVarianceCost || 0).toLocaleString('en-IN')}`, sub: `${stats.totals.totalTimeVarianceMins || 0} extra min`, icon: Clock, color: 'text-red-400' },
             ].map((s, i) => (
               <div key={i} className="glass-card p-4">
                 <div className="flex items-center gap-2 mb-2">
@@ -1127,13 +1279,14 @@ export default function ManufacturingPage() {
                   </span>
                 </div>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
                 {[
                   { label: 'Material Cost', value: o.totalMaterialCost || 0 },
                   { label: 'Labour Cost', value: o.totalLabourCost || 0 },
                   { label: 'Overhead', value: o.overheadCost || 0 },
                   { label: 'Total Cost', value: o.totalCost || 0 },
                   { label: 'Cost/Unit', value: o.costPerUnit || 0 },
+                  { label: 'Extra Time Cost', value: o.labourVarianceCost || 0 },
                 ].map((c, i) => (
                   <div key={i} className="bg-surface-hover p-3 rounded-lg">
                     <p className="text-[10px] text-muted">{c.label}</p>
@@ -1145,19 +1298,22 @@ export default function ManufacturingPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
-                      {['Material','Planned Qty','Actual Qty','Unit Cost','Total Cost','Variance'].map(h => (
+                      {['Material','Planned Qty','Used','Scrap','Returned','Unit Cost','Total Cost','Variance'].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {o.consumptions.map((c, i) => {
-                      const variance = ((c.actualQty - c.plannedQty) / c.plannedQty * 100).toFixed(1)
+                      const varianceBase = (c.actualQty || 0) + (c.scrapQty || 0)
+                      const variance = c.plannedQty > 0 ? ((varianceBase - c.plannedQty) / c.plannedQty * 100).toFixed(1) : '0.0'
                       return (
                         <tr key={i} className="border-b border-border/50">
                           <td className="px-3 py-2 text-foreground">{c.rawMaterial?.name}</td>
                           <td className="px-3 py-2 text-muted">{c.plannedQty?.toFixed(2)} {c.rawMaterial?.unitOfMeasure}</td>
                           <td className="px-3 py-2 text-foreground">{c.actualQty?.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-red-400">{(c.scrapQty || 0).toFixed(2)}</td>
+                          <td className="px-3 py-2 text-emerald-400">{(c.returnedQty || 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-foreground">₹{c.unitCost?.toLocaleString('en-IN')}</td>
                           <td className="px-3 py-2 text-foreground">₹{c.totalCost?.toLocaleString('en-IN')}</td>
                           <td className="px-3 py-2">
@@ -1384,9 +1540,14 @@ export default function ManufacturingPage() {
                 ['Status', selectedOrder.status?.replace(/_/g,' ')],
                 ['Planned Qty', selectedOrder.plannedQty],
                 ['Actual Qty', selectedOrder.actualQty ?? 0],
+                ['Std Time', `${selectedOrder.standardMins || 0} min`],
+                ['Actual Time', `${selectedOrder.actualMins || 0} min`],
+                ['Time Variance', `${selectedOrder.labourVarianceMins > 0 ? '+' : ''}${selectedOrder.labourVarianceMins || 0} min`],
+                ['Extra Labour Cost', `₹${(selectedOrder.labourVarianceCost || 0).toLocaleString('en-IN')}`],
                 ['Yield Rate', selectedOrder.yieldRate ? `${selectedOrder.yieldRate.toFixed(1)}%` : '0%'],
                 ['Quality', selectedOrder.qualityStatus],
                 ['Scrap Qty', selectedOrder.scrapQty || 0],
+                ['Custom Order', selectedOrder.customOrder ? `${selectedOrder.customOrder.displayId} · ${selectedOrder.customOrder.contact?.name}` : '—'],
                 ['Assigned To', selectedOrder.assignedStaff?.name || selectedOrder.assignedTo || '—'],
                 ['Work Center', selectedOrder.workCenter?.name || '—'],
                 ['Due Date', selectedOrder.dueDate ? new Date(selectedOrder.dueDate).toLocaleDateString('en-IN') : '—'],
@@ -1408,6 +1569,7 @@ export default function ManufacturingPage() {
                       <span className="flex-1 text-foreground min-w-[100px]">{s.operationName}</span>
                       <span className="text-muted text-xs">{s.workCenter?.name || '—'}</span>
                       <span className="text-muted text-xs">{s.plannedMins}min</span>
+                      {s.actualMins > 0 && <span className={`text-xs ${s.actualMins > s.plannedMins ? 'text-red-400' : 'text-emerald-400'}`}>Actual {s.actualMins}min</span>}
                       {['PLANNED','IN_PROGRESS','COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
                         <div className="flex gap-1">
                           {s.status === 'PENDING' && (
@@ -1521,7 +1683,14 @@ export default function ManufacturingPage() {
                     <div className="flex-1">
                       <label className="text-[10px] text-muted block mb-0.5">Material</label>
                       <select value={item.rawMaterialId}
-                        onChange={e => { const v = [...bomForm.items]; v[i].rawMaterialId = e.target.value; setBomForm(f => ({ ...f, items: v })) }}
+                        onChange={e => {
+                          const selected = products.find(p => String(p.id) === String(e.target.value))
+                          const v = [...bomForm.items]
+                          v[i].rawMaterialId = e.target.value
+                          if (selected?.unitOfMeasure) v[i].unitOfMeasure = selected.unitOfMeasure
+                          if (selected?.costPrice) v[i].unitCost = selected.costPrice
+                          setBomForm(f => ({ ...f, items: v }))
+                        }}
                         className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground">
                         <option value="">— Select raw material —</option>
                         {products.filter(p => p.category === 'Raw Material').map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
@@ -1558,7 +1727,7 @@ export default function ManufacturingPage() {
                       <input type="number" min="0" max="100" value={item.wastagePercent}
                         onChange={e => { const v = [...bomForm.items]; v[i].wastagePercent = e.target.value; setBomForm(f => ({ ...f, items: v })) }}
                         className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground" />
-                      <p className="text-[9px] text-muted mt-0.5">Extra material lost during production</p>
+                      <p className="text-[9px] text-muted mt-0.5">Planning allowance</p>
                     </div>
                   </div>
                 </div>
@@ -1579,6 +1748,7 @@ export default function ManufacturingPage() {
             const stepCost = bomForm.steps.reduce((sum, s) => {
               return sum + ((Number(s.durationMins) / 60) * Number(s.labourRatePerHour || 0)) + Number(s.machineCostPerUnit || 0)
             }, 0)
+            const stdTime = bomForm.steps.reduce((sum, s) => sum + (Number(s.durationMins) || 0), 0)
             const totalMfg = matCost + stepCost
             const selProd = products.find(p => String(p.id) === String(bomForm.finishedProductId))
             const sellingPrice = selProd?.price ?? 0
@@ -1586,7 +1756,11 @@ export default function ManufacturingPage() {
             return (
               <div className="p-3 rounded-xl bg-surface-hover border border-border">
                 <p className="text-[10px] text-muted uppercase tracking-wide font-semibold mb-2">Manufacturing Cost Estimate</p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  <div className="p-2 rounded-lg bg-surface text-center">
+                    <p className="text-[10px] text-muted mb-0.5">Std Time</p>
+                    <p className="text-sm font-bold text-cyan-400">{stdTime} min</p>
+                  </div>
                   <div className="p-2 rounded-lg bg-surface text-center">
                     <p className="text-[10px] text-muted mb-0.5">Material Cost</p>
                     <p className="text-sm font-bold text-blue-400">₹{matCost.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
@@ -1680,6 +1854,13 @@ export default function ManufacturingPage() {
             <select value={prodForm.bomId} onChange={e => setProdForm(p => ({ ...p, bomId: e.target.value }))} className={SEL}>
               <option value="">Select BOM</option>
               {boms.filter(b => b.isActive).map(b => <option key={b.id} value={b.id}>{b.name} — {b.finishedProduct?.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted mb-1 block">Custom Order Inventory</label>
+            <select value={prodForm.customOrderId} onChange={e => setProdForm(p => ({ ...p, customOrderId: e.target.value }))} className={SEL}>
+              <option value="">Standard finished goods inventory</option>
+              {customOrders.map(o => <option key={o.id} value={o.id}>{o.displayId} — {o.customerName} ({o.type})</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
@@ -1783,6 +1964,50 @@ export default function ManufacturingPage() {
             </div>
           </div>
 
+          {completeForm.stepActuals.length > 0 && (() => {
+            const standardMins = completeForm.stepActuals.reduce((sum, s) => sum + Number(s.plannedMins || 0), 0)
+            const actualMins = completeForm.stepActuals.reduce((sum, s) => sum + Number(s.actualMins || 0), 0)
+            const extraMins = actualMins - standardMins
+            const extraCost = completeForm.stepActuals.reduce((sum, s) => {
+              const over = Math.max(0, Number(s.actualMins || 0) - Number(s.plannedMins || 0))
+              return sum + (over / 60) * Number(s.labourRatePerHour || 0)
+            }, 0)
+            return (
+              <div className="p-3 bg-surface-hover rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-xs font-medium text-muted uppercase tracking-wide">Production Time Variance</label>
+                  <span className={`text-xs font-semibold ${extraMins > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                    {actualMins} / {standardMins} min · {extraMins > 0 ? '+' : ''}{extraMins} min · ₹{Math.round(extraCost).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {completeForm.stepActuals.map((s, i) => (
+                    <div key={s.stepId} className="grid grid-cols-12 gap-2 items-center">
+                      <span className="col-span-1 text-xs text-muted text-center">{s.stepNumber}</span>
+                      <span className="col-span-5 text-sm text-foreground truncate">{s.operationName}</span>
+                      <span className="col-span-2 text-xs text-muted">Std {s.plannedMins}m</span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={s.actualMins}
+                        onChange={e => {
+                          const v = [...completeForm.stepActuals]
+                          v[i].actualMins = e.target.value
+                          const labour = Math.round(v.reduce((sum, step) => sum + (Number(step.actualMins || 0) / 60) * Number(step.labourRatePerHour || 0), 0))
+                          setCompleteForm(f => ({ ...f, stepActuals: v, totalLabourCost: labour }))
+                        }}
+                        className="col-span-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground"
+                      />
+                      <span className={`col-span-2 text-xs ${Number(s.actualMins || 0) > Number(s.plannedMins || 0) ? 'text-red-400' : 'text-emerald-400'}`}>
+                        {Number(s.actualMins || 0) - Number(s.plannedMins || 0) > 0 ? '+' : ''}{Number(s.actualMins || 0) - Number(s.plannedMins || 0)}m
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
           <div>
             <label className="text-xs text-muted mb-1 block">Quality Notes</label>
             <input value={completeForm.qualityNotes} onChange={e => setCompleteForm(p => ({ ...p, qualityNotes: e.target.value }))} className={INP} />
@@ -1794,11 +2019,21 @@ export default function ManufacturingPage() {
               <div className="space-y-2">
                 {completeForm.consumptions.map((c, i) => {
                   const prod = products.find(p => p.id === c.rawMaterialId)
+                  const returned = Math.max(0, Number(c.plannedQty || 0) - Number(c.actualQty || 0) - Number(c.scrapQty || 0))
                   return (
-                    <div key={i} className="flex items-center gap-3">
-                      <span className="text-sm text-foreground flex-1">{prod?.name || `Material #${c.rawMaterialId}`}</span>
-                      <span className="text-xs text-muted">Planned: {Number(c.plannedQty).toFixed(2)}</span>
-                      <input type="number" min="0" step="0.01" value={c.actualQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].actualQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-28 px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                    <div key={i} className="grid grid-cols-12 gap-2 items-center p-2 bg-surface-hover rounded-lg">
+                      <span className="col-span-12 sm:col-span-3 text-sm text-foreground">{prod?.name || `Material #${c.rawMaterialId}`}</span>
+                      <span className="col-span-3 sm:col-span-2 text-xs text-muted">Plan {Number(c.plannedQty).toFixed(2)} {prod?.unitOfMeasure}</span>
+                      <div className="col-span-3 sm:col-span-2">
+                        <label className="text-[10px] text-muted block mb-0.5">Used</label>
+                        <input type="number" min="0" step="0.01" value={c.actualQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].actualQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                      </div>
+                      <div className="col-span-3 sm:col-span-2">
+                        <label className="text-[10px] text-muted block mb-0.5">Scrap</label>
+                        <input type="number" min="0" step="0.01" value={c.scrapQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                      </div>
+                      <span className="col-span-3 sm:col-span-1 text-xs text-emerald-400">Return {returned.toFixed(2)}</span>
+                      <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Reason" className="col-span-12 sm:col-span-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                     </div>
                   )
                 })}
@@ -2072,10 +2307,14 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
               return sum + ((Number(s.durationMins) / 60) * Number(s.labourRatePerHour || 0)) + Number(s.machineCostPerUnit || 0)
             }, 0) ?? 0
             const totalMfg = matCost + stepCost
+            const stdTime = bom.standardMins ?? (bom.steps?.reduce((sum, s) => sum + (Number(s.durationMins) || 0), 0) ?? 0)
             const sellingPrice = bom.finishedProduct?.price ?? 0
             const margin = sellingPrice > 0 ? sellingPrice - totalMfg : null
             return (
               <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <span className="text-[11px] px-2 py-0.5 rounded-md bg-cyan-500/10 text-cyan-400 font-medium">
+                  Std Time: {stdTime} min
+                </span>
                 <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 font-medium">
                   Mfg Cost: ₹{totalMfg.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                 </span>
@@ -2184,14 +2423,14 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                       </div>
                       {/* Stock */}
                       <div className="text-center w-20">
-                        <p className={`text-sm font-semibold ${item.rawMaterial?.stock < item.quantity ? 'text-red-400' : 'text-emerald-400'}`}>
+                        <p className={`text-sm font-semibold ${(item.rawMaterial?.stock || 0) < item.quantity * (1 + (item.wastagePercent || 0) / 100) ? 'text-red-400' : 'text-emerald-400'}`}>
                           {item.rawMaterial?.stock}
                         </p>
                         <p className="text-[10px] text-muted">in stock</p>
                       </div>
                       {/* Status badge */}
-                      <span className={`hidden sm:inline text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${item.rawMaterial?.stock < item.quantity ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                        {item.rawMaterial?.stock < item.quantity ? '⚠ Short' : '✓ OK'}
+                      <span className={`hidden sm:inline text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${(item.rawMaterial?.stock || 0) < item.quantity * (1 + (item.wastagePercent || 0) / 100) ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                        {(item.rawMaterial?.stock || 0) < item.quantity * (1 + (item.wastagePercent || 0) / 100) ? '⚠ Short' : '✓ OK'}
                       </span>
                       {/* Action buttons — always visible */}
                       <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -2223,7 +2462,15 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                   <label className="text-[10px] text-muted block mb-0.5">Material *</label>
                   <select
                     value={newItem.rawMaterialId}
-                    onChange={e => setNewItem(p => ({ ...p, rawMaterialId: e.target.value }))}
+                    onChange={e => {
+                      const selected = products.find(p => String(p.id) === String(e.target.value))
+                      setNewItem(p => ({
+                        ...p,
+                        rawMaterialId: e.target.value,
+                        unitOfMeasure: selected?.unitOfMeasure || p.unitOfMeasure,
+                        unitCost: selected?.costPrice || p.unitCost,
+                      }))
+                    }}
                     className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent/50">
                     <option value="">— Select material —</option>
                     {products.filter(p => p.category === 'Raw Material').map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}

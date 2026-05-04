@@ -35,6 +35,7 @@ export const createBOMSchema = z.object({
 
 export const createProductionOrderSchema = z.object({
   bomId: z.number(),
+  customOrderId: z.number().int().positive().optional(),
   plannedQty: z.number().min(1),
   priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).default('MEDIUM'),
   dueDate: z.string().optional(),
@@ -59,7 +60,13 @@ export const completeProductionSchema = z.object({
   consumptions: z.array(z.object({
     rawMaterialId: z.number(),
     actualQty: z.number().min(0),
+    scrapQty: z.number().min(0).default(0),
+    scrapReason: z.string().optional(),
   })),
+  stepActuals: z.array(z.object({
+    stepId: z.number(),
+    actualMins: z.number().min(0),
+  })).optional(),
 })
 
 export const qualityCheckSchema = z.object({

@@ -17,6 +17,193 @@ import {
   createBomTemplateSchema,
 } from '@/lib/validations/manufacturing'
 
+const roundQty = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
+type ProductionStepTiming = {
+  plannedMins?: number | null
+  actualMins?: number | null
+  labourRatePerHour?: number | null
+  startedAt?: Date | null
+  completedAt?: Date | null
+}
+type GodownStockRow = {
+  id: number
+  godownId: number
+  quantity: number
+  godown: { id: number; name: string; isDefault: boolean }
+}
+
+function getActualStepMins(step: ProductionStepTiming) {
+  if ((step.actualMins || 0) > 0) return step.actualMins || 0
+  if (step.startedAt && step.completedAt) {
+    return Math.max(0, Math.round((step.completedAt.getTime() - step.startedAt.getTime()) / 60000))
+  }
+  return 0
+}
+
+function calculateBomMetrics(bom: {
+  items?: Array<{ quantity: number; wastagePercent?: number | null; unitCost?: number | null; rawMaterial?: { costPrice?: number | null } | null }>
+  steps?: Array<{ durationMins?: number | null; labourRatePerHour?: number | null; machineCostPerUnit?: number | null }>
+}, qty = 1) {
+  const materialCost = (bom.items || []).reduce((sum, item) => {
+    const unitCost = (item.unitCost || 0) > 0 ? item.unitCost || 0 : item.rawMaterial?.costPrice || 0
+    const requiredQty = (item.quantity || 0) * (1 + (item.wastagePercent || 0) / 100) * qty
+    return sum + requiredQty * unitCost
+  }, 0)
+
+  const standardMins = (bom.steps || []).reduce((sum, step) => sum + (step.durationMins || 0) * qty, 0)
+  const labourCost = (bom.steps || []).reduce((sum, step) => {
+    return sum + (((step.durationMins || 0) / 60) * (step.labourRatePerHour || 0) * qty)
+  }, 0)
+  const machineCost = (bom.steps || []).reduce((sum, step) => sum + (step.machineCostPerUnit || 0) * qty, 0)
+
+  return {
+    standardMins,
+    standardHours: Math.round((standardMins / 60) * 10) / 10,
+    standardMaterialCost: Math.round(materialCost),
+    standardLabourCost: Math.round(labourCost),
+    standardMachineCost: Math.round(machineCost),
+    standardTotalCost: Math.round(materialCost + labourCost + machineCost),
+  }
+}
+
+function decorateBOM<T extends {
+  items?: Array<{ quantity: number; wastagePercent?: number | null; unitCost?: number | null; rawMaterial?: { costPrice?: number | null } | null }>
+  steps?: Array<{ durationMins?: number | null; labourRatePerHour?: number | null; machineCostPerUnit?: number | null }>
+}>(bom: T) {
+  return { ...bom, ...calculateBomMetrics(bom, 1) }
+}
+
+async function getDefaultGodownWithTx(tx: any) {
+  let godown = await tx.godown.findFirst({ where: { isDefault: true } })
+  if (!godown) {
+    godown = await tx.godown.findFirst({ orderBy: { id: 'asc' } })
+    if (godown) {
+      godown = await tx.godown.update({ where: { id: godown.id }, data: { isDefault: true } })
+    } else {
+      godown = await tx.godown.create({ data: { name: 'Main Showroom', type: 'Showroom', isDefault: true } })
+    }
+  }
+  return godown
+}
+
+async function adjustManufacturingStockWithTx(tx: any, productId: number, quantity: number, entryType: string, options?: {
+  referenceType?: string
+  referenceId?: number
+  notes?: string
+  createdBy?: string
+}) {
+  const qty = roundQty(quantity)
+  if (qty === 0) return
+
+  const godownCount = await tx.godown.count()
+  if (godownCount > 0) {
+    const defaultGodown = await getDefaultGodownWithTx(tx)
+
+    if (qty > 0) {
+      const existing = await tx.godownStock.findUnique({
+        where: { productId_godownId: { productId, godownId: defaultGodown.id } },
+      })
+      const currentQty = existing?.quantity || 0
+      const newQty = roundQty(currentQty + qty)
+
+      await tx.godownStock.upsert({
+        where: { productId_godownId: { productId, godownId: defaultGodown.id } },
+        create: { productId, godownId: defaultGodown.id, quantity: newQty },
+        update: { quantity: newQty },
+      })
+      await tx.stockLedger.create({
+        data: {
+          productId,
+          godownId: defaultGodown.id,
+          entryType,
+          quantity: qty,
+          balanceAfter: newQty,
+          referenceType: options?.referenceType,
+          referenceId: options?.referenceId,
+          notes: options?.notes,
+          createdBy: options?.createdBy,
+        },
+      })
+      const total = await tx.godownStock.aggregate({ where: { productId }, _sum: { quantity: true } })
+      await tx.product.update({ where: { id: productId }, data: { stock: total._sum.quantity || 0 } })
+      return
+    }
+
+    let remainingToIssue = Math.abs(qty)
+    const stockRows = await tx.godownStock.findMany({
+      where: { productId, quantity: { gt: 0 } },
+      include: { godown: { select: { id: true, name: true, isDefault: true } } },
+      orderBy: { quantity: 'desc' },
+    }) as GodownStockRow[]
+    stockRows.sort((a, b) => Number(b.godown.isDefault) - Number(a.godown.isDefault))
+
+    const totalAvailable = stockRows.reduce((sum, row) => sum + row.quantity, 0)
+    if (totalAvailable + 0.0001 < remainingToIssue) throw new Error('Insufficient raw material stock')
+
+    for (const row of stockRows) {
+      if (remainingToIssue <= 0) break
+      const issuedQty = roundQty(Math.min(row.quantity, remainingToIssue))
+      const newQty = roundQty(row.quantity - issuedQty)
+      await tx.godownStock.update({ where: { id: row.id }, data: { quantity: newQty } })
+      await tx.stockLedger.create({
+        data: {
+          productId,
+          godownId: row.godownId,
+          entryType,
+          quantity: -issuedQty,
+          balanceAfter: newQty,
+          referenceType: options?.referenceType,
+          referenceId: options?.referenceId,
+          notes: options?.notes,
+          createdBy: options?.createdBy,
+        },
+      })
+      remainingToIssue = roundQty(remainingToIssue - issuedQty)
+    }
+
+    const total = await tx.godownStock.aggregate({ where: { productId }, _sum: { quantity: true } })
+    await tx.product.update({ where: { id: productId }, data: { stock: total._sum.quantity || 0 } })
+    return
+  }
+
+  if (qty < 0) {
+    const product = await tx.product.findUnique({ where: { id: productId }, select: { stock: true, name: true } })
+    if (!product) throw new Error('Product not found')
+    if ((product.stock || 0) + qty < 0) throw new Error(`Insufficient stock for ${product.name}`)
+  }
+  await tx.product.update({
+    where: { id: productId },
+    data: { stock: { increment: qty } },
+  })
+}
+
+async function updateProductionTimeVarianceWithTx(tx: any, productionOrderId: number) {
+  const order = await tx.productionOrder.findUnique({
+    where: { id: productionOrderId },
+    include: { productionSteps: true },
+  })
+  if (!order) return
+
+  const steps = order.productionSteps as ProductionStepTiming[]
+  const standardMins = order.standardMins || steps.reduce((sum, s) => sum + (s.plannedMins || 0), 0)
+  const actualMins = steps.reduce((sum, s) => sum + getActualStepMins(s), 0)
+  const labourVarianceMins = actualMins > 0 ? actualMins - standardMins : 0
+  const labourVarianceCost = steps.reduce((sum, s) => {
+    const extraMins = Math.max(0, getActualStepMins(s) - (s.plannedMins || 0))
+    return sum + (extraMins / 60) * (s.labourRatePerHour || 0)
+  }, 0)
+
+  await tx.productionOrder.update({
+    where: { id: productionOrderId },
+    data: {
+      standardMins,
+      actualMins,
+      labourVarianceMins,
+      labourVarianceCost: Math.round(labourVarianceCost),
+    },
+  })
+}
+
 // ─── WORK CENTERS ────────────────────────────────────
 
 export async function getWorkCenters() {
@@ -76,7 +263,7 @@ export async function getBOMs() {
       _count: { select: { productionOrders: true } },
     },
   })
-  return { success: true, data: boms }
+  return { success: true, data: boms.map(decorateBOM) }
 }
 
 export async function createBOM(data: unknown) {
@@ -244,7 +431,7 @@ export async function exportBOM(id: number) {
   })
   if (!bom) return { success: false, error: 'BOM not found' }
 
-  return { success: true, data: bom }
+  return { success: true, data: decorateBOM(bom) }
 }
 
 // ─── BOM TEMPLATES ───────────────────────────────────
@@ -301,7 +488,7 @@ export async function getMRPAnalysis(bomId: number, qty: number) {
       materialId: item.rawMaterialId,
       materialName: item.rawMaterial.name,
       sku: item.rawMaterial.sku,
-      unitOfMeasure: item.rawMaterial.unitOfMeasure,
+      unitOfMeasure: item.unitOfMeasure || item.rawMaterial.unitOfMeasure,
       required: Math.ceil(required * 100) / 100,
       available,
       shortage: Math.ceil(shortage * 100) / 100,
@@ -333,6 +520,7 @@ export async function getMRPAnalysis(bomId: number, qty: number) {
   const totalLabourCost = stepCostings.reduce((s, c) => s + c.totalLabourCost, 0)
   const totalMachineCost = stepCostings.reduce((s, c) => s + c.totalMachineCost, 0)
   const totalManufacturingCost = totalMaterialCost + totalLabourCost + totalMachineCost
+  const totalStandardMins = bom.steps.reduce((s, step) => s + step.durationMins * qty, 0)
   const sellingPrice = (bom.finishedProduct.price || 0) * qty
   const estimatedProfit = sellingPrice - totalManufacturingCost
 
@@ -350,6 +538,8 @@ export async function getMRPAnalysis(bomId: number, qty: number) {
       totalLabourCost,
       totalMachineCost,
       totalManufacturingCost,
+      totalStandardMins,
+      totalStandardHours: Math.round((totalStandardMins / 60) * 10) / 10,
       sellingPrice,
       estimatedProfit,
       estimatedMargin: sellingPrice > 0 ? Math.round((estimatedProfit / sellingPrice) * 100) : 0,
@@ -364,20 +554,40 @@ export async function getProductionOrders() {
   const orders = await prisma.productionOrder.findMany({
     orderBy: [{ status: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
     include: {
-      bom: { select: { name: true, version: true } },
+      bom: {
+        select: {
+          name: true,
+          version: true,
+          steps: { select: { stepNumber: true, durationMins: true, labourRatePerHour: true, machineCostPerUnit: true } },
+        },
+      },
       finishedProduct: { select: { name: true, sku: true, price: true } },
+      customOrder: { select: { id: true, displayId: true, type: true, contact: { select: { name: true } } } },
       workCenter: { select: { name: true, type: true } },
       assignedStaff: { select: { name: true } },
       consumptions: {
         include: { rawMaterial: { select: { name: true, sku: true, unitOfMeasure: true } } },
       },
+      scrapEntries: {
+        include: { rawMaterial: { select: { name: true, sku: true, unitOfMeasure: true } } },
+        orderBy: { createdAt: 'desc' },
+      },
+      customInventoryItems: true,
       productionSteps: {
         include: { workCenter: { select: { name: true } } },
         orderBy: { stepNumber: 'asc' },
       },
     },
   })
-  return { success: true, data: orders }
+  return {
+    success: true,
+    data: orders.map(order => {
+      const standardMins = order.standardMins || order.productionSteps.reduce((sum, step) => sum + (step.plannedMins || 0), 0)
+      const actualMins = order.actualMins || order.productionSteps.reduce((sum, step) => sum + getActualStepMins(step), 0)
+      const labourVarianceMins = actualMins > 0 ? actualMins - standardMins : order.labourVarianceMins
+      return { ...order, standardMins, actualMins, labourVarianceMins }
+    }),
+  }
 }
 
 export async function getAssignableStaff() {
@@ -389,12 +599,61 @@ export async function getAssignableStaff() {
   return { success: true, data: staff }
 }
 
+export async function getManufacturingCustomOrders() {
+  const orders = await prisma.customOrder.findMany({
+    where: { status: { not: 'DELIVERED' } },
+    select: {
+      id: true,
+      displayId: true,
+      type: true,
+      status: true,
+      quotedPrice: true,
+      contact: { select: { name: true } },
+    },
+    orderBy: { date: 'desc' },
+  })
+  return {
+    success: true,
+    data: orders.map(o => ({
+      id: o.id,
+      displayId: o.displayId,
+      type: o.type,
+      status: o.status,
+      customerName: o.contact.name,
+      quotedPrice: o.quotedPrice,
+    })),
+  }
+}
+
+export async function getScrapInventory() {
+  const entries = await prisma.scrapInventory.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: {
+      rawMaterial: { select: { name: true, sku: true, unitOfMeasure: true } },
+      productionOrder: { select: { displayId: true, finishedProduct: { select: { name: true } } } },
+    },
+  })
+  return { success: true, data: entries }
+}
+
+export async function getCustomOrderInventory() {
+  const entries = await prisma.customOrderInventory.findMany({
+    orderBy: { createdAt: 'desc' },
+    include: {
+      customOrder: { select: { displayId: true, type: true, contact: { select: { name: true } } } },
+      product: { select: { name: true, sku: true } },
+      productionOrder: { select: { displayId: true } },
+    },
+  })
+  return { success: true, data: entries }
+}
+
 export async function createProductionOrder(data: unknown) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductionOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { bomId, plannedQty, priority, dueDate, startDate, workCenterId, assignedStaffId, assignedTo, notes } = parsed.data
+  const { bomId, customOrderId, plannedQty, priority, dueDate, startDate, workCenterId, assignedStaffId, assignedTo, notes } = parsed.data
 
   const bom = await prisma.billOfMaterials.findUnique({
     where: { id: bomId },
@@ -405,6 +664,16 @@ export async function createProductionOrder(data: unknown) {
   })
   if (!bom) return { success: false, error: 'BOM not found' }
   if (!bom.isActive) return { success: false, error: 'This BOM is inactive' }
+
+  let customOrder = null
+  if (customOrderId) {
+    customOrder = await prisma.customOrder.findUnique({
+      where: { id: customOrderId },
+      select: { id: true, displayId: true, status: true },
+    })
+    if (!customOrder) return { success: false, error: 'Custom order not found' }
+    if (customOrder.status === 'DELIVERED') return { success: false, error: 'Cannot create production for a delivered custom order' }
+  }
 
   let assigneeName = assignedTo?.trim() || null
   if (assignedStaffId) {
@@ -424,13 +693,16 @@ export async function createProductionOrder(data: unknown) {
     if (m) nextNum = parseInt(m[1]) + 1
   }
   const displayId = `PRD-${String(nextNum).padStart(4, '0')}`
+  const standardMins = bom.steps.reduce((sum, step) => sum + step.durationMins * plannedQty, 0)
 
   const baseCreateData = {
     displayId,
     bomId,
     finishedProductId: bom.finishedProductId,
+    customOrderId: customOrderId || null,
     workCenterId: workCenterId || null,
     plannedQty,
+    standardMins,
     priority,
     dueDate: dueDate ? new Date(dueDate) : null,
     startDate: startDate ? new Date(startDate) : null,
@@ -453,6 +725,8 @@ export async function createProductionOrder(data: unknown) {
         operationName: s.operationName,
         workCenterId: s.workCenterId || null,
         plannedMins: s.durationMins * plannedQty,
+        labourRatePerHour: s.labourRatePerHour || 0,
+        machineCostPerUnit: s.machineCostPerUnit || 0,
         status: 'PENDING',
       })),
     } : undefined,
@@ -491,7 +765,22 @@ export async function createProductionOrder(data: unknown) {
       // Keep order creation successful even if relation update fails in stale environments.
     }
   }
+  if (customOrderId) {
+    await prisma.$transaction([
+      prisma.customOrder.update({ where: { id: customOrderId }, data: { status: 'IN_PRODUCTION' } }),
+      prisma.customOrderTimeline.create({
+        data: {
+          customOrderId,
+          date: new Date(),
+          event: `Production order ${displayId} created`,
+          status: 'done',
+          updatedBy: 'Manager',
+        },
+      }),
+    ])
+  }
   revalidatePath('/manufacturing')
+  revalidatePath('/custom-orders')
   return { success: true, data: order }
 }
 
@@ -540,15 +829,26 @@ export async function deleteProductionOrder(id: number) {
 
 export async function updateProductionStep(stepId: number, status: string, actualMins?: number, assignedWorker?: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  await prisma.productionStep.update({
-    where: { id: stepId },
-    data: {
-      status,
-      actualMins: actualMins ?? undefined,
-      assignedWorker: assignedWorker ?? undefined,
-      startedAt: status === 'IN_PROGRESS' ? new Date() : undefined,
-      completedAt: status === 'DONE' ? new Date() : undefined,
-    },
+  await prisma.$transaction(async (tx) => {
+    const current = await tx.productionStep.findUnique({ where: { id: stepId } })
+    if (!current) throw new Error('Step not found')
+    const completedAt = status === 'DONE' ? new Date() : undefined
+    const computedActualMins = actualMins ?? (
+      status === 'DONE' && current.startedAt
+        ? Math.max(0, Math.round(((completedAt as Date).getTime() - current.startedAt.getTime()) / 60000))
+        : undefined
+    )
+    await tx.productionStep.update({
+      where: { id: stepId },
+      data: {
+        status,
+        actualMins: computedActualMins,
+        assignedWorker: assignedWorker ?? undefined,
+        startedAt: status === 'IN_PROGRESS' ? new Date() : undefined,
+        completedAt,
+      },
+    })
+    await updateProductionTimeVarianceWithTx(tx, current.productionOrderId)
   })
   revalidatePath('/manufacturing')
   return { success: true }
@@ -559,11 +859,24 @@ export async function completeProduction(data: unknown) {
   const parsed = completeProductionSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { productionOrderId, actualQty, totalLabourCost, overheadCost, machineCost, scrapQty, scrapReason, qualityStatus, qualityNotes, notes, consumptions } = parsed.data
+  const {
+    productionOrderId,
+    actualQty,
+    totalLabourCost,
+    overheadCost,
+    machineCost,
+    scrapQty,
+    scrapReason,
+    qualityStatus,
+    qualityNotes,
+    notes,
+    consumptions,
+    stepActuals,
+  } = parsed.data
 
   const order = await prisma.productionOrder.findUnique({
     where: { id: productionOrderId },
-    include: { consumptions: true },
+    include: { consumptions: { include: { rawMaterial: { select: { unitOfMeasure: true } } } }, productionSteps: true },
   })
   if (!order) return { success: false, error: 'Production order not found' }
   if (order.status !== 'IN_PROGRESS' && order.status !== 'ON_HOLD') {
@@ -575,17 +888,54 @@ export async function completeProduction(data: unknown) {
 
     for (const c of consumptions) {
       const planned = order.consumptions.find(oc => oc.rawMaterialId === c.rawMaterialId)
-      const cost = planned ? Math.round(c.actualQty * planned.unitCost) : 0
+      const materialScrapQty = c.scrapQty || 0
+      const consumedFromStock = roundQty(c.actualQty + materialScrapQty)
+      const returnedQty = planned ? Math.max(0, roundQty(planned.plannedQty - consumedFromStock)) : 0
+      const cost = planned ? Math.round(consumedFromStock * planned.unitCost) : 0
       totalMaterialCost += cost
 
-      await tx.product.update({
-        where: { id: c.rawMaterialId },
-        data: { stock: { decrement: Math.ceil(c.actualQty) } },
+      await adjustManufacturingStockWithTx(tx, c.rawMaterialId, -consumedFromStock, 'PRODUCTION', {
+        referenceType: 'Production',
+        referenceId: productionOrderId,
+        notes: `Consumed for production ${order.displayId}`,
+        createdBy: 'Manufacturing',
       })
       if (planned) {
         await tx.materialConsumption.update({
           where: { id: planned.id },
-          data: { actualQty: c.actualQty, totalCost: cost },
+          data: {
+            actualQty: c.actualQty,
+            scrapQty: materialScrapQty,
+            returnedQty,
+            scrapReason: c.scrapReason,
+            totalCost: cost,
+          },
+        })
+        if (materialScrapQty > 0) {
+          await tx.scrapInventory.create({
+            data: {
+              productionOrderId,
+              rawMaterialId: c.rawMaterialId,
+              materialConsumptionId: planned.id,
+              quantity: materialScrapQty,
+              unitOfMeasure: planned.rawMaterial?.unitOfMeasure || 'PCS',
+              unitCost: planned.unitCost,
+              estimatedValue: Math.round(materialScrapQty * planned.unitCost),
+              reason: c.scrapReason || scrapReason,
+              disposition: 'REUSABLE',
+              status: 'IN_STOCK',
+              notes: `Recorded from ${order.displayId}`,
+            },
+          })
+        }
+      }
+    }
+
+    if (stepActuals?.length) {
+      for (const stepActual of stepActuals) {
+        await tx.productionStep.update({
+          where: { id: stepActual.stepId },
+          data: { actualMins: stepActual.actualMins },
         })
       }
     }
@@ -593,21 +943,58 @@ export async function completeProduction(data: unknown) {
     // Only add finished goods for passed/partial quality
     const goodQty = qualityStatus === 'FAILED' ? 0 : actualQty - scrapQty
     if (goodQty > 0) {
-      await tx.product.update({
-        where: { id: order.finishedProductId },
-        data: { stock: { increment: goodQty } },
-      })
+      if (order.customOrderId) {
+        await tx.customOrderInventory.create({
+          data: {
+            customOrderId: order.customOrderId,
+            productionOrderId,
+            productId: order.finishedProductId,
+            quantity: goodQty,
+            status: 'READY',
+            notes: `Finished from ${order.displayId}`,
+          },
+        })
+      } else {
+        await adjustManufacturingStockWithTx(tx, order.finishedProductId, goodQty, 'PRODUCTION', {
+          referenceType: 'Production',
+          referenceId: productionOrderId,
+          notes: `Finished goods from ${order.displayId}`,
+          createdBy: 'Manufacturing',
+        })
+      }
     }
 
-    const totalCost = totalMaterialCost + totalLabourCost + (machineCost ?? 0) + overheadCost
+    await tx.productionStep.updateMany({
+      where: { productionOrderId, status: { not: 'DONE' } },
+      data: { status: 'DONE', completedAt: new Date() },
+    })
+
+    await updateProductionTimeVarianceWithTx(tx, productionOrderId)
+
+    const refreshedOrder = await tx.productionOrder.findUnique({
+      where: { id: productionOrderId },
+      select: { actualMins: true, labourVarianceMins: true, labourVarianceCost: true },
+    })
+    const effectiveLabourCost = totalLabourCost > 0 ? totalLabourCost : order.productionSteps.reduce((sum, step) => {
+      const actualMinsForStep = stepActuals?.find(s => s.stepId === step.id)?.actualMins ?? (step.actualMins || step.plannedMins)
+      return sum + (actualMinsForStep / 60) * (step.labourRatePerHour || 0)
+    }, 0)
+    const roundedLabourCost = Math.round(effectiveLabourCost)
+    const totalCost = totalMaterialCost + roundedLabourCost + (machineCost ?? 0) + overheadCost
     const costPerUnit = actualQty > 0 ? Math.round(totalCost / actualQty) : 0
     const yieldRate = order.plannedQty > 0 ? Math.round((actualQty / order.plannedQty) * 100 * 10) / 10 : 0
 
-    // Update product cost price if now known
-    if (costPerUnit > 0) {
+    if (costPerUnit > 0 && !order.customOrderId) {
       await tx.product.update({
         where: { id: order.finishedProductId },
         data: { costPrice: costPerUnit },
+      })
+    }
+
+    if (costPerUnit > 0 && order.customOrderId && goodQty > 0) {
+      await tx.customOrderInventory.updateMany({
+        where: { productionOrderId },
+        data: { unitCost: costPerUnit, totalCost: costPerUnit * goodQty },
       })
     }
 
@@ -617,10 +1004,13 @@ export async function completeProduction(data: unknown) {
         status: 'COMPLETED',
         actualQty,
         totalMaterialCost,
-        totalLabourCost,
+        totalLabourCost: roundedLabourCost,
         overheadCost: (machineCost ?? 0) + overheadCost, // store combined overhead
         totalCost,
         costPerUnit,
+        actualMins: refreshedOrder?.actualMins || 0,
+        labourVarianceMins: refreshedOrder?.labourVarianceMins || 0,
+        labourVarianceCost: refreshedOrder?.labourVarianceCost || 0,
         yieldRate,
         scrapQty,
         scrapReason,
@@ -631,15 +1021,23 @@ export async function completeProduction(data: unknown) {
       },
     })
 
-    // Mark all steps done
-    await tx.productionStep.updateMany({
-      where: { productionOrderId, status: { not: 'DONE' } },
-      data: { status: 'DONE', completedAt: new Date() },
-    })
+    if (order.customOrderId) {
+      await tx.customOrderTimeline.create({
+        data: {
+          customOrderId: order.customOrderId,
+          date: new Date(),
+          event: `Production completed (${order.displayId})`,
+          status: 'done',
+          updatedBy: 'Manager',
+        },
+      })
+    }
   })
 
   revalidatePath('/manufacturing')
   revalidatePath('/inventory')
+  revalidatePath('/godowns')
+  revalidatePath('/custom-orders')
   return { success: true }
 }
 
@@ -660,7 +1058,7 @@ export async function recordQualityCheck(data: unknown) {
 // ─── ANALYTICS ───────────────────────────────────────
 
 export async function getManufacturingStats() {
-  const [allOrders, workCenters] = await Promise.all([
+  const [allOrders, workCenters, scrapEntries, customInventory] = await Promise.all([
     prisma.productionOrder.findMany({
       include: {
         finishedProduct: { select: { name: true } },
@@ -669,6 +1067,8 @@ export async function getManufacturingStats() {
       orderBy: { createdAt: 'desc' },
     }),
     prisma.workCenter.findMany(),
+    prisma.scrapInventory.findMany(),
+    prisma.customOrderInventory.findMany(),
   ])
 
   const completed = allOrders.filter(o => o.status === 'COMPLETED')
@@ -686,6 +1086,10 @@ export async function getManufacturingStats() {
   const totalLabourCost = completed.reduce((s, o) => s + (o.totalLabourCost || 0), 0)
   const totalOverhead = completed.reduce((s, o) => s + (o.overheadCost || 0), 0)
   const totalScrap = completed.reduce((s, o) => s + (o.scrapQty || 0), 0)
+  const totalMaterialScrapQty = scrapEntries.reduce((s, e) => s + (e.quantity || 0), 0)
+  const totalMaterialScrapValue = scrapEntries.reduce((s, e) => s + (e.estimatedValue || 0), 0)
+  const totalTimeVarianceMins = completed.reduce((s, o) => s + (o.labourVarianceMins || 0), 0)
+  const totalTimeVarianceCost = completed.reduce((s, o) => s + (o.labourVarianceCost || 0), 0)
 
   // Quality pass rate
   const qualityPassed = completed.filter(o => o.qualityStatus === 'PASSED').length
@@ -733,6 +1137,11 @@ export async function getManufacturingStats() {
         overdue: overdue.length,
         totalProduced,
         totalScrap,
+        totalMaterialScrapQty,
+        totalMaterialScrapValue,
+        totalCustomInventoryQty: customInventory.reduce((s, i) => s + (i.quantity || 0), 0),
+        totalTimeVarianceMins,
+        totalTimeVarianceCost,
         avgYield,
         qualityRate,
         totalMaterialCost,
@@ -804,13 +1213,21 @@ export async function staffUpdateProductionStep(staffId: number, stepId: number,
     return { success: false, error: 'Production order is not in progress' }
   }
 
-  await prisma.productionStep.update({
-    where: { id: stepId },
-    data: {
-      status,
-      startedAt: status === 'IN_PROGRESS' ? new Date() : undefined,
-      completedAt: status === 'DONE' ? new Date() : undefined,
-    },
+  await prisma.$transaction(async (tx) => {
+    const completedAt = status === 'DONE' ? new Date() : undefined
+    const actualMins = status === 'DONE' && step.startedAt
+      ? Math.max(0, Math.round(((completedAt as Date).getTime() - step.startedAt.getTime()) / 60000))
+      : undefined
+    await tx.productionStep.update({
+      where: { id: stepId },
+      data: {
+        status,
+        actualMins,
+        startedAt: status === 'IN_PROGRESS' ? new Date() : undefined,
+        completedAt,
+      },
+    })
+    await updateProductionTimeVarianceWithTx(tx, step.productionOrderId)
   })
   revalidatePath('/staff-portal')
   revalidatePath('/manufacturing')

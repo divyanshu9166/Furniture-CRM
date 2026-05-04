@@ -17,7 +17,13 @@ function shouldRefreshPrismaClient(client: PrismaClient | undefined) {
 
   // In dev, global Prisma instances can survive schema changes.
   // If new models are missing, create a fresh client instance.
-  return typeof (client as any).indiaMartConfig === 'undefined' || typeof (client as any).indiaMartLead === 'undefined'
+  return typeof (client as any).indiaMartConfig === 'undefined' ||
+    typeof (client as any).indiaMartLead === 'undefined' ||
+    typeof (client as any).scrapInventory === 'undefined' ||
+    typeof (client as any).customOrderInventory === 'undefined' ||
+    // If production/manufacturing models were added/changed, ensure we recreate the client
+    typeof (client as any).productionOrder === 'undefined' ||
+    typeof (client as any).customOrder === 'undefined'
 }
 
 let prismaClient: PrismaClient = globalForPrisma.prisma ?? createPrismaClient()
