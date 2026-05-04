@@ -20,9 +20,11 @@ function shouldRefreshPrismaClient(client: PrismaClient | undefined) {
   return typeof (client as any).indiaMartConfig === 'undefined' || typeof (client as any).indiaMartLead === 'undefined'
 }
 
-const prismaClient = shouldRefreshPrismaClient(globalForPrisma.prisma)
-  ? createPrismaClient()
-  : globalForPrisma.prisma
+let prismaClient: PrismaClient = globalForPrisma.prisma ?? createPrismaClient()
+
+if (shouldRefreshPrismaClient(prismaClient)) {
+  prismaClient = createPrismaClient()
+}
 
 export const prisma = prismaClient
 
