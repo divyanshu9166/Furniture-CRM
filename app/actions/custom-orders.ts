@@ -9,8 +9,9 @@ import {
   scheduleVisitSchema,
   updateVisitSchema,
   updateMeasurementsSchema,
+  type UpdateMeasurementsInput,
 } from '@/lib/validations/custom-order'
-import type { CustomOrderStatus } from '@prisma/client'
+import type { CustomOrderStatus, Prisma } from '@prisma/client'
 import { sendEmail } from '@/lib/email'
 
 const statusMap: Record<string, CustomOrderStatus> = {
@@ -38,6 +39,14 @@ const statusOrder: CustomOrderStatus[] = [
   'INSTALLATION',
   'DELIVERED',
 ]
+
+type MeasurementsInput = UpdateMeasurementsInput['measurements']
+
+function compactMeasurements(measurements: MeasurementsInput): Prisma.InputJsonValue {
+  return Object.fromEntries(
+    Object.entries(measurements).filter(([, value]) => value !== undefined)
+  ) as Prisma.InputJsonValue
+}
 
 // ─── GET ALL CUSTOM ORDERS ──────────────────────────────
 
@@ -352,7 +361,7 @@ export async function updateMeasurements(data: unknown) {
 
   await prisma.customOrder.update({
     where: { id: customOrderId },
-    data: { measurements },
+    data: { measurements: compactMeasurements(measurements) },
   })
 
   await prisma.customOrderTimeline.create({
@@ -372,7 +381,11 @@ export async function updateMeasurements(data: unknown) {
 
 // ─── UPDATE MEASUREMENTS WITH PHOTOS ────────────────────
 
-export async function updateMeasurementsWithPhotos(customOrderId: number, measurements: unknown, photoUrls: string[]) {
+export async function updateMeasurementsWithPhotos(
+  customOrderId: number,
+  measurements: MeasurementsInput,
+  photoUrls: string[]
+) {
   const order = await prisma.customOrder.findUnique(
     { where: { id: customOrderId }, select: { photos: true } }
   )
@@ -383,7 +396,7 @@ export async function updateMeasurementsWithPhotos(customOrderId: number, measur
   await prisma.customOrder.update({
     where: { id: customOrderId },
     data: {
-      measurements,
+      measurements: compactMeasurements(measurements),
       photos: updatedPhotos,
     },
   })
@@ -418,7 +431,7 @@ export async function updateFieldVisit(data: unknown) {
   if (!visit) return { success: false, error: 'Visit not found' }
 
   const updateData: Record<string, unknown> = {}
-  if (measurements) updateData.measurements = measurements
+  if (measurements) updateData.measurements = compactMeasurements(measurements)
   if (staffNotes !== undefined) updateData.staffNotes = staffNotes
   if (status) {
     updateData.status = status
@@ -442,7 +455,7 @@ export async function updateFieldVisit(data: unknown) {
     if (measurements) {
       await prisma.customOrder.update({
         where: { id: visit.customOrderId },
-        data: { measurements },
+        data: { measurements: compactMeasurements(measurements) },
       })
     }
 

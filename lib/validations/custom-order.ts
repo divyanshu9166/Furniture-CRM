@@ -76,3 +76,4 @@ export const updateMeasurementsSchema = z.object({
 export type CreateCustomOrderInput = z.infer<typeof createCustomOrderSchema>
 export type ScheduleVisitInput = z.infer<typeof scheduleVisitSchema>
 export type UpdateVisitInput = z.infer<typeof updateVisitSchema>
+export type UpdateMeasurementsInput = z.infer<typeof updateMeasurementsSchema>
