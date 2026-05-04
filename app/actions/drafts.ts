@@ -1056,11 +1056,11 @@ export async function restoreFromDraft(draftId: number) {
           followUps: {
             create: Array.isArray(data.followUps)
               ? data.followUps.map((f: any) => ({
-                  day: f.day,
-                  message: f.message,
-                  sent: !!f.sent,
-                  date: new Date(f.date),
-                }))
+                day: f.day,
+                message: f.message,
+                sent: !!f.sent,
+                date: new Date(f.date),
+              }))
               : [],
           },
         },
@@ -1470,12 +1470,12 @@ export async function restoreFromDraft(draftId: number) {
           payments: {
             create: Array.isArray(data.payments)
               ? data.payments.map((p: any) => ({
-                  amount: p.amount,
-                  method: p.method,
-                  reference: p.reference || null,
-                  notes: p.notes || null,
-                  date: p.date ? new Date(p.date) : new Date(),
-                }))
+                amount: p.amount,
+                method: p.method,
+                reference: p.reference || null,
+                notes: p.notes || null,
+                date: p.date ? new Date(p.date) : new Date(),
+              }))
               : [],
           },
         },
@@ -1611,13 +1611,13 @@ export async function restoreFromDraft(draftId: number) {
           payments: {
             create: Array.isArray(data.payments)
               ? data.payments.map((p: any) => ({
-                  amount: p.amount,
-                  method: p.method || 'Bank Transfer',
-                  reference: p.reference || null,
-                  notes: p.notes || null,
-                  paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
-                  createdBy: p.createdBy || null,
-                }))
+                amount: p.amount,
+                method: p.method || 'Bank Transfer',
+                reference: p.reference || null,
+                notes: p.notes || null,
+                paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
+                createdBy: p.createdBy || null,
+              }))
               : [],
           },
         },

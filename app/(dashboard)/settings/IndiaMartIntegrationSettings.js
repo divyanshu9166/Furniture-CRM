@@ -128,7 +128,7 @@ export default function IndiaMartIntegrationSettings() {
             <label className="p-3 rounded-xl bg-surface flex items-start justify-between gap-3 cursor-pointer">
               <div>
                 <p className="text-sm font-medium text-foreground">Enable IndiaMART Integration</p>
-                <p className="text-xs text-muted">Allow Pull API syncing for IndiaMART enquiries.</p>
+                <p className="text-xs text-muted">Show IndiaMART in the sidebar and allow Pull API syncing.</p>
               </div>
               <input
                 type="checkbox"

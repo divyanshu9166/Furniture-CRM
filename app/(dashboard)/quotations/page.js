@@ -54,6 +54,7 @@ const createBlankItem = () => ({
   productImage: '',
   referenceImage: '',
   imageSource: 'REFERENCE',
+  isCustom: false,
 })
 
 const BANK_DETAILS_KEY = 'quotation_bank_details'
@@ -146,6 +147,7 @@ function buildFormFromQuotation(quotation) {
           productImage,
           referenceImage: imageSource === 'REFERENCE' ? savedImage : '',
           imageSource,
+          isCustom: !item.productId,
         }
       })
     : [createBlankItem()]
@@ -778,10 +780,19 @@ export default function QuotationsPage() {
   }
 
   const handleProductSelect = (index, productIdValue) => {
-    const productId = productIdValue ? parseInt(productIdValue) : ''
-    const product = products.find(p => p.id === productId)
+    const selection = String(productIdValue || '')
 
-    if (!product) {
+    if (selection === 'custom') {
+      updateItem(index, {
+        productId: '',
+        productImage: '',
+        imageSource: 'REFERENCE',
+        isCustom: true,
+      })
+      return
+    }
+
+    if (!selection) {
       updateItem(index, {
         productId: '',
         name: '',
@@ -790,6 +801,20 @@ export default function QuotationsPage() {
         description: '',
         productImage: '',
         imageSource: 'REFERENCE',
+        isCustom: false,
+      })
+      return
+    }
+
+    const productId = parseInt(selection, 10)
+    const product = products.find(p => p.id === productId)
+
+    if (!product) {
+      updateItem(index, {
+        productId: '',
+        productImage: '',
+        imageSource: 'REFERENCE',
+        isCustom: true,
       })
       return
     }
@@ -802,6 +827,7 @@ export default function QuotationsPage() {
       rate: product.price,
       productImage: product.image || '',
       imageSource: product.image ? 'PRODUCT' : 'REFERENCE',
+      isCustom: false,
     })
   }
 
@@ -1404,13 +1430,14 @@ export default function QuotationsPage() {
                     <div key={index} className="bg-surface border border-border rounded-xl p-3 space-y-2">
                       <div className="grid grid-cols-12 gap-2">
                         <div className="col-span-12 md:col-span-6">
-                          <label className="block text-[11px] text-muted mb-1">Inventory Product</label>
+                          <label className="block text-[11px] text-muted mb-1">Inventory Product (optional)</label>
                           <select
-                            value={item.productId}
+                            value={item.isCustom ? 'custom' : item.productId}
                             onChange={e => handleProductSelect(index, e.target.value)}
                             className="w-full px-3 py-2 rounded-lg text-xs"
                           >
                             <option value="">Select from inventory</option>
+                            <option value="custom">Custom item (manual)</option>
                             {products.map(product => (
                               <option key={product.id} value={product.id}>
                                 {product.name} ({product.sku}) - Stock: {product.stock}

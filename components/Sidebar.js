@@ -37,6 +37,7 @@ import { useState, useEffect } from 'react';
 import { useSession } from '@/components/AuthProvider';
 import { useSidebarContext } from './SidebarContext';
 import { getStoreSettings } from '@/app/actions/settings';
+import { getIndiaMartConfig } from '@/app/actions/indiamart';
 
 // role: which roles can see this item. undefined = all authenticated users
 const navItems = [
@@ -74,10 +75,14 @@ export default function Sidebar() {
   const { data: session } = useSession();
 
   const [logoUrl, setLogoUrl] = useState('/logo.png');
+  const [indiaMartEnabled, setIndiaMartEnabled] = useState(false);
 
   useEffect(() => {
     getStoreSettings().then(res => {
       if (res.success && res.data.logo) setLogoUrl(res.data.logo);
+    });
+    getIndiaMartConfig().then(res => {
+      if (res.success) setIndiaMartEnabled(!!res.data.enabled);
     });
     const handleLogoUpdate = (e) => setLogoUrl(e.detail);
     window.addEventListener('logo-updated', handleLogoUpdate);
@@ -93,6 +98,7 @@ export default function Sidebar() {
   // Filter nav items by role
   const visibleNav = navItems.filter(item => {
     if (!item.roles) return true;
+    if (item.href === '/indiamart-leads' && !indiaMartEnabled) return false;
     return item.roles.includes(userRole);
   });
 

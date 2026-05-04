@@ -103,6 +103,8 @@ export default function BillingPage() {
   const [posSalesperson, setPosSalesperson] = useState('');
   const [posNotes, setPosNotes] = useState('');
   const [posDueDate, setPosDueDate] = useState('');
+  const [posSupplyType, setPosSupplyType] = useState('INTRASTATE');
+  const [posPlaceOfSupply, setPosPlaceOfSupply] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
@@ -216,8 +218,9 @@ export default function BillingPage() {
   const posDiscountAmount = posDiscountType === 'percent' ? Math.round(posSubtotal * posDiscount / 100) : Math.min(posDiscount, posSubtotal);
   const posAfterDiscount = Math.max(0, posSubtotal - posDiscountAmount);
   const posTotalGst = Math.round(posAfterDiscount * gstRate / 100);
-  const posCgst = Math.round(posTotalGst / 2);
-  const posSgst = posTotalGst - posCgst;
+  const posIgst = posSupplyType === 'INTERSTATE' ? posTotalGst : 0;
+  const posCgst = posSupplyType === 'INTERSTATE' ? 0 : Math.round(posTotalGst / 2);
+  const posSgst = posSupplyType === 'INTERSTATE' ? 0 : posTotalGst - posCgst;
   const posTotal = posAfterDiscount + posTotalGst + (posTransportCost || 0);
   const posTotalPayments = posPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
@@ -269,6 +272,8 @@ export default function BillingPage() {
     setPosSalesperson('');
     setPosNotes('');
     setPosDueDate('');
+    setPosSupplyType('INTRASTATE');
+    setPosPlaceOfSupply('');
   };
 
   // Split payment management
@@ -326,6 +331,8 @@ export default function BillingPage() {
         salespersonId: posSalesperson ? parseInt(posSalesperson) : undefined,
         notes: posNotes || undefined,
         dueDate: posDueDate || undefined,
+        supplyType: posSupplyType,
+        placeOfSupply: posPlaceOfSupply || undefined,
         isHeld,
       });
       if (res.success) {
@@ -466,13 +473,13 @@ export default function BillingPage() {
   // ─── EXPORT CSV ────────────────────────────────────────
 
   const handleExportCSV = () => {
-    const headers = ['Invoice ID', 'Date', 'Customer', 'Phone', 'Items', 'Subtotal', 'Discount', 'GST', 'CGST', 'SGST', 'Total', 'Amount Paid', 'Balance Due', 'Payment Method', 'Payment Status', 'Invoice Status', 'Salesperson', 'Notes'];
+    const headers = ['Invoice ID', 'Date', 'Customer', 'Phone', 'Items', 'Subtotal', 'Discount', 'GST', 'CGST', 'SGST', 'IGST', 'Total', 'Amount Paid', 'Balance Due', 'Payment Method', 'Payment Status', 'Invoice Status', 'Supply Type', 'Salesperson', 'Notes'];
     const rows = filtered.map(inv => [
       inv.id, inv.date, `"${inv.customer}"`, inv.phone,
       `"${inv.items.map(i => `${i.name} x${i.qty}`).join(', ')}"`,
-      inv.subtotal, inv.discount, inv.gst, inv.cgst, inv.sgst, inv.total,
+      inv.subtotal, inv.discount, inv.gst, inv.cgst, inv.sgst, inv.igst || 0, inv.total,
       inv.amountPaid, inv.balanceDue, inv.paymentMethod, inv.paymentStatus,
-      inv.invoiceStatus, inv.salesperson || '', `"${inv.notes || ''}"`,
+      inv.invoiceStatus, inv.supplyType || '', inv.salesperson || '', `"${inv.notes || ''}"`,
     ]);
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -488,10 +495,12 @@ export default function BillingPage() {
 
   const handlePrintInvoice = (inv) => {
     const store = storeSettings || {};
+    const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
     const printContent = `
       <html><head><title>Invoice ${inv.id}</title>
       <style>
         body { font-family: 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+        @page { size: A4; margin: 12mm; }
         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
         .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
         .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
@@ -509,7 +518,7 @@ export default function BillingPage() {
         .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
         .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
         .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
-        @media print { body { padding: 20px; } }
+        @media print { body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
       </style></head><body>
       <div class="header">
         <div><div class="store-name">${store.storeName || 'Furniture Store'}</div>
@@ -523,7 +532,7 @@ export default function BillingPage() {
       <div class="meta">
         <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}</div>
         <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
-        ${inv.salesperson ? `<div style="font-size:12px;color:#888;margin-top:2px">Salesperson: ${inv.salesperson}</div>` : ''}
+        ${inv.placeOfSupply ? `<div style="font-size:12px;color:#888;margin-top:2px">Place of Supply: ${inv.placeOfSupply}</div>` : ''}
         ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
       </div>
       <table><thead><tr><th>#</th><th>Item</th><th>SKU</th><th>HSN</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead><tbody>
@@ -532,8 +541,10 @@ export default function BillingPage() {
       <div class="totals">
         <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
         ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
-        <div class="row"><span>CGST (${gstRate / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-        <div class="row"><span>SGST (${gstRate / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>
+        ${isInterstate
+          ? `<div class="row"><span>IGST (${gstRate}%)</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+          : `<div class="row"><span>CGST (${gstRate / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+             <div class="row"><span>SGST (${gstRate / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
         ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
         <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
         <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
@@ -543,11 +554,25 @@ export default function BillingPage() {
       ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
       <div class="footer">Thank you for your purchase!</div>
       </body></html>`;
-    const w = window.open('', '_blank', 'width=800,height=900');
-    w.document.write(printContent);
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 300);
+    const printFrame = document.createElement('iframe');
+    printFrame.style.position = 'fixed';
+    printFrame.style.right = '0';
+    printFrame.style.bottom = '0';
+    printFrame.style.width = '0';
+    printFrame.style.height = '0';
+    printFrame.style.border = '0';
+    printFrame.onload = () => {
+      const win = printFrame.contentWindow;
+      if (!win) return;
+      win.document.title = `Invoice ${inv.id}`;
+      win.focus();
+      win.print();
+      setTimeout(() => {
+        printFrame.remove();
+      }, 500);
+    };
+    printFrame.srcdoc = printContent;
+    document.body.appendChild(printFrame);
   };
 
   // ─── LOADING STATE ─────────────────────────────────────
@@ -1036,6 +1061,29 @@ export default function BillingPage() {
                     rows={2}
                     className="w-full pl-9 pr-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
                 </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Supply Type</label>
+                    <select
+                      value={posSupplyType}
+                      onChange={e => setPosSupplyType(e.target.value)}
+                      className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50"
+                    >
+                      <option value="INTRASTATE">Intra-state (CGST + SGST)</option>
+                      <option value="INTERSTATE">Inter-state (IGST)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Place of Supply</label>
+                    <input
+                      type="text"
+                      value={posPlaceOfSupply}
+                      onChange={e => setPosPlaceOfSupply(e.target.value)}
+                      placeholder="e.g. Bihar"
+                      className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50"
+                    />
+                  </div>
+                </div>
                 {/* Customer suggestions dropdown */}
                 {showCustomerDropdown && customerSuggestions.length > 0 && (
                   <div className="bg-surface border border-border rounded-xl shadow-lg max-h-[180px] overflow-y-auto">
@@ -1248,14 +1296,23 @@ export default function BillingPage() {
                     <span className="text-success font-medium">-{formatFullCurrency(posAdvancePaid)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted">CGST ({gstRate / 2}%)</span>
-                  <span className="text-foreground">{formatFullCurrency(posCgst)}</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-muted">SGST ({gstRate / 2}%)</span>
-                  <span className="text-foreground">{formatFullCurrency(posSgst)}</span>
-                </div>
+                {posSupplyType === 'INTERSTATE' ? (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-muted">IGST ({gstRate}%)</span>
+                    <span className="text-foreground">{formatFullCurrency(posIgst)}</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted">CGST ({gstRate / 2}%)</span>
+                      <span className="text-foreground">{formatFullCurrency(posCgst)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-muted">SGST ({gstRate / 2}%)</span>
+                      <span className="text-foreground">{formatFullCurrency(posSgst)}</span>
+                    </div>
+                  </>
+                )}
                 {posTransportCost > 0 && (
                   <div className="flex justify-between text-xs">
                     <span className="text-muted">Transport Cost</span>
@@ -1339,6 +1396,9 @@ export default function BillingPage() {
                   <p className="text-sm font-medium text-foreground">{selectedInvoice.customer}</p>
                   <p className="text-xs text-muted">{selectedInvoice.phone}</p>
                   {selectedInvoice.address && <p className="text-xs text-muted mt-0.5">{selectedInvoice.address}</p>}
+                  {selectedInvoice.placeOfSupply && (
+                    <p className="text-xs text-muted mt-0.5">Place of Supply: {selectedInvoice.placeOfSupply}</p>
+                  )}
                 </div>
                 <div className="text-right">
                   {selectedInvoice.salesperson && (
@@ -1386,8 +1446,14 @@ export default function BillingPage() {
                   {selectedInvoice.transportCost > 0 && (
                     <div className="flex justify-between"><span className="text-muted">Transport Cost</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.transportCost)}</span></div>
                   )}
-                  <div className="flex justify-between text-xs"><span className="text-muted">CGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.cgst)}</span></div>
-                  <div className="flex justify-between text-xs"><span className="text-muted">SGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.sgst)}</span></div>
+                  {(selectedInvoice.supplyType === 'INTERSTATE' || selectedInvoice.igst > 0) ? (
+                    <div className="flex justify-between text-xs"><span className="text-muted">IGST ({gstRate}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.igst || 0)}</span></div>
+                  ) : (
+                    <>
+                      <div className="flex justify-between text-xs"><span className="text-muted">CGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.cgst)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-muted">SGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.sgst)}</span></div>
+                    </>
+                  )}
                   <div className="flex justify-between text-base font-bold pt-2 border-t border-border">
                     <span className="text-foreground">Total</span>
                     <span className="text-accent">{formatFullCurrency(selectedInvoice.total)}</span>

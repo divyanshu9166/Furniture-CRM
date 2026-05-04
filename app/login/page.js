@@ -3,6 +3,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getStaff } from '@/app/actions/staff';
+import { getStoreSettings } from '@/app/actions/settings';
+import Image from 'next/image';
 
 export default function LoginPage() {
   return (
@@ -18,6 +20,7 @@ function LoginContent() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [storeProfile, setStoreProfile] = useState({ name: 'Furniture CRM', logo: '' });
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get('callbackUrl') || '/';
@@ -37,6 +40,18 @@ function LoginContent() {
       });
     }
   }, [mode, staffList.length]);
+
+  useEffect(() => {
+    let active = true;
+    getStoreSettings().then(res => {
+      if (!active || !res.success) return;
+      setStoreProfile({
+        name: res.data.storeName || 'Furniture CRM',
+        logo: res.data.logo || '',
+      });
+    });
+    return () => { active = false; };
+  }, []);
 
   const handleAdminSubmit = async (e) => {
     e.preventDefault();
@@ -110,10 +125,14 @@ function LoginContent() {
         <div className="w-full max-w-lg">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
             <div className="text-center mb-8">
-              <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <span className="text-2xl">🪑</span>
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 bg-blue-600 overflow-hidden">
+                {storeProfile.logo ? (
+                  <Image src={storeProfile.logo} alt="Store Logo" width={64} height={64} unoptimized className="w-full h-full object-contain bg-white" />
+                ) : (
+                  <span className="text-2xl">🪑</span>
+                )}
               </div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Furzentic</h1>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{storeProfile.name}</h1>
               <p className="text-gray-500 dark:text-gray-400 mt-1">Choose how you want to sign in</p>
             </div>
 
@@ -160,8 +179,12 @@ function LoginContent() {
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
           {/* Logo & Header */}
           <div className="text-center mb-8">
-            <div className={`w-16 h-16 ${mode === 'admin' ? 'bg-blue-600' : 'bg-amber-500'} rounded-2xl flex items-center justify-center mx-auto mb-4`}>
-              <span className="text-2xl">🪑</span>
+            <div className={`w-16 h-16 ${mode === 'admin' ? 'bg-blue-600' : 'bg-amber-500'} rounded-2xl flex items-center justify-center mx-auto mb-4 overflow-hidden`}>
+              {storeProfile.logo ? (
+                <Image src={storeProfile.logo} alt="Store Logo" width={64} height={64} unoptimized className="w-full h-full object-contain bg-white" />
+              ) : (
+                <span className="text-2xl">🪑</span>
+              )}
             </div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
               {mode === 'admin' ? 'Admin Login' : 'Staff Login'}

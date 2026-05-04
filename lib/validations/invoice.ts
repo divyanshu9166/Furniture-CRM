@@ -29,6 +29,8 @@ export const createInvoiceSchema = z.object({
   dueDate: z.string().optional(), // ISO date string
   isHeld: z.boolean().optional(),  // park/hold the bill
   transportCost: z.number().min(0).default(0),
+  supplyType: z.enum(['INTRASTATE', 'INTERSTATE']).optional(),
+  placeOfSupply: z.string().optional(),
 })
 
 export const recordPaymentSchema = z.object({

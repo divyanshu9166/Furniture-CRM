@@ -41,6 +41,9 @@ export async function getInvoices() {
       gst: inv.gst,
       cgst: inv.cgst,
       sgst: inv.sgst,
+      igst: inv.igst,
+      supplyType: inv.supplyType,
+      placeOfSupply: inv.placeOfSupply,
       transportCost: inv.transportCost,
       total: inv.total,
       amountPaid: inv.amountPaid,
@@ -97,7 +100,22 @@ export async function createInvoice(data: unknown) {
   const parsed = createInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { customer, phone, address, items, discount, discountType, payments, salespersonId, notes, dueDate, isHeld, transportCost } = parsed.data
+  const {
+    customer,
+    phone,
+    address,
+    items,
+    discount,
+    discountType,
+    payments,
+    salespersonId,
+    notes,
+    dueDate,
+    isHeld,
+    transportCost,
+    supplyType,
+    placeOfSupply,
+  } = parsed.data
 
   // Find or create contact
   let contact = await prisma.contact.findFirst({ where: { phone } })
@@ -123,8 +141,10 @@ export async function createInvoice(data: unknown) {
 
   const taxable = subtotal - discountAmount
   const totalGst = Math.round(taxable * gstRate / 100)
-  const cgst = Math.round(totalGst / 2)
-  const sgst = totalGst - cgst // avoid rounding issues
+  const resolvedSupplyType = supplyType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE'
+  const igst = resolvedSupplyType === 'INTERSTATE' ? totalGst : 0
+  const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(totalGst / 2)
+  const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : totalGst - cgst // avoid rounding issues
   const total = taxable + totalGst + (transportCost || 0)
 
   // Calculate total payment
@@ -161,6 +181,7 @@ export async function createInvoice(data: unknown) {
       gst: totalGst,
       cgst,
       sgst,
+      igst,
       transportCost: transportCost || 0,
       total,
       amountPaid,
@@ -168,6 +189,8 @@ export async function createInvoice(data: unknown) {
       paymentMethod: payments[0].method, // primary method
       paymentStatus,
       invoiceStatus: 'ACTIVE',
+      supplyType: resolvedSupplyType,
+      placeOfSupply: placeOfSupply?.trim() || null,
       date: now,
       time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
       dueDate: dueDate ? new Date(dueDate) : null,
