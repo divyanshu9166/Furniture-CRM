@@ -5,9 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { createStaffSchema, updateStaffSchema } from '@/lib/validations/staff'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import bcrypt from 'bcryptjs'
-import type { UserRole } from '@prisma/client'
+import type { Prisma, UserRole } from '@prisma/client'
 
-const staffPortalInclude = {
+const staffPortalInclude: Prisma.StaffInclude = {
   attendance: { orderBy: { date: 'desc' }, take: 7 },
   activities: { orderBy: { date: 'desc' }, take: 10 },
   fieldVisits: { orderBy: { date: 'desc' }, take: 5 },
