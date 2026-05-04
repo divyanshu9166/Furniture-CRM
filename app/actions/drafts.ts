@@ -4,10 +4,34 @@ import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
 import { syncProductStockFromGodowns } from './godowns'
+import {
+  InvoiceStatus,
+  LeadStatus,
+  OrderSource,
+  OrderStatus,
+  PaymentStatus,
+  POStatus,
+  QuotationStatus,
+  WalkinStatus,
+} from '@prisma/client'
 
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 const getDraftExpiry = (now: Date) => new Date(now.getTime() + DRAFT_TTL_MS)
+
+const leadStatusValues = new Set(Object.values(LeadStatus))
+const walkinStatusValues = new Set(Object.values(WalkinStatus))
+const orderStatusValues = new Set(Object.values(OrderStatus))
+const paymentStatusValues = new Set(Object.values(PaymentStatus))
+const orderSourceValues = new Set(Object.values(OrderSource))
+const quotationStatusValues = new Set(Object.values(QuotationStatus))
+const invoiceStatusValues = new Set(Object.values(InvoiceStatus))
+const poStatusValues = new Set(Object.values(POStatus))
+
+function coerceEnum<T extends string>(value: unknown, allowed: Set<string>, fallback: T): T {
+  if (typeof value === 'string' && allowed.has(value)) return value as T
+  return fallback
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function adjustGodownStockWithTx(tx: any, params: {
@@ -1024,7 +1048,7 @@ export async function restoreFromDraft(draftId: number) {
           contactId: contact.id,
           interest: data.interest as string,
           budget: (data.budget as string) || null,
-          status: (data.status as string) || 'NEW',
+          status: coerceEnum(data.status, leadStatusValues, LeadStatus.NEW),
           source: (data.source as string) || null,
           date: data.date ? new Date(data.date as string) : new Date(),
           notes: (data.notes as string) || null,
@@ -1088,7 +1112,7 @@ export async function restoreFromDraft(draftId: number) {
           assignedToId: (data.assignedToId as number) || null,
           date: data.date ? new Date(data.date as string) : new Date(),
           time: data.time as string,
-          status: (data.status as string) || 'BROWSING',
+          status: coerceEnum(data.status, walkinStatusValues, WalkinStatus.BROWSING),
           budget: (data.budget as string) || null,
           notes: (data.notes as string) || null,
           source: (data.source as string) || 'Walk-in',
@@ -1157,7 +1181,7 @@ export async function restoreFromDraft(draftId: number) {
 
     const productId = data.productId as number
     const quantity = data.quantity as number
-    const orderSource = (data.source as string) || 'STORE'
+    const orderSource = coerceEnum(data.source, orderSourceValues, OrderSource.STORE)
     const shouldDeductStock = ['STORE', 'SHOPIFY'].includes(orderSource)
 
     let contact = await prisma.contact.findFirst({ where: { phone: data.phone as string } })
@@ -1222,9 +1246,9 @@ export async function restoreFromDraft(draftId: number) {
           productId,
           quantity,
           amount: data.amount as number,
-          source: orderSource as any,
-          payment: (data.payment as string) || 'PENDING',
-          status: (data.status as string) || 'CONFIRMED',
+          source: orderSource,
+          payment: coerceEnum(data.payment, paymentStatusValues, PaymentStatus.PENDING),
+          status: coerceEnum(data.status, orderStatusValues, OrderStatus.CONFIRMED),
           date: data.date ? new Date(data.date as string) : new Date(),
           deliveryDate: data.deliveryDate ? new Date(data.deliveryDate as string) : null,
           notes: (data.notes as string) || null,
@@ -1329,7 +1353,7 @@ export async function restoreFromDraft(draftId: number) {
           grandTotal: data.grandTotal as number,
           notes: (data.notes as string) || null,
           termsAndConditions: Array.isArray(data.termsAndConditions) ? data.termsAndConditions : [],
-          status: (data.status as string) || 'DRAFT',
+          status: coerceEnum(data.status, quotationStatusValues, QuotationStatus.DRAFT),
           items: {
             create: items.map((item: any) => ({
               productId: item.productId || null,
@@ -1415,8 +1439,8 @@ export async function restoreFromDraft(draftId: number) {
           amountPaid: data.amountPaid as number,
           balanceDue: data.balanceDue as number,
           paymentMethod: data.paymentMethod as string,
-          paymentStatus: (data.paymentStatus as string) || 'PENDING',
-          invoiceStatus: (data.invoiceStatus as string) || 'ACTIVE',
+          paymentStatus: coerceEnum(data.paymentStatus, paymentStatusValues, PaymentStatus.PENDING),
+          invoiceStatus: coerceEnum(data.invoiceStatus, invoiceStatusValues, InvoiceStatus.ACTIVE),
           transportCost: (data.transportCost as number) || 0,
           supplyType: (data.supplyType as string) || 'INTRASTATE',
           placeOfSupply: (data.placeOfSupply as string) || null,
@@ -1553,7 +1577,7 @@ export async function restoreFromDraft(draftId: number) {
         data: {
           displayId,
           supplierId: supplierId as number,
-          status: (data.status as string) || 'DRAFT',
+          status: coerceEnum(data.status, poStatusValues, POStatus.DRAFT),
           subtotal: data.subtotal as number,
           discount: data.discount as number,
           gst: data.gst as number,
