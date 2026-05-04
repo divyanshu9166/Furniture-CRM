@@ -1,0 +1,9 @@
+-- Add missing columns for StoreSettings and Quotation
+
+ALTER TABLE "StoreSettings"
+ADD COLUMN IF NOT EXISTS "paymentQr" TEXT;
+
+ALTER TABLE "Quotation"
+ADD COLUMN IF NOT EXISTS "discountType" TEXT NOT NULL DEFAULT 'PERCENT',
+ADD COLUMN IF NOT EXISTS "discountValue" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "discountAmount" INTEGER NOT NULL DEFAULT 0;
