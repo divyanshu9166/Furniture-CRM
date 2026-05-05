@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Search, Plus, Truck, Users, RotateCcw, CheckCircle, XCircle, Trash2,
-  Eye, FileText, ArrowDownCircle, Clock, AlertTriangle
+  Eye, FileText, ArrowDownCircle, Clock, AlertTriangle,
+  Download, MessageSquare, Mail
 } from 'lucide-react'
 import {
   getSuppliers, createSupplier, updateSupplier, getPurchaseOrders, createPurchaseOrder,
@@ -12,6 +13,7 @@ import {
   sendPurchaseOrderToSupplier, updatePurchaseOrder
 } from '@/app/actions/purchases'
 import { getProducts } from '@/app/actions/products'
+import { getStoreSettings } from '@/app/actions/settings'
 import { movePurchaseOrderToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
 import { useAlertToast } from '@/components/AlertToastProvider'
@@ -25,6 +27,182 @@ const poStatusColors = {
 }
 
 const ITC_CATEGORIES = ['INPUTS', 'SERVICES', 'CAPITAL_GOODS', 'INELIGIBLE']
+
+const formatCurrency = (value) => `₹${Number(value || 0).toLocaleString('en-IN')}`
+
+const formatDate = (value) => {
+  if (!value) return '—'
+  return new Date(value).toLocaleDateString('en-IN')
+}
+
+const normalizePhoneNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '').replace(/^0+/, '')
+  if (!digits) return ''
+  return digits.startsWith('91') ? digits : `91${digits}`
+}
+
+const buildWhatsAppUrl = (phone, message) => {
+  const normalized = normalizePhoneNumber(phone)
+  if (!normalized) return ''
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
+}
+
+const buildMailtoUrl = (email, subject, body) => {
+  if (!email) return ''
+  const params = new URLSearchParams()
+  if (subject) params.set('subject', subject)
+  if (body) params.set('body', body)
+  return `mailto:${email}?${params.toString()}`
+}
+
+const escapeHtml = (value) => String(value || '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;')
+
+const buildPurchaseOrderShareMessage = (po, storeSettings) => {
+  const storeName = storeSettings?.storeName || 'Furniture Store'
+  const contactBits = []
+  if (storeSettings?.phone) contactBits.push(`Phone: ${storeSettings.phone}`)
+  if (storeSettings?.whatsappNumber) contactBits.push(`WhatsApp: ${storeSettings.whatsappNumber}`)
+  if (storeSettings?.email) contactBits.push(`Email: ${storeSettings.email}`)
+
+  const itemLines = (po.items || []).map(item => (
+    `- ${item.name} (${item.sku}) | Qty ${item.quantity} | INR ${Number(item.amount || 0).toLocaleString('en-IN')}`
+  ))
+
+  return [
+    `*Purchase Order ${po.displayId}*`,
+    `Supplier: ${po.supplier?.name || ''}`.trim(),
+    `PO Date: ${formatDate(po.date)}`,
+    `Expected Delivery: ${formatDate(po.expectedDate)}`,
+    `Total: INR ${Number(po.total || 0).toLocaleString('en-IN')}`,
+    po.supplier?.paymentTerms ? `Payment Terms: ${po.supplier.paymentTerms} days` : null,
+    '',
+    'Items:',
+    ...itemLines,
+    '',
+    contactBits.length > 0 ? `Issued by ${storeName} · ${contactBits.join(' | ')}` : `Issued by ${storeName}`,
+  ].filter(Boolean).join('\n')
+}
+
+const buildPurchaseOrderDocumentHtml = (po, storeSettings) => {
+  const store = storeSettings || {}
+  const supplier = po.supplier || {}
+  const hasIgst = Number(po.igst || 0) > 0
+
+  const itemRows = (po.items || []).map((item, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td>${escapeHtml(item.name)}</td>
+      <td>${escapeHtml(item.sku)}</td>
+      <td>${escapeHtml(item.hsnCode || '-')}</td>
+      <td style="text-align:center">${item.quantity}</td>
+      <td style="text-align:right">₹${Number(item.unitCost || 0).toLocaleString('en-IN')}</td>
+      <td style="text-align:center">${Number(item.gstRate || 0)}%</td>
+      <td style="text-align:right;font-weight:600">₹${Number(item.amount || 0).toLocaleString('en-IN')}</td>
+    </tr>
+  `).join('')
+
+  return `
+  <html>
+    <head>
+      <title>Purchase Order ${escapeHtml(po.displayId)}</title>
+      <style>
+        body { font-family: 'Segoe UI', sans-serif; padding: 32px; color: #111827; max-width: 860px; margin: 0 auto; }
+        @page { size: A4; margin: 12mm; }
+        .header { display:flex; justify-content:space-between; border-bottom:2px solid #e5e7eb; padding-bottom:16px; margin-bottom:16px; }
+        .brand { font-size:22px; font-weight:700; color:#0f172a; }
+        .meta { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:16px; margin-bottom:18px; }
+        .label { font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:0.5px; }
+        .box { border:1px solid #e5e7eb; border-radius:8px; padding:12px; }
+        table { width:100%; border-collapse:collapse; margin-top:12px; }
+        th { text-align:left; font-size:11px; text-transform:uppercase; color:#6b7280; border-bottom:1px solid #e5e7eb; padding:8px 6px; }
+        td { padding:8px 6px; border-bottom:1px solid #f3f4f6; font-size:12px; }
+        .totals { margin-top:12px; width: 320px; margin-left:auto; }
+        .totals .row { display:flex; justify-content:space-between; padding:4px 0; font-size:12px; }
+        .totals .grand { border-top:2px solid #111827; padding-top:8px; font-size:14px; font-weight:700; }
+        .notes { margin-top:14px; font-size:12px; color:#4b5563; background:#f9fafb; padding:10px; border-radius:8px; border:1px solid #e5e7eb; }
+        @media print { body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="brand">${escapeHtml(store.storeName || 'Furniture Store')}</div>
+          ${store.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px">${escapeHtml(store.address)}</div>` : ''}
+          <div style="font-size:12px;color:#6b7280">${escapeHtml(store.phone || '')}${store.email ? ` · ${escapeHtml(store.email)}` : ''}</div>
+          ${store.gstNumber ? `<div style="font-size:12px;color:#6b7280;margin-top:2px">GSTIN: ${escapeHtml(store.gstNumber)}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:18px;font-weight:700">${escapeHtml(po.displayId)}</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:4px">PO Date: ${formatDate(po.date)}</div>
+          <div style="font-size:12px;color:#6b7280">Expected: ${formatDate(po.expectedDate)}</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:2px">Status: ${escapeHtml(po.status || '')}</div>
+        </div>
+      </div>
+
+      <div class="meta">
+        <div class="box">
+          <div class="label">Supplier</div>
+          <div style="font-weight:600;margin-top:6px">${escapeHtml(supplier.name || '')}</div>
+          ${supplier.contactPerson ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(supplier.contactPerson)}</div>` : ''}
+          ${supplier.phone ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(supplier.phone)}</div>` : ''}
+          ${supplier.email ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(supplier.email)}</div>` : ''}
+          ${supplier.gstNumber ? `<div style="font-size:12px;color:#6b7280">GSTIN: ${escapeHtml(supplier.gstNumber)}</div>` : ''}
+          ${supplier.address ? `<div style="font-size:12px;color:#6b7280;margin-top:4px">${escapeHtml(supplier.address)}</div>` : ''}
+        </div>
+        <div class="box">
+          <div class="label">Ship To</div>
+          <div style="font-weight:600;margin-top:6px">${escapeHtml(store.storeName || 'Furniture Store')}</div>
+          ${store.address ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(store.address)}</div>` : ''}
+          ${store.phone ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(store.phone)}</div>` : ''}
+        </div>
+        <div class="box">
+          <div class="label">Compliance</div>
+          <div style="font-size:12px;color:#6b7280;margin-top:6px">ITC: ${po.itcEligible ? escapeHtml(po.itcCategory || 'INPUTS') : 'Ineligible'}</div>
+          <div style="font-size:12px;color:#6b7280">RCM: ${po.isRCM ? 'Yes' : 'No'}</div>
+          ${supplier.paymentTerms ? `<div style="font-size:12px;color:#6b7280">Payment Terms: ${supplier.paymentTerms} days</div>` : ''}
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Item</th>
+            <th>SKU</th>
+            <th>HSN</th>
+            <th style="text-align:center">Qty</th>
+            <th style="text-align:right">Unit Cost</th>
+            <th style="text-align:center">GST</th>
+            <th style="text-align:right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div class="row"><span>Subtotal</span><span>₹${Number(po.subtotal || 0).toLocaleString('en-IN')}</span></div>
+        ${Number(po.discount || 0) > 0 ? `<div class="row"><span>Discount</span><span>-₹${Number(po.discount || 0).toLocaleString('en-IN')}</span></div>` : ''}
+        ${hasIgst
+          ? `<div class="row"><span>IGST</span><span>₹${Number(po.igst || 0).toLocaleString('en-IN')}</span></div>`
+          : `<div class="row"><span>CGST</span><span>₹${Number(po.cgst || 0).toLocaleString('en-IN')}</span></div>
+             <div class="row"><span>SGST</span><span>₹${Number(po.sgst || 0).toLocaleString('en-IN')}</span></div>`}
+        <div class="row grand"><span>Total</span><span>₹${Number(po.total || 0).toLocaleString('en-IN')}</span></div>
+        ${Number(po.amountPaid || 0) > 0 ? `<div class="row"><span>Paid</span><span>₹${Number(po.amountPaid || 0).toLocaleString('en-IN')}</span></div>` : ''}
+        ${Number(po.balanceDue || 0) > 0 ? `<div class="row"><span>Balance Due</span><span>₹${Number(po.balanceDue || 0).toLocaleString('en-IN')}</span></div>` : ''}
+      </div>
+
+      ${po.notes ? `<div class="notes"><strong>Notes:</strong> ${escapeHtml(po.notes)}</div>` : ''}
+    </body>
+  </html>
+  `
+}
 
 const createEmptyPOForm = () => ({
   supplierId: '',
@@ -55,6 +233,7 @@ export default function PurchasesPage() {
   const [returns, setReturns] = useState([])
   const [products, setProducts] = useState([])
   const [stats, setStats] = useState(null)
+  const [storeSettings, setStoreSettings] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('All')
 
@@ -82,18 +261,25 @@ export default function PurchasesPage() {
 
   const loadData = () => {
     setLoading(true)
-    Promise.all([getPurchaseOrders(), getSuppliers(), getPurchaseReturns(), getProducts(), getPurchaseStats()])
-      .then(([poRes, supRes, retRes, prodRes, statsRes]) => {
+    Promise.all([
+      getPurchaseOrders(),
+      getSuppliers(),
+      getPurchaseReturns(),
+      getProducts(),
+      getPurchaseStats(),
+      getStoreSettings(),
+    ])
+      .then(([poRes, supRes, retRes, prodRes, statsRes, settingsRes]) => {
         if (poRes.success) setOrders(poRes.data)
         if (supRes.success) setSuppliers(supRes.data)
         if (retRes.success) setReturns(retRes.data)
         if (prodRes.success) setProducts(prodRes.data)
         if (statsRes.success) setStats(statsRes.data)
+        if (settingsRes.success) setStoreSettings(settingsRes.data)
         setLoading(false)
       })
   }
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadData() }, [])
 
   const filteredOrders = useMemo(() => orders.filter(o =>
@@ -319,6 +505,53 @@ export default function PurchasesPage() {
     }
   }
 
+  const handleDownloadPO = (po) => {
+    if (!po) return
+    const printContent = buildPurchaseOrderDocumentHtml(po, storeSettings)
+    if (!printContent) return
+    const printFrame = document.createElement('iframe')
+    printFrame.style.position = 'fixed'
+    printFrame.style.right = '0'
+    printFrame.style.bottom = '0'
+    printFrame.style.width = '0'
+    printFrame.style.height = '0'
+    printFrame.style.border = '0'
+    printFrame.onload = () => {
+      const win = printFrame.contentWindow
+      if (!win) return
+      win.document.title = `Purchase Order ${po.displayId}`
+      win.focus()
+      win.print()
+      setTimeout(() => {
+        printFrame.remove()
+      }, 500)
+    }
+    printFrame.srcdoc = printContent
+    document.body.appendChild(printFrame)
+  }
+
+  const handleSharePOWhatsApp = (po) => {
+    const message = buildPurchaseOrderShareMessage(po, storeSettings)
+    const url = buildWhatsAppUrl(po?.supplier?.phone, message)
+    if (!url) {
+      notify('Supplier phone number is missing', { variant: 'danger' })
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleSharePOEmail = (po) => {
+    if (!po?.supplier?.email) {
+      notify('Supplier email is missing', { variant: 'danger' })
+      return
+    }
+    const subject = `Purchase Order ${po.displayId} from ${storeSettings?.storeName || 'Furniture Store'}`
+    const body = buildPurchaseOrderShareMessage(po, storeSettings)
+    const url = buildMailtoUrl(po.supplier.email, subject, body)
+    if (!url) return
+    window.location.href = url
+  }
+
   const openPaymentModal = (po) => {
     setPaymentForm({
       poId: po.id,
@@ -512,6 +745,33 @@ export default function PurchasesPage() {
                           Send PO
                         </button>
                       )}
+                      {po.status !== 'CANCELLED' && (
+                        <>
+                          <button
+                            onClick={() => handleDownloadPO(po)}
+                            className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground"
+                            title="Download PO"
+                          >
+                            <Download className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleSharePOWhatsApp(po)}
+                            className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-400"
+                            title="Share on WhatsApp"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                          {po.supplier?.email && (
+                            <button
+                              onClick={() => handleSharePOEmail(po)}
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-400"
+                              title="Share by Email"
+                            >
+                              <Mail className="w-4 h-4" />
+                            </button>
+                          )}
+                        </>
+                      )}
                       {po.status === 'DRAFT' && <button onClick={() => handleApprovePO(po.id)} className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Approve"><CheckCircle className="w-4 h-4" /></button>}
                       {(po.status === 'APPROVED' || po.status === 'PARTIALLY_RECEIVED') && <button onClick={() => handleReceivePO(po.id)} className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Receive"><ArrowDownCircle className="w-4 h-4" /></button>}
                       {po.status !== 'CANCELLED' && po.balanceDue > 0 && (
@@ -605,39 +865,105 @@ export default function PurchasesPage() {
       <Modal isOpen={showDetailModal} onClose={() => setShowDetailModal(false)} title={`Purchase Order: ${selectedPO?.displayId}`} size="lg">
         {selectedPO && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="flex gap-2"><span className="text-muted w-20">Supplier:</span> <span className="text-foreground font-medium truncate">{selectedPO.supplier?.name}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">Date:</span> <span className="text-foreground">{new Date(selectedPO.date).toLocaleDateString('en-IN')}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">Expected:</span> <span className="text-foreground">{selectedPO.expectedDate ? new Date(selectedPO.expectedDate).toLocaleDateString('en-IN') : '—'}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">Status:</span> <span className={`px-2 py-0.5 rounded-full text-xs ${poStatusColors[selectedPO.status]}`}>{selectedPO.status}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">ITC:</span> <span className="text-foreground">{selectedPO.itcEligible ? selectedPO.itcCategory?.replace(/_/g, ' ') : 'Ineligible'}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">RCM:</span> <span className="text-foreground">{selectedPO.isRCM ? 'Yes' : 'No'}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">Total:</span> <span className="text-foreground font-medium">₹{selectedPO.total?.toLocaleString('en-IN')}</span></div>
-              <div className="flex gap-2"><span className="text-muted w-20">Balance:</span> <span className="text-foreground font-medium">₹{selectedPO.balanceDue?.toLocaleString('en-IN')}</span></div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-muted font-semibold">Supplier</p>
+                <p className="text-sm font-medium text-foreground">{selectedPO.supplier?.name}</p>
+                {selectedPO.supplier?.contactPerson && <p className="text-xs text-muted">Contact: {selectedPO.supplier.contactPerson}</p>}
+                {selectedPO.supplier?.phone && <p className="text-xs text-muted">Phone: {selectedPO.supplier.phone}</p>}
+                {selectedPO.supplier?.email && <p className="text-xs text-muted">Email: {selectedPO.supplier.email}</p>}
+                {selectedPO.supplier?.gstNumber && <p className="text-xs text-muted">GSTIN: {selectedPO.supplier.gstNumber}</p>}
+                {selectedPO.supplier?.address && <p className="text-xs text-muted">Address: {selectedPO.supplier.address}</p>}
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-muted font-semibold">Ship To</p>
+                <p className="text-sm font-medium text-foreground">{storeSettings?.storeName || 'Furniture Store'}</p>
+                {storeSettings?.address && <p className="text-xs text-muted">{storeSettings.address}</p>}
+                {storeSettings?.phone && <p className="text-xs text-muted">Phone: {storeSettings.phone}</p>}
+                {storeSettings?.gstNumber && <p className="text-xs text-muted">GSTIN: {storeSettings.gstNumber}</p>}
+              </div>
+              <div className="space-y-1">
+                <p className="text-[10px] uppercase tracking-wider text-muted font-semibold">PO Details</p>
+                <p className="text-xs text-muted">Date: <span className="text-foreground">{formatDate(selectedPO.date)}</span></p>
+                <p className="text-xs text-muted">Expected: <span className="text-foreground">{formatDate(selectedPO.expectedDate)}</span></p>
+                <p className="text-xs text-muted">Status: <span className={`px-2 py-0.5 rounded-full text-xs ${poStatusColors[selectedPO.status]}`}>{selectedPO.status}</span></p>
+                <p className="text-xs text-muted">ITC: <span className="text-foreground">{selectedPO.itcEligible ? selectedPO.itcCategory?.replace(/_/g, ' ') : 'Ineligible'}</span></p>
+                <p className="text-xs text-muted">RCM: <span className="text-foreground">{selectedPO.isRCM ? 'Yes' : 'No'}</span></p>
+                {selectedPO.supplier?.paymentTerms && <p className="text-xs text-muted">Payment Terms: <span className="text-foreground">{selectedPO.supplier.paymentTerms} days</span></p>}
+              </div>
             </div>
             <div className="overflow-x-auto border border-border rounded-lg">
               <table className="w-full text-sm whitespace-nowrap">
                 <thead><tr className="bg-surface-hover">
-                {['Product', 'SKU', 'Qty', 'Received', 'Unit Cost', 'Amount'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)}
+                {['Product', 'SKU', 'HSN', 'Qty', 'Received', 'Unit Cost', 'GST', 'Amount'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)}
               </tr></thead>
               <tbody>
                 {selectedPO.items?.map((item, i) => (
                   <tr key={i} className="border-t border-border/50">
                     <td className="px-3 py-2 text-foreground">{item.name}</td>
                     <td className="px-3 py-2 text-muted">{item.sku}</td>
+                    <td className="px-3 py-2 text-muted">{item.hsnCode || '—'}</td>
                     <td className="px-3 py-2 text-foreground">{item.quantity}</td>
                     <td className="px-3 py-2 text-foreground">{item.receivedQty}</td>
                     <td className="px-3 py-2 text-foreground">₹{item.unitCost?.toLocaleString('en-IN')}</td>
+                    <td className="px-3 py-2 text-foreground">{item.gstRate || 0}%</td>
                     <td className="px-3 py-2 text-foreground">₹{item.amount?.toLocaleString('en-IN')}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-4 text-sm pt-2 border-t border-border">
-              <div className="flex justify-between sm:justify-start"><span className="text-muted">Subtotal:</span> <span className="font-medium ml-1">₹{selectedPO.subtotal?.toLocaleString('en-IN')}</span></div>
-              <div className="flex justify-between sm:justify-start"><span className="text-muted">GST:</span> <span className="font-medium ml-1">₹{selectedPO.gst?.toLocaleString('en-IN')}</span></div>
-              <div className="flex justify-between sm:justify-start"><span className="text-muted">Discount:</span> <span className="font-medium ml-1">₹{selectedPO.discount?.toLocaleString('en-IN')}</span></div>
+            <div className="flex justify-end pt-3 border-t border-border">
+              <div className="w-72 space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-muted">Subtotal</span><span className="text-foreground">{formatCurrency(selectedPO.subtotal)}</span></div>
+                {Number(selectedPO.discount || 0) > 0 && (
+                  <div className="flex justify-between"><span className="text-muted">Discount</span><span className="text-foreground">- {formatCurrency(selectedPO.discount)}</span></div>
+                )}
+                {Number(selectedPO.igst || 0) > 0 ? (
+                  <div className="flex justify-between text-xs"><span className="text-muted">IGST</span><span className="text-foreground">{formatCurrency(selectedPO.igst)}</span></div>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-xs"><span className="text-muted">CGST</span><span className="text-foreground">{formatCurrency(selectedPO.cgst)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted">SGST</span><span className="text-foreground">{formatCurrency(selectedPO.sgst)}</span></div>
+                  </>
+                )}
+                <div className="flex justify-between text-base font-bold pt-2 border-t border-border">
+                  <span className="text-foreground">Total</span>
+                  <span className="text-foreground">{formatCurrency(selectedPO.total)}</span>
+                </div>
+                {Number(selectedPO.amountPaid || 0) > 0 && (
+                  <div className="flex justify-between text-xs"><span className="text-muted">Paid</span><span className="text-foreground">{formatCurrency(selectedPO.amountPaid)}</span></div>
+                )}
+                {Number(selectedPO.balanceDue || 0) > 0 && (
+                  <div className="flex justify-between text-xs"><span className="text-muted">Balance Due</span><span className="text-foreground">{formatCurrency(selectedPO.balanceDue)}</span></div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <p className="text-xs font-semibold text-muted uppercase tracking-wide">Share & Download</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleDownloadPO(selectedPO)}
+                  className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs font-medium text-muted hover:text-foreground"
+                >
+                  <Download className="w-3.5 h-3.5 inline-block mr-1" /> Download PO
+                </button>
+                <button
+                  onClick={() => handleSharePOWhatsApp(selectedPO)}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 inline-block mr-1" /> WhatsApp
+                </button>
+                {selectedPO.supplier?.email && (
+                  <button
+                    onClick={() => handleSharePOEmail(selectedPO)}
+                    className="px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 text-xs font-medium hover:bg-blue-500/20"
+                  >
+                    <Mail className="w-3.5 h-3.5 inline-block mr-1" /> Email (optional)
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="border-t border-border pt-3 space-y-2">

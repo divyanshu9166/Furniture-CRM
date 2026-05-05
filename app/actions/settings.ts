@@ -9,6 +9,7 @@ import { requireRole } from '@/lib/auth-helpers'
 const updateSettingsSchema = z.object({
   storeName: z.string().min(1).optional(),
   phone: z.string().optional(),
+  whatsappNumber: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
   address: z.string().optional(),
   paymentQr: z.string().optional(),
@@ -36,6 +37,12 @@ const supportsStoreSettingsPaymentQr = Boolean(
     ?.fields.some(field => field.name === 'paymentQr')
 )
 
+const supportsStoreSettingsWhatsappNumber = Boolean(
+  Prisma.dmmf.datamodel.models
+    .find(model => model.name === 'StoreSettings')
+    ?.fields.some(field => field.name === 'whatsappNumber')
+)
+
 async function readPaymentQrFromDb() {
   try {
     const rows = await prisma.$queryRaw<Array<{ paymentQr: string | null }>>`
@@ -45,6 +52,20 @@ async function readPaymentQrFromDb() {
       LIMIT 1
     `
     return rows[0]?.paymentQr ?? null
+  } catch {
+    return null
+  }
+}
+
+async function readWhatsappNumberFromDb() {
+  try {
+    const rows = await prisma.$queryRaw<Array<{ whatsappNumber: string | null }>>`
+      SELECT "whatsappNumber" as "whatsappNumber"
+      FROM "StoreSettings"
+      WHERE "id" = 1
+      LIMIT 1
+    `
+    return rows[0]?.whatsappNumber ?? null
   } catch {
     return null
   }
@@ -62,11 +83,16 @@ export async function getStoreSettings() {
     ? ((settings as { paymentQr?: string | null }).paymentQr ?? null)
     : await readPaymentQrFromDb()
 
+  const whatsappNumber = supportsStoreSettingsWhatsappNumber
+    ? ((settings as { whatsappNumber?: string | null }).whatsappNumber ?? null)
+    : await readWhatsappNumberFromDb()
+
   return {
     success: true,
     data: {
       storeName: settings.storeName,
       phone: settings.phone,
+      whatsappNumber,
       email: settings.email,
       address: settings.address,
       paymentQr,
@@ -96,7 +122,12 @@ export async function updateStoreSettings(data: unknown) {
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const { paymentQr, ...settingsWithoutPaymentQr } = parsed.data
-  const settingsData = supportsStoreSettingsPaymentQr ? parsed.data : settingsWithoutPaymentQr
+  const { whatsappNumber, ...settingsWithoutExtras } = settingsWithoutPaymentQr
+  const settingsData = {
+    ...settingsWithoutExtras,
+    ...(supportsStoreSettingsPaymentQr && paymentQr !== undefined ? { paymentQr } : {}),
+    ...(supportsStoreSettingsWhatsappNumber && whatsappNumber !== undefined ? { whatsappNumber } : {}),
+  }
 
   const settings = await prisma.storeSettings.upsert({
     where: { id: 1 },
@@ -119,12 +150,31 @@ export async function updateStoreSettings(data: unknown) {
     }
   }
 
+  if (!supportsStoreSettingsWhatsappNumber && whatsappNumber !== undefined) {
+    try {
+      await prisma.$executeRaw`
+        UPDATE "StoreSettings"
+        SET "whatsappNumber" = ${whatsappNumber}
+        WHERE "id" = 1
+      `
+    } catch {
+      return {
+        success: false,
+        error: 'WhatsApp number field is not available yet. Run `npx prisma generate`, `npx prisma db push`, and restart the dev server.',
+      }
+    }
+  }
+
   const resolvedPaymentQr = supportsStoreSettingsPaymentQr
     ? ((settings as { paymentQr?: string | null }).paymentQr ?? null)
     : await readPaymentQrFromDb()
 
+  const resolvedWhatsappNumber = supportsStoreSettingsWhatsappNumber
+    ? ((settings as { whatsappNumber?: string | null }).whatsappNumber ?? null)
+    : await readWhatsappNumberFromDb()
+
   revalidatePath('/settings')
-  return { success: true, data: { ...settings, paymentQr: resolvedPaymentQr } }
+  return { success: true, data: { ...settings, paymentQr: resolvedPaymentQr, whatsappNumber: resolvedWhatsappNumber } }
 }
 
 export async function getMarketplaceChannels() {

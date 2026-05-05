@@ -1,6 +1,7 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Search, Plus, Package, AlertTriangle, TrendingUp, Grid3x3, List,
   Warehouse, QrCode, RefreshCw, ArrowDown, ArrowUp, Bell,
@@ -105,33 +106,32 @@ export default function InventoryPage() {
     if (res.success) setProducts(res.data);
   };
 
-  const loadDeepInventory = async () => {
+  const loadDeepInventory = useCallback(async () => {
     setDeepLoading(true);
     const [sgRes, bRes, aRes] = await Promise.all([getStockGroups(), getBatches(), getAgingAnalysis()]);
     if (sgRes.success) setStockGroups(sgRes.data);
     if (bRes.success) setBatches(bRes.data);
     if (aRes.success) setAgingData(aRes.data);
     setDeepLoading(false);
-  };
+  }, []);
 
-  const loadLocationData = async () => {
+  const loadLocationData = useCallback(async () => {
     setLocationLoading(true);
     const [gsRes, gdRes] = await Promise.all([getGodownStock(), getGodowns()]);
     if (gsRes.success) setGodownStocks(gsRes.data);
     if (gdRes.success) setGodowns(gdRes.data);
     setLocationLoading(false);
-  };
+  }, []);
 
-  const loadLedger = async () => {
+  const loadLedger = useCallback(async () => {
     setLedgerLoading(true);
     const res = await getStockLedger({ limit: 200 });
     if (res.success) setLedgerEntries(res.data);
     setLedgerLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     if (['stockGroups', 'batches', 'aging'].includes(tab) && stockGroups.length === 0 && !deepLoading) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadDeepInventory();
     }
     if (tab === 'location' && godownStocks.length === 0 && !locationLoading) {
@@ -140,7 +140,18 @@ export default function InventoryPage() {
     if (tab === 'ledger' && ledgerEntries.length === 0 && !ledgerLoading) {
       loadLedger();
     }
-  }, [tab]);
+  }, [
+    tab,
+    stockGroups.length,
+    deepLoading,
+    loadDeepInventory,
+    godownStocks.length,
+    locationLoading,
+    loadLocationData,
+    ledgerEntries.length,
+    ledgerLoading,
+    loadLedger,
+  ]);
 
   const filtered = useMemo(() => products.filter(p =>
     (category === 'All' || p.category === category) &&

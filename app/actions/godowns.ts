@@ -13,7 +13,6 @@ import { createBranchSchema, createGodownSchema, createTransferSchema } from '@/
  * Recalculates Product.stock as SUM(GodownStock.quantity) for a given product.
  * Called after every godown stock change to keep the single source of truth.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function syncProductStockFromGodowns(productId: number, tx?: any) {
   const db = tx || prisma
   const result = await db.godownStock.aggregate({

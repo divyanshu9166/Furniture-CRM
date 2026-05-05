@@ -1,9 +1,10 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, UserPlus, Users, Clock, TrendingUp, CheckCircle2,
-  Phone, Mail, DollarSign, Eye, Filter, ShoppingBag, ArrowRight,
+  Phone, Mail, DollarSign, Eye, Filter, ShoppingBag, ArrowRight, MessageSquare,
   X, UserCheck, UserX, Timer, QrCode, Download, Printer, Trash2,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
@@ -23,6 +24,25 @@ const statusConfig = {
   'Follow-up': { cls: 'bg-purple-500/10 text-purple-700 border-purple-500/20', icon: Clock },
   Converted: { cls: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20', icon: CheckCircle2 },
   Left: { cls: 'bg-red-500/10 text-red-700 border-red-500/20', icon: UserX },
+};
+
+const normalizePhoneNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  const trimmed = digits.replace(/^0+/, '');
+  if (!trimmed) return '';
+  if (trimmed.length === 10) return `91${trimmed}`;
+  return trimmed;
+};
+
+const buildWhatsAppUrl = (phone, message) => {
+  const normalized = normalizePhoneNumber(phone);
+  if (!normalized) return '';
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+};
+
+const buildWalkinWhatsAppMessage = (walkin) => {
+  const requirement = walkin?.requirement ? ` about ${walkin.requirement}` : '';
+  return `Hello ${walkin?.name || ''}, this is regarding your visit${requirement}.`.trim();
 };
 
 export default function WalkinsPage() {
@@ -199,6 +219,16 @@ export default function WalkinsPage() {
   const handleMoveToDraft = () => {
     if (!selectedWalkin) return;
     setWalkinToDraft(selectedWalkin);
+  };
+
+  const handleWalkinWhatsApp = (walkin) => {
+    const message = buildWalkinWhatsAppMessage(walkin);
+    const url = buildWhatsAppUrl(walkin?.phone, message);
+    if (!url) {
+      alertToast.notify?.('Walk-in phone number is missing', 'error');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const confirmMoveToDraft = async () => {
@@ -497,6 +527,9 @@ export default function WalkinsPage() {
                 <a href={`tel:${selectedWalkin.phone}`} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
                   <Phone className="w-4 h-4" /> Call
                 </a>
+                <button onClick={() => handleWalkinWhatsApp(selectedWalkin)} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-surface border border-border text-muted rounded-xl text-sm font-medium hover:text-foreground hover:border-emerald-500/30 transition-colors">
+                  <MessageSquare className="w-4 h-4" /> WhatsApp
+                </button>
                 <button onClick={handleConvertToLead} className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
                   <ArrowRight className="w-4 h-4" /> Convert to Lead
                 </button>

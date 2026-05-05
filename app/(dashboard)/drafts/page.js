@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -57,7 +58,6 @@ export default function DraftsPage() {
 
   useEffect(() => {
     // Initial draft load is intentionally kicked off on mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload().finally(() => setLoading(false));
   }, []);
 

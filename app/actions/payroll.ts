@@ -453,6 +453,7 @@ export async function getPayrollRun(id: number) {
           staff: {
             select: {
               name: true, role: true, designation: true,
+              phone: true, email: true,
               bankAccount: true, bankName: true, ifscCode: true,
               panNumber: true, uanNumber: true, pfNumber: true, esiNumber: true,
             },
@@ -477,6 +478,8 @@ export async function getAllPayslips(period?: string) {
           name: true,
           role: true,
           designation: true,
+          phone: true,
+          email: true,
           panNumber: true,
           uanNumber: true,
           bankAccount: true,

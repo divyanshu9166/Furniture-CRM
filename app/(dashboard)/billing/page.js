@@ -1,9 +1,10 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Search, Plus, Receipt, CreditCard, Banknote,
-  FileText, Printer, ShoppingBag,
+  FileText, Printer, ShoppingBag, Mail, MessageSquare,
   Percent, Calculator, CheckCircle2, Clock, AlertCircle,
   X, Package, User, Phone, Minus, IndianRupee, MapPin,
   Trash2, Tag, Calendar, Download, Ban,
@@ -64,6 +65,47 @@ const formatCurrency = (val) => {
 
 const formatFullCurrency = (val) => `₹${val.toLocaleString('en-IN')}`;
 
+const normalizePhoneNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  const trimmed = digits.replace(/^0+/, '');
+  if (!trimmed) return '';
+  if (trimmed.length === 10) return `91${trimmed}`;
+  return trimmed;
+};
+
+const buildWhatsAppUrl = (phone, message) => {
+  const normalized = normalizePhoneNumber(phone);
+  if (!normalized) return '';
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+};
+
+const buildMailtoUrl = (email, subject, body) => {
+  if (!email) return '';
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (body) params.set('body', body);
+  return `mailto:${email}?${params.toString()}`;
+};
+
+const buildInvoiceShareMessage = (invoice, storeSettings) => {
+  const storeName = storeSettings?.storeName || 'Furniture Store';
+  const contactBits = [];
+  if (storeSettings?.phone) contactBits.push(`Phone: ${storeSettings.phone}`);
+  if (storeSettings?.whatsappNumber) contactBits.push(`WhatsApp: ${storeSettings.whatsappNumber}`);
+  if (storeSettings?.email) contactBits.push(`Email: ${storeSettings.email}`);
+
+  return [
+    `Hello ${invoice?.customer || ''}`.trim(),
+    `Your invoice ${invoice?.id || ''} from ${storeName}.`.trim(),
+    `Total: ${formatFullCurrency(invoice?.total || 0)}`,
+    invoice?.balanceDue > 0
+      ? `Balance due: ${formatFullCurrency(invoice.balanceDue)}`
+      : 'Status: Paid in full',
+    invoice?.date ? `Date: ${invoice.date}` : null,
+    contactBits.length > 0 ? `Contact: ${contactBits.join(' | ')}` : null,
+  ].filter(Boolean).join('\n');
+};
+
 // ─── MAIN COMPONENT ───────────────────────────────────
 
 export default function BillingPage() {
@@ -95,7 +137,7 @@ export default function BillingPage() {
 
   // POS state
   const [posItems, setPosItems] = useState([]);
-  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '' });
+  const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '', gstNumber: '' });
   const [posDiscount, setPosDiscount] = useState(0);
   const [posDiscountType, setPosDiscountType] = useState('flat');
   const [posTransportCost, setPosTransportCost] = useState(0);
@@ -176,7 +218,12 @@ export default function BillingPage() {
   }, []);
 
   const selectCustomer = async (contact) => {
-    setPosCustomer({ name: contact.name, phone: contact.phone, address: contact.address || '' });
+    setPosCustomer({
+      name: contact.name,
+      phone: contact.phone,
+      address: contact.address || '',
+      gstNumber: contact.gstNumber || '',
+    });
     setShowCustomerDropdown(false);
     setCustomerSuggestions([]);
     setCustomerProfileLoading(true);
@@ -264,7 +311,7 @@ export default function BillingPage() {
 
   const clearPOS = () => {
     setPosItems([]);
-    setPosCustomer({ name: '', phone: '', address: '' });
+    setPosCustomer({ name: '', phone: '', address: '', gstNumber: '' });
     setCustomerProfile(null);
     setPosDiscount(0);
     setPosDiscountType('flat');
@@ -323,6 +370,7 @@ export default function BillingPage() {
         customer: posCustomer.name,
         phone: posCustomer.phone,
         address: posCustomer.address || undefined,
+        gstNumber: posCustomer.gstNumber || undefined,
         items: posItems.map(i => ({ productId: i.id, name: i.name, sku: i.sku || '', quantity: i.qty, price: i.price })),
         discount: posDiscount,
         discountType: posDiscountType === 'flat' ? 'flat' : 'percent',
@@ -530,7 +578,7 @@ export default function BillingPage() {
         ${inv.invoiceStatus !== 'ACTIVE' ? `<div style="font-size:12px;color:#b91c1c;text-align:right;font-weight:600;margin-top:4px">${inv.invoiceStatus}</div>` : ''}</div>
       </div>
       <div class="meta">
-        <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}</div>
+        <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}${inv.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${inv.gstNumber}</div>` : ''}</div>
         <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
         ${inv.placeOfSupply ? `<div style="font-size:12px;color:#888;margin-top:2px">Place of Supply: ${inv.placeOfSupply}</div>` : ''}
         ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
@@ -573,6 +621,28 @@ export default function BillingPage() {
     };
     printFrame.srcdoc = printContent;
     document.body.appendChild(printFrame);
+  };
+
+  const handleShareInvoiceWhatsApp = (inv) => {
+    const message = buildInvoiceShareMessage(inv, storeSettings);
+    const url = buildWhatsAppUrl(inv?.phone, message);
+    if (!url) {
+      notify('Customer phone number is missing', { variant: 'danger' });
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleShareInvoiceEmail = (inv) => {
+    if (!inv?.email) {
+      notify('Customer email is missing', { variant: 'danger' });
+      return;
+    }
+    const subject = `Invoice ${inv.id} from ${storeSettings?.storeName || 'Furniture Store'}`;
+    const body = buildInvoiceShareMessage(inv, storeSettings);
+    const url = buildMailtoUrl(inv.email, subject, body);
+    if (!url) return;
+    window.location.href = url;
   };
 
   // ─── LOADING STATE ─────────────────────────────────────
@@ -778,6 +848,14 @@ export default function BillingPage() {
                         <td className="text-muted whitespace-nowrap">{inv.date}</td>
                         <td>
                           <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => handleShareInvoiceWhatsApp(inv)}
+                              className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors" title="Share on WhatsApp">
+                              <MessageSquare className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleShareInvoiceEmail(inv)}
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-700 transition-colors" title="Share by Email">
+                              <Mail className="w-4 h-4" />
+                            </button>
                             <button onClick={() => handlePrintInvoice(inv)}
                               className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors" title="Print">
                               <Printer className="w-4 h-4" />
@@ -1060,6 +1138,16 @@ export default function BillingPage() {
                     onChange={e => setPosCustomer({ ...posCustomer, address: e.target.value })}
                     rows={2}
                     className="w-full pl-9 pr-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
+                </div>
+                <div className="relative">
+                  <FileText className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                  <input
+                    type="text"
+                    placeholder="GSTIN (optional)"
+                    value={posCustomer.gstNumber || ''}
+                    onChange={e => setPosCustomer({ ...posCustomer, gstNumber: e.target.value.toUpperCase() })}
+                    className="w-full pl-9 pr-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50"
+                  />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
@@ -1396,6 +1484,7 @@ export default function BillingPage() {
                   <p className="text-sm font-medium text-foreground">{selectedInvoice.customer}</p>
                   <p className="text-xs text-muted">{selectedInvoice.phone}</p>
                   {selectedInvoice.address && <p className="text-xs text-muted mt-0.5">{selectedInvoice.address}</p>}
+                  {selectedInvoice.gstNumber && <p className="text-xs text-muted mt-0.5">GSTIN: {selectedInvoice.gstNumber}</p>}
                   {selectedInvoice.placeOfSupply && (
                     <p className="text-xs text-muted mt-0.5">Place of Supply: {selectedInvoice.placeOfSupply}</p>
                   )}
@@ -1519,6 +1608,14 @@ export default function BillingPage() {
 
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2">
+              <button onClick={() => handleShareInvoiceWhatsApp(selectedInvoice)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
+                <MessageSquare className="w-4 h-4" /> WhatsApp
+              </button>
+              <button onClick={() => handleShareInvoiceEmail(selectedInvoice)}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-xl text-sm font-medium hover:bg-blue-500/20 transition-colors">
+                <Mail className="w-4 h-4" /> Email
+              </button>
               <button onClick={() => handlePrintInvoice(selectedInvoice)}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent text-white rounded-xl text-sm font-medium hover:bg-accent-hover transition-colors">
                 <Printer className="w-4 h-4" /> Print

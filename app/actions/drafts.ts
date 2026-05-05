@@ -33,7 +33,6 @@ function coerceEnum<T extends string>(value: unknown, allowed: Set<string>, fall
   return fallback
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function adjustGodownStockWithTx(tx: any, params: {
   productId: number
   godownId: number

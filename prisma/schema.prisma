@@ -799,6 +799,7 @@ model StoreSettings {
   id             Int      @id @default(1)
   storeName      String   @default("Furniture Store")
   phone          String?
+  whatsappNumber String?
   email          String?
   address        String?
   paymentQr      String?

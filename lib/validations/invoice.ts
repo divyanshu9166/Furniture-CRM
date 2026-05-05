@@ -20,6 +20,7 @@ export const createInvoiceSchema = z.object({
   customer: z.string().min(1),
   phone: z.string().min(10),
   address: z.string().optional(),
+  gstNumber: z.string().optional(),
   items: z.array(invoiceItemSchema).min(1, 'At least one item required'),
   discount: z.number().min(0).default(0),
   discountType: z.enum(['none', 'flat', 'percent']).default('none'),

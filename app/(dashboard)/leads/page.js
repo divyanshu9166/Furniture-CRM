@@ -34,6 +34,25 @@ const statusColorMap = {
   Lost: 'bg-danger-light text-danger border-danger/20',
 };
 
+const normalizePhoneNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  const trimmed = digits.replace(/^0+/, '');
+  if (!trimmed) return '';
+  if (trimmed.length === 10) return `91${trimmed}`;
+  return trimmed;
+};
+
+const buildWhatsAppUrl = (phone, message) => {
+  const normalized = normalizePhoneNumber(phone);
+  if (!normalized) return '';
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+};
+
+const buildLeadWhatsAppMessage = (lead) => {
+  const interest = lead?.interest ? ` about ${lead.interest}` : '';
+  return `Hello ${lead?.name || ''}, this is regarding your enquiry${interest}.`.trim();
+};
+
 export default function LeadsPage() {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -131,6 +150,16 @@ export default function LeadsPage() {
         if (fresh) setSelectedLead(fresh);
       }
     }
+  };
+
+  const handleLeadWhatsApp = (lead) => {
+    const message = buildLeadWhatsAppMessage(lead);
+    const url = buildWhatsAppUrl(lead?.phone, message);
+    if (!url) {
+      notify('Lead phone number is missing', { variant: 'danger' });
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   if (loading) {
@@ -280,6 +309,21 @@ export default function LeadsPage() {
                 <div className="flex items-center gap-4 mt-1 flex-wrap">
                   <span className="flex items-center gap-1 text-sm text-muted"><Phone className="w-3.5 h-3.5" /> {selectedLead.phone}</span>
                   {selectedLead.email && <span className="flex items-center gap-1 text-sm text-muted"><Mail className="w-3.5 h-3.5" /> {selectedLead.email}</span>}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-3">
+                  <a
+                    href={`tel:${selectedLead.phone}`}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20"
+                  >
+                    <Phone className="w-3.5 h-3.5" /> Call
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleLeadWhatsApp(selectedLead)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-foreground hover:border-emerald-500/30"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
+                  </button>
                 </div>
               </div>
             </div>

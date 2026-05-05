@@ -70,6 +70,14 @@ const nonChannelIntegrations = [
   { name: 'Razorpay', description: 'Accept online payments and track transactions', connected: false, icon: '💳' },
 ];
 
+const staffRoleOptions = [
+  'Senior Sales Executive',
+  'Sales Executive',
+  'Junior Sales Executive',
+  'Design Consultant',
+  'Warehouse Manager',
+];
+
 const getInitialInviteForm = () => ({
   name: '',
   role: 'Sales Executive',
@@ -426,6 +434,7 @@ export default function SettingsPage() {
       const data = {
         storeName: form.storeName.value,
         phone: form.phone.value,
+        whatsappNumber: form.whatsappNumber.value,
         email: form.email.value,
         address: form.address.value,
         gstNumber: form.gstNumber.value,
@@ -600,7 +609,17 @@ export default function SettingsPage() {
                   <div><label className="block text-xs font-medium text-muted mb-1.5">Store Name</label><input type="text" name="storeName" defaultValue={storeSettings?.storeName || ''} className="w-full" /></div>
                   <div><label className="block text-xs font-medium text-muted mb-1.5">Phone</label><input type="tel" name="phone" defaultValue={storeSettings?.phone || ''} className="w-full" /></div>
                 </div>
-                <div><label className="block text-xs font-medium text-muted mb-1.5">Email</label><input type="email" name="email" defaultValue={storeSettings?.email || ''} className="w-full" /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">WhatsApp Number</label>
+                    <input type="tel" name="whatsappNumber" defaultValue={storeSettings?.whatsappNumber || ''} className="w-full" />
+                    <p className="text-[10px] text-muted mt-1">Use full number with country code if possible (e.g. +91XXXXXXXXXX).</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1.5">Email</label>
+                    <input type="email" name="email" defaultValue={storeSettings?.email || ''} className="w-full" />
+                  </div>
+                </div>
                 <div><label className="block text-xs font-medium text-muted mb-1.5">Address</label><textarea rows={2} name="address" defaultValue={storeSettings?.address || ''} className="w-full" /></div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div><label className="block text-xs font-medium text-muted mb-1.5">GST Number</label><input type="text" name="gstNumber" defaultValue={storeSettings?.gstNumber || ''} className="w-full" /></div>
@@ -814,17 +833,13 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Role</label>
-                      <select
+                      <input
+                        list="staff-role-options"
                         value={inviteForm.role}
                         onChange={e => setInviteForm(prev => ({ ...prev, role: e.target.value }))}
+                        placeholder="e.g. Sales Executive"
                         className="w-full"
-                      >
-                        <option value="Senior Sales Executive">Senior Sales Executive</option>
-                        <option value="Sales Executive">Sales Executive</option>
-                        <option value="Junior Sales Executive">Junior Sales Executive</option>
-                        <option value="Design Consultant">Design Consultant</option>
-                        <option value="Warehouse Manager">Warehouse Manager</option>
-                      </select>
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Phone</label>
@@ -983,13 +998,13 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Role</label>
-                      <select value={editForm.role} onChange={e => setEditForm(prev => ({ ...prev, role: e.target.value }))} className="w-full">
-                        <option value="Senior Sales Executive">Senior Sales Executive</option>
-                        <option value="Sales Executive">Sales Executive</option>
-                        <option value="Junior Sales Executive">Junior Sales Executive</option>
-                        <option value="Design Consultant">Design Consultant</option>
-                        <option value="Warehouse Manager">Warehouse Manager</option>
-                      </select>
+                      <input
+                        list="staff-role-options"
+                        value={editForm.role}
+                        onChange={e => setEditForm(prev => ({ ...prev, role: e.target.value }))}
+                        placeholder="e.g. Sales Executive"
+                        className="w-full"
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Status</label>
@@ -1039,6 +1054,12 @@ export default function SettingsPage() {
                   </div>
                 </form>
               )}
+
+              <datalist id="staff-role-options">
+                {staffRoleOptions.map(role => (
+                  <option key={role} value={role} />
+                ))}
+              </datalist>
 
               {/* Desktop table */}
               <table className="crm-table hidden sm:table">

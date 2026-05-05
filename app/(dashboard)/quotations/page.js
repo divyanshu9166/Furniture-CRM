@@ -8,6 +8,8 @@ import {
   FileText,
   Image as ImageIcon,
   IndianRupee,
+  Mail,
+  MessageSquare,
   Package,
   Pencil,
   Phone,
@@ -187,6 +189,44 @@ function buildFormFromQuotation(quotation) {
 
 function formatCurrency(amount) {
   return `Rs. ${Number(amount || 0).toLocaleString('en-IN')}`
+}
+
+function normalizePhoneNumber(value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  const trimmed = digits.replace(/^0+/, '')
+  if (!trimmed) return ''
+  if (trimmed.length === 10) return `91${trimmed}`
+  return trimmed
+}
+
+function buildWhatsAppUrl(phone, message) {
+  const normalized = normalizePhoneNumber(phone)
+  if (!normalized) return ''
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
+}
+
+function buildMailtoUrl(email, subject, body) {
+  if (!email) return ''
+  const params = new URLSearchParams()
+  if (subject) params.set('subject', subject)
+  if (body) params.set('body', body)
+  return `mailto:${email}?${params.toString()}`
+}
+
+function buildQuotationShareMessage(quotation, storeSettings) {
+  const storeName = storeSettings?.storeName || 'Furniture Store'
+  const contactBits = []
+  if (storeSettings?.phone) contactBits.push(`Phone: ${storeSettings.phone}`)
+  if (storeSettings?.whatsappNumber) contactBits.push(`WhatsApp: ${storeSettings.whatsappNumber}`)
+  if (storeSettings?.email) contactBits.push(`Email: ${storeSettings.email}`)
+
+  return [
+    `Hello ${quotation?.customer || ''}`.trim(),
+    `Here is your quotation ${quotation?.id || ''} from ${storeName}.`.trim(),
+    `Total: ${formatCurrency(quotation?.grandTotal)}`,
+    quotation?.validUntil ? `Valid until: ${formatDateDisplay(quotation.validUntil)}` : null,
+    contactBits.length > 0 ? `Contact: ${contactBits.join(' | ')}` : null,
+  ].filter(Boolean).join('\n')
 }
 
 function getItemDisplayImage(item) {
@@ -1042,6 +1082,28 @@ export default function QuotationsPage() {
     }, 300)
   }
 
+  const handleShareQuotationWhatsApp = (quotation) => {
+    const message = buildQuotationShareMessage(quotation, storeSettings)
+    const url = buildWhatsAppUrl(quotation?.phone, message)
+    if (!url) {
+      notify('Customer phone number is missing', { variant: 'danger' })
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleShareQuotationEmail = (quotation) => {
+    if (!quotation?.email) {
+      notify('Customer email is missing', { variant: 'danger' })
+      return
+    }
+    const subject = `Quotation ${quotation.id} from ${storeSettings?.storeName || 'Furniture Store'}`
+    const body = buildQuotationShareMessage(quotation, storeSettings)
+    const url = buildMailtoUrl(quotation.email, subject, body)
+    if (!url) return
+    window.location.href = url
+  }
+
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -1167,6 +1229,20 @@ export default function QuotationsPage() {
                   </td>
                   <td>
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleShareQuotationWhatsApp(quotation)}
+                        className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors"
+                        title="Share on WhatsApp"
+                      >
+                        <MessageSquare className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleShareQuotationEmail(quotation)}
+                        className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-700 transition-colors"
+                        title="Share by Email"
+                      >
+                        <Mail className="w-4 h-4" />
+                      </button>
                       <button
                         onClick={() => openEditQuotationModal(quotation)}
                         className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors"
@@ -1730,6 +1806,18 @@ export default function QuotationsPage() {
                 <span className={`px-2 py-1 rounded-full text-xs border ${statusColors[selectedQuotation.statusKey]}`}>
                   {selectedQuotation.status}
                 </span>
+                <button
+                  onClick={() => handleShareQuotationWhatsApp(selectedQuotation)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-500/20 text-xs text-emerald-700 hover:bg-emerald-500/10"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
+                </button>
+                <button
+                  onClick={() => handleShareQuotationEmail(selectedQuotation)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-500/20 text-xs text-blue-700 hover:bg-blue-500/10"
+                >
+                  <Mail className="w-3.5 h-3.5" /> Email
+                </button>
                 <button
                   onClick={() => openEditQuotationModal(selectedQuotation)}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-accent hover:border-accent/40"

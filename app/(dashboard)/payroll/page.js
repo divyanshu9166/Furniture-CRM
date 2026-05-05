@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Wallet, Users, Calendar, CheckCircle, Eye, CreditCard,
   AlertCircle, IndianRupee, Printer, Edit2, Save, X,
-  FileText, ShieldCheck, BadgeCheck, PiggyBank, Plus, Landmark
+  FileText, ShieldCheck, BadgeCheck, PiggyBank, Plus, Landmark, Mail, MessageSquare
 } from 'lucide-react'
 import {
   generatePayroll, getPayrollHistory, getPayrollRun, getAllPayslips,
@@ -22,6 +22,39 @@ const statusColors = {
 const PT_STATES = ['None', 'Maharashtra', 'Karnataka', 'West Bengal', 'Tamil Nadu', 'Gujarat', 'Andhra', 'Telangana']
 
 const fmt = (v) => `₹${(v || 0).toLocaleString('en-IN')}`
+
+const normalizePhoneNumber = (value) => {
+  const digits = String(value || '').replace(/\D/g, '')
+  const trimmed = digits.replace(/^0+/, '')
+  if (!trimmed) return ''
+  if (trimmed.length === 10) return `91${trimmed}`
+  return trimmed
+}
+
+const buildWhatsAppUrl = (phone, message) => {
+  const normalized = normalizePhoneNumber(phone)
+  if (!normalized) return ''
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
+}
+
+const buildMailtoUrl = (email, subject, body) => {
+  if (!email) return ''
+  const params = new URLSearchParams()
+  if (subject) params.set('subject', subject)
+  if (body) params.set('body', body)
+  return `mailto:${email}?${params.toString()}`
+}
+
+const buildPayslipShareMessage = (payslip) => {
+  const period = payslip?.payrollRun?.period || ''
+  const netPay = fmt(payslip?.netSalary || 0)
+  return [
+    `Hello ${payslip?.staff?.name || ''}`.trim(),
+    `Your payslip for ${period} is ready.`,
+    `Net Pay: ${netPay}`,
+    'Please reply if you need any clarification.',
+  ].filter(Boolean).join('\n')
+}
 
 export default function PayrollPage() {
   const [tab, setTab] = useState('process')
@@ -235,6 +268,28 @@ export default function PayrollPage() {
     </style></head><body>${content}</body></html>`)
     win.document.close()
     setTimeout(() => { win.print(); win.close() }, 300)
+  }
+
+  const handleSharePayslipWhatsApp = (payslip) => {
+    const message = buildPayslipShareMessage(payslip)
+    const url = buildWhatsAppUrl(payslip?.staff?.phone, message)
+    if (!url) {
+      alert('Staff phone number is missing')
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
+  const handleSharePayslipEmail = (payslip) => {
+    if (!payslip?.staff?.email) {
+      alert('Staff email is missing')
+      return
+    }
+    const subject = `Payslip ${payslip?.payrollRun?.period || ''}`.trim()
+    const body = buildPayslipShareMessage(payslip)
+    const url = buildMailtoUrl(payslip.staff.email, subject, body)
+    if (!url) return
+    window.location.href = url
   }
 
   const handlePrintBankAdvice = () => {
@@ -599,10 +654,20 @@ export default function PayrollPage() {
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${statusColors[ps.payrollRun?.status] || ''}`}>{ps.payrollRun?.status}</span>
                     </td>
                     <td className="px-3 py-2">
-                      <button onClick={() => setPrintPayslip({ ...ps, payrollRun: ps.payrollRun })}
-                        className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="Print">
-                        <Printer className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => handleSharePayslipWhatsApp(ps)}
+                          className="p-1.5 rounded hover:bg-emerald-500/10 text-muted hover:text-emerald-700" title="Share on WhatsApp">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => handleSharePayslipEmail(ps)}
+                          className="p-1.5 rounded hover:bg-blue-500/10 text-muted hover:text-blue-700" title="Share by Email">
+                          <Mail className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => setPrintPayslip({ ...ps, payrollRun: ps.payrollRun })}
+                          className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="Print">
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -888,10 +953,20 @@ export default function PayrollPage() {
                 </div>
               </div>
             </div>
-            <button onClick={handlePrintPayslip}
-              className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2">
-              <Printer className="w-4 h-4" /> Print / Save as PDF
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button onClick={() => handleSharePayslipWhatsApp(printPayslip)}
+                className="w-full py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-lg text-sm font-medium hover:bg-emerald-500/20 flex items-center justify-center gap-2">
+                <MessageSquare className="w-4 h-4" /> WhatsApp
+              </button>
+              <button onClick={() => handleSharePayslipEmail(printPayslip)}
+                className="w-full py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-lg text-sm font-medium hover:bg-blue-500/20 flex items-center justify-center gap-2">
+                <Mail className="w-4 h-4" /> Email
+              </button>
+              <button onClick={handlePrintPayslip}
+                className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2">
+                <Printer className="w-4 h-4" /> Print / Save as PDF
+              </button>
+            </div>
           </div>
         </Modal>
       )}

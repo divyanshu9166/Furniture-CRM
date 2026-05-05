@@ -283,7 +283,7 @@ export async function getPurchaseOrders() {
   const pos = await prisma.purchaseOrder.findMany({
     orderBy: { date: 'desc' },
     include: {
-      supplier: { select: { name: true, phone: true, email: true, contactPerson: true } },
+      supplier: { select: { name: true, phone: true, email: true, contactPerson: true, gstNumber: true, address: true, paymentTerms: true } },
       items: { include: { product: { select: { name: true, sku: true } } } },
     },
   })

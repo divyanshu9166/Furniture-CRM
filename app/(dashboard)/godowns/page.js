@@ -64,7 +64,7 @@ export default function GodownsPage() {
     if (tab === 'ledger' && ledgerEntries.length === 0) {
       getStockLedger({ limit: 200 }).then(res => { if (res.success) setLedgerEntries(res.data) })
     }
-  }, [tab])
+  }, [tab, ledgerEntries.length])
 
   const filteredStocks = useMemo(() => stocks.filter(s =>
     (!selectedGodown || s.godownId === Number(selectedGodown)) &&

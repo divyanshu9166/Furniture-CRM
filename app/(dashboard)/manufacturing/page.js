@@ -534,7 +534,7 @@ export default function ManufacturingPage() {
   )
 
   const completedOrders = orders.filter(o => o.status === 'COMPLETED')
-  const overdueOrders = orders.filter(o => o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED','CANCELLED'].includes(o.status))
+  const overdueOrders = orders.filter(o => o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED', 'CANCELLED'].includes(o.status))
 
   return (
     <div className="space-y-5">
@@ -614,11 +614,11 @@ export default function ManufacturingPage() {
             </div>
             <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
               <option value="ALL">All Status</option>
-              {['PLANNED','IN_PROGRESS','ON_HOLD','COMPLETED','CANCELLED'].map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+              {['PLANNED', 'IN_PROGRESS', 'ON_HOLD', 'COMPLETED', 'CANCELLED'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
             </select>
             <select value={orderPriorityFilter} onChange={e => setOrderPriorityFilter(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
               <option value="ALL">All Priority</option>
-              {['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
+              {['LOW', 'MEDIUM', 'HIGH', 'URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
             </select>
           </div>
 
@@ -627,14 +627,14 @@ export default function ManufacturingPage() {
               <table className="w-full text-sm min-w-[980px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
-                    {['Order #','BOM / Product','Priority','Qty','Status','Quality','Due Date','Assigned To','Actions'].map(h => (
+                    {['Order #', 'BOM / Product', 'Priority', 'Qty', 'Status', 'Quality', 'Due Date', 'Assigned To', 'Actions'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase tracking-wide">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredOrders.map(o => {
-                    const isOverdue = o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED','CANCELLED'].includes(o.status)
+                    const isOverdue = o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED', 'CANCELLED'].includes(o.status)
                     return (
                       <tr key={o.id} className={`border-b border-border/50 hover:bg-surface-hover transition-colors ${isOverdue ? 'bg-red-500/5' : ''}`}>
                         <td className="px-4 py-3">
@@ -662,7 +662,7 @@ export default function ManufacturingPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[o.status] || ''}`}>{o.status?.replace(/_/g,' ')}</span>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[o.status] || ''}`}>{o.status?.replace(/_/g, ' ')}</span>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full ${QUALITY_COLORS[o.qualityStatus] || ''}`}>{o.qualityStatus}</span>
@@ -692,10 +692,10 @@ export default function ManufacturingPage() {
                             {(o.status === 'IN_PROGRESS' || o.status === 'ON_HOLD') && (
                               <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="p-1.5 rounded hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-3.5 h-3.5" /></button>
                             )}
-                            {!['COMPLETED','CANCELLED'].includes(o.status) && (
+                            {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
                               <button onClick={() => { setCancelTarget(o); setShowCancelModal(true) }} className="p-1.5 rounded hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-3.5 h-3.5" /></button>
                             )}
-                            {['PLANNED','CANCELLED'].includes(o.status) && (
+                            {['PLANNED', 'CANCELLED'].includes(o.status) && (
                               <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-1.5 rounded hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
                           </div>
@@ -855,7 +855,7 @@ export default function ManufacturingPage() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
-                        {['Material','SKU','Required','Available','Shortage','Unit Cost','Est. Cost','Status'].map(h => (
+                        {['Material', 'SKU', 'Required', 'Available', 'Shortage', 'Unit Cost', 'Est. Cost', 'Status'].map(h => (
                           <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>
                         ))}
                       </tr>
@@ -890,7 +890,7 @@ export default function ManufacturingPage() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-border">
-                          {['Step','Operation','Work Center','Duration','Labour Rate','Labour Cost','Machine Cost','Total'].map(h => (
+                          {['Step', 'Operation', 'Work Center', 'Duration', 'Labour Rate', 'Labour Cost', 'Machine Cost', 'Total'].map(h => (
                             <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>
                           ))}
                         </tr>
@@ -951,7 +951,7 @@ export default function ManufacturingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface-hover">
-                  {['Order #','Product','Planned','Actual','Scrap','Yield','Quality','Notes'].map(h => (
+                  {['Order #', 'Product', 'Planned', 'Actual', 'Scrap', 'Yield', 'Quality', 'Notes'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
                   ))}
                 </tr>
@@ -988,7 +988,7 @@ export default function ManufacturingPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
-                    {['Order #','Product','Planned Qty','Work Center','Action'].map(h => (
+                    {['Order #', 'Product', 'Planned Qty', 'Work Center', 'Action'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
                     ))}
                   </tr>
@@ -1043,7 +1043,7 @@ export default function ManufacturingPage() {
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
-                    {['Material','Source Order','Qty','Value','Disposition','Status','Reason','Date'].map(h => (
+                    {['Material', 'Source Order', 'Qty', 'Value', 'Disposition', 'Status', 'Reason', 'Date'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
                     ))}
                   </tr>
@@ -1102,7 +1102,7 @@ export default function ManufacturingPage() {
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
-                    {['Custom Order','Customer','Product','Production','Qty','Unit Cost','Total Cost','Status'].map(h => (
+                    {['Custom Order', 'Customer', 'Product', 'Production', 'Qty', 'Unit Cost', 'Total Cost', 'Status'].map(h => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
                     ))}
                   </tr>
@@ -1206,7 +1206,7 @@ export default function ManufacturingPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
-                      {['Month','Orders','Units Produced','Total Cost'].map(h => (
+                      {['Month', 'Orders', 'Units Produced', 'Total Cost'].map(h => (
                         <th key={h} className="px-4 py-2 text-left text-xs font-medium text-muted">{h}</th>
                       ))}
                     </tr>
@@ -1236,7 +1236,7 @@ export default function ManufacturingPage() {
                     <span className="text-foreground">{o.product}</span>
                     <span className={`text-[10px] px-2 py-0.5 rounded-full ${PRIORITY_COLORS[o.priority] || ''}`}>{o.priority}</span>
                     <span className="text-red-400 text-xs">Due: {o.dueDate}</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[o.status] || ''}`}>{o.status?.replace(/_/g,' ')}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[o.status] || ''}`}>{o.status?.replace(/_/g, ' ')}</span>
                   </div>
                 ))}
               </div>
@@ -1251,10 +1251,10 @@ export default function ManufacturingPage() {
           {completedOrders.length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
-                { label: 'Total Material Cost', value: completedOrders.reduce((s,o) => s+(o.totalMaterialCost||0),0) },
-                { label: 'Total Labour Cost', value: completedOrders.reduce((s,o) => s+(o.totalLabourCost||0),0) },
-                { label: 'Total Overhead', value: completedOrders.reduce((s,o) => s+(o.overheadCost||0),0) },
-                { label: 'Total Manufacturing Cost', value: completedOrders.reduce((s,o) => s+(o.totalCost||0),0) },
+                { label: 'Total Material Cost', value: completedOrders.reduce((s, o) => s + (o.totalMaterialCost || 0), 0) },
+                { label: 'Total Labour Cost', value: completedOrders.reduce((s, o) => s + (o.totalLabourCost || 0), 0) },
+                { label: 'Total Overhead', value: completedOrders.reduce((s, o) => s + (o.overheadCost || 0), 0) },
+                { label: 'Total Manufacturing Cost', value: completedOrders.reduce((s, o) => s + (o.totalCost || 0), 0) },
               ].map((s, i) => (
                 <div key={i} className="glass-card p-4">
                   <p className="text-xs text-muted mb-1">{s.label}</p>
@@ -1274,7 +1274,7 @@ export default function ManufacturingPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${QUALITY_COLORS[o.qualityStatus]}`}>{o.qualityStatus}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${(o.yieldRate||0) >= 90 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${(o.yieldRate || 0) >= 90 ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
                     Yield: {o.yieldRate?.toFixed(1) || 0}%
                   </span>
                 </div>
@@ -1298,7 +1298,7 @@ export default function ManufacturingPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
-                      {['Material','Planned Qty','Used','Scrap','Returned','Unit Cost','Total Cost','Variance'].map(h => (
+                      {['Material', 'Planned Qty', 'Used', 'Scrap', 'Returned', 'Unit Cost', 'Total Cost', 'Variance'].map(h => (
                         <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>
                       ))}
                     </tr>
@@ -1537,7 +1537,7 @@ export default function ManufacturingPage() {
                 ['BOM', `${selectedOrder.bom?.name} v${selectedOrder.bom?.version}`],
                 ['Product', selectedOrder.finishedProduct?.name],
                 ['Priority', selectedOrder.priority],
-                ['Status', selectedOrder.status?.replace(/_/g,' ')],
+                ['Status', selectedOrder.status?.replace(/_/g, ' ')],
                 ['Planned Qty', selectedOrder.plannedQty],
                 ['Actual Qty', selectedOrder.actualQty ?? 0],
                 ['Std Time', `${selectedOrder.standardMins || 0} min`],
@@ -1551,7 +1551,7 @@ export default function ManufacturingPage() {
                 ['Assigned To', selectedOrder.assignedStaff?.name || selectedOrder.assignedTo || '—'],
                 ['Work Center', selectedOrder.workCenter?.name || '—'],
                 ['Due Date', selectedOrder.dueDate ? new Date(selectedOrder.dueDate).toLocaleDateString('en-IN') : '—'],
-              ].map(([l,v]) => (
+              ].map(([l, v]) => (
                 <div key={l} className="bg-surface-hover p-2.5 rounded-lg">
                   <p className="text-[10px] text-muted uppercase">{l}</p>
                   <p className="text-sm text-foreground font-medium mt-0.5">{v}</p>
@@ -1570,7 +1570,7 @@ export default function ManufacturingPage() {
                       <span className="text-muted text-xs">{s.workCenter?.name || '—'}</span>
                       <span className="text-muted text-xs">{s.plannedMins}min</span>
                       {s.actualMins > 0 && <span className={`text-xs ${s.actualMins > s.plannedMins ? 'text-red-400' : 'text-emerald-400'}`}>Actual {s.actualMins}min</span>}
-                      {['PLANNED','IN_PROGRESS','COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
+                      {['PLANNED', 'IN_PROGRESS', 'COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
                         <div className="flex gap-1">
                           {s.status === 'PENDING' && (
                             <button onClick={async () => { await updateProductionStep(s.id, 'IN_PROGRESS'); loadData(); setSelectedOrder(prev => ({ ...prev, productionSteps: prev.productionSteps.map(x => x.id === s.id ? { ...x, status: 'IN_PROGRESS' } : x) })) }} className="px-2 py-0.5 text-[10px] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded">Start</button>
@@ -1594,10 +1594,10 @@ export default function ManufacturingPage() {
                   ['Labour', selectedOrder.totalLabourCost],
                   ['Overhead', selectedOrder.overheadCost],
                   ['Total', selectedOrder.totalCost],
-                ].map(([l,v]) => (
+                ].map(([l, v]) => (
                   <div key={l} className="bg-surface-hover p-2.5 rounded-lg">
                     <p className="text-[10px] text-muted">{l}</p>
-                    <p className="text-sm font-bold text-foreground">₹{(v||0).toLocaleString('en-IN')}</p>
+                    <p className="text-sm font-bold text-foreground">₹{(v || 0).toLocaleString('en-IN')}</p>
                   </div>
                 ))}
               </div>
@@ -1818,7 +1818,7 @@ export default function ManufacturingPage() {
                     <div>
                       <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> Labour ₹/hr</label>
                       <input type="number" min="0" value={step.labourRatePerHour} onChange={e => { const v = [...bomForm.steps]; v[i].labourRatePerHour = e.target.value; setBomForm(f => ({ ...f, steps: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
-                      <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(step.durationMins)/60) * Number(step.labourRatePerHour)).toFixed(2)}/unit</p>
+                      <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(step.durationMins) / 60) * Number(step.labourRatePerHour)).toFixed(2)}/unit</p>
                     </div>
                     <div>
                       <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Zap className="w-3 h-3" /> Machine ₹/unit</label>
@@ -1833,9 +1833,9 @@ export default function ManufacturingPage() {
               <div className="mt-2 p-2 bg-accent/5 border border-accent/20 rounded-lg text-xs">
                 <span className="text-muted">Estimated step cost/unit: </span>
                 <span className="text-accent font-semibold">
-                  ₹{bomForm.steps.reduce((sum, s) => sum + ((Number(s.durationMins)/60) * Number(s.labourRatePerHour)) + Number(s.machineCostPerUnit), 0).toFixed(2)}
+                  ₹{bomForm.steps.reduce((sum, s) => sum + ((Number(s.durationMins) / 60) * Number(s.labourRatePerHour)) + Number(s.machineCostPerUnit), 0).toFixed(2)}
                 </span>
-                <span className="text-muted ml-2">(Labour: ₹{bomForm.steps.reduce((sum, s) => sum + (Number(s.durationMins)/60) * Number(s.labourRatePerHour), 0).toFixed(2)} + Machine: ₹{bomForm.steps.reduce((sum, s) => sum + Number(s.machineCostPerUnit), 0).toFixed(2)})</span>
+                <span className="text-muted ml-2">(Labour: ₹{bomForm.steps.reduce((sum, s) => sum + (Number(s.durationMins) / 60) * Number(s.labourRatePerHour), 0).toFixed(2)} + Machine: ₹{bomForm.steps.reduce((sum, s) => sum + Number(s.machineCostPerUnit), 0).toFixed(2)})</span>
               </div>
             )}
           </div>
@@ -1871,7 +1871,7 @@ export default function ManufacturingPage() {
             <div>
               <label className="text-xs text-muted mb-1 block">Priority</label>
               <select value={prodForm.priority} onChange={e => setProdForm(p => ({ ...p, priority: e.target.value }))} className={SEL}>
-                {['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
+                {['LOW', 'MEDIUM', 'HIGH', 'URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
             <div>
@@ -1954,7 +1954,7 @@ export default function ManufacturingPage() {
                 { label: 'Labour', value: Number(completeForm.totalLabourCost) || 0 },
                 { label: 'Machine', value: Number(completeForm.machineCost) || 0 },
                 { label: 'Overhead', value: Number(completeForm.overheadCost) || 0 },
-                { label: 'Total', value: (Number(completeForm.totalLabourCost)||0) + (Number(completeForm.machineCost)||0) + (Number(completeForm.overheadCost)||0) },
+                { label: 'Total', value: (Number(completeForm.totalLabourCost) || 0) + (Number(completeForm.machineCost) || 0) + (Number(completeForm.overheadCost) || 0) },
               ].map((c, i) => (
                 <div key={i} className={i === 3 ? 'bg-accent/10 p-2 rounded' : 'p-2'}>
                   <p className="text-[10px] text-muted">{c.label}</p>
@@ -2560,7 +2560,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                           <div>
                             <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> Labour ₹/hr</label>
                             <input type="number" min="0" value={stepEdit.labourRatePerHour} onChange={e => setStepEdit(p => ({ ...p, labourRatePerHour: e.target.value }))} className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
-                            <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(stepEdit.durationMins)/60) * Number(stepEdit.labourRatePerHour)).toFixed(2)}/unit</p>
+                            <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(stepEdit.durationMins) / 60) * Number(stepEdit.labourRatePerHour)).toFixed(2)}/unit</p>
                           </div>
                           <div>
                             <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Zap className="w-3 h-3" /> Machine ₹/unit</label>
@@ -2575,7 +2575,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                         {s.workCenter && <span className="text-muted text-xs">@ {s.workCenter.name}</span>}
                         <span className="text-muted text-xs flex items-center gap-1"><Clock className="w-3 h-3" />{s.durationMins}min</span>
                         {s.labourRatePerHour > 0 && (
-                          <span className="text-blue-400 text-xs">Labour: ₹{((s.durationMins/60) * s.labourRatePerHour).toFixed(2)}/unit</span>
+                          <span className="text-blue-400 text-xs">Labour: ₹{((s.durationMins / 60) * s.labourRatePerHour).toFixed(2)}/unit</span>
                         )}
                         {s.machineCostPerUnit > 0 && (
                           <span className="text-amber-400 text-xs">Machine: ₹{s.machineCostPerUnit}/unit</span>
@@ -2594,9 +2594,9 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                   <div className="p-2.5 bg-surface-hover rounded-lg border border-border/50 flex items-center justify-between text-xs">
                     <span className="text-muted">Total job cost per unit:</span>
                     <div className="flex gap-4">
-                      <span className="text-blue-400">Labour: ₹{bom.steps.reduce((s, step) => s + (step.durationMins/60) * step.labourRatePerHour, 0).toFixed(2)}</span>
+                      <span className="text-blue-400">Labour: ₹{bom.steps.reduce((s, step) => s + (step.durationMins / 60) * step.labourRatePerHour, 0).toFixed(2)}</span>
                       <span className="text-amber-400">Machine: ₹{bom.steps.reduce((s, step) => s + step.machineCostPerUnit, 0).toFixed(2)}</span>
-                      <span className="text-foreground font-semibold">Total: ₹{bom.steps.reduce((s, step) => s + (step.durationMins/60) * step.labourRatePerHour + step.machineCostPerUnit, 0).toFixed(2)}</span>
+                      <span className="text-foreground font-semibold">Total: ₹{bom.steps.reduce((s, step) => s + (step.durationMins / 60) * step.labourRatePerHour + step.machineCostPerUnit, 0).toFixed(2)}</span>
                     </div>
                   </div>
                 )}
@@ -2624,7 +2624,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                   <div>
                     <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Clock className="w-3 h-3" /> Labour ₹/hr</label>
                     <input type="number" min="0" value={newStep.labourRatePerHour} onChange={e => setNewStep(p => ({ ...p, labourRatePerHour: e.target.value }))} className="w-full px-2 py-1.5 bg-surface border border-border rounded text-xs text-foreground" />
-                    <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(newStep.durationMins)/60) * Number(newStep.labourRatePerHour)).toFixed(2)}/unit</p>
+                    <p className="text-[9px] text-muted mt-0.5">= ₹{((Number(newStep.durationMins) / 60) * Number(newStep.labourRatePerHour)).toFixed(2)}/unit</p>
                   </div>
                   <div>
                     <label className="text-[10px] text-muted block mb-0.5 flex items-center gap-1"><Zap className="w-3 h-3" /> Machine ₹/unit</label>

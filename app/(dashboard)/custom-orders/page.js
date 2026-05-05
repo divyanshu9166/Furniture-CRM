@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -6,7 +7,7 @@ import {
   Clock, CheckCircle2, ArrowRight, Package,
   Phone, User, Calendar, DollarSign, Truck,
   ChevronRight, Hammer, Eye, X, Upload,
-  MapPinned, Image, ShoppingBag,
+  MapPinned, Image as ImageIcon, ShoppingBag,
   ClipboardList, ArrowUpDown, ChevronDown, Trash2,
   Bell, MessageSquare, Mail, Send, CheckCheck,
 } from 'lucide-react';
@@ -718,7 +719,7 @@ export default function CustomOrdersPage() {
               {/* Reference Images */}
               {selectedOrder.referenceImages?.length > 0 && (
                 <div className="bg-surface rounded-xl p-3">
-                  <p className="text-xs text-muted mb-2 flex items-center gap-1"><Image className="w-3 h-3" /> Reference Images ({selectedOrder.referenceImages.length})</p>
+                  <p className="text-xs text-muted mb-2 flex items-center gap-1"><ImageIcon className="w-3 h-3" /> Reference Images ({selectedOrder.referenceImages.length})</p>
                   <div className="flex gap-2 flex-wrap">
                     {selectedOrder.referenceImages.map((url, idx) => (
                       <img key={idx} src={url} alt="" className="w-20 h-20 rounded-lg object-cover border border-border" />
@@ -1338,7 +1339,7 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
           {refImages.length < 6 && (
             <button type="button" onClick={() => refFileInputRef.current?.click()}
               className="w-16 h-16 rounded-lg border-2 border-dashed border-border hover:border-accent/50 flex flex-col items-center justify-center gap-1 text-muted hover:text-accent transition-colors">
-              <Image className="w-5 h-5" />
+              <ImageIcon className="w-5 h-5" />
               <span className="text-[9px]">Add</span>
             </button>
           )}

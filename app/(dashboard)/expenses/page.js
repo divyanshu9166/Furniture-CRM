@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -118,11 +119,10 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);  // intentionally empty - called with explicit args when needed
+  }, [dateRange.from, dateRange.to]);
 
-  useEffect(() => { loadData(dateRange.from, dateRange.to); }, []);
-  // Re-run loadData when Load button is clicked (handled by passing args) or on initial mount
+  useEffect(() => { loadData(); }, [loadData]);
+  // Initial load on mount; re-runs when the date range changes.
 
   // Load summary when tab changes to analytics/budget, with loading states
   useEffect(() => {

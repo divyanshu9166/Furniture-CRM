@@ -28,6 +28,7 @@ export async function getInvoices() {
       phone: inv.contact.phone,
       email: inv.contact.email,
       address: inv.contact.address,
+      gstNumber: inv.contact.gstNumber,
       items: inv.items.map(i => ({
         name: i.name,
         sku: i.sku,
@@ -104,6 +105,7 @@ export async function createInvoice(data: unknown) {
     customer,
     phone,
     address,
+    gstNumber,
     items,
     discount,
     discountType,
@@ -117,16 +119,34 @@ export async function createInvoice(data: unknown) {
     placeOfSupply,
   } = parsed.data
 
+  const gstNumberValue = typeof gstNumber === 'string'
+    ? gstNumber.trim().toUpperCase()
+    : undefined
+
   // Find or create contact
   let contact = await prisma.contact.findFirst({ where: { phone } })
   if (!contact) {
-    contact = await prisma.contact.create({ data: { name: customer, phone, address } })
-  } else if (contact.name !== customer || (address && contact.address !== address)) {
-    // Update name or address if changed
-    await prisma.contact.update({ 
-      where: { id: contact.id }, 
-      data: { name: customer, ...(address ? { address } : {}) } 
+    contact = await prisma.contact.create({
+      data: {
+        name: customer,
+        phone,
+        address,
+        ...(gstNumberValue ? { gstNumber: gstNumberValue } : {}),
+      },
     })
+  } else {
+    const updateData: { name?: string; address?: string; gstNumber?: string | null } = {}
+    if (contact.name !== customer) updateData.name = customer
+    if (address && contact.address !== address) updateData.address = address
+    if (gstNumberValue !== undefined && gstNumberValue !== contact.gstNumber) {
+      updateData.gstNumber = gstNumberValue || null
+    }
+    if (Object.keys(updateData).length > 0) {
+      await prisma.contact.update({
+        where: { id: contact.id },
+        data: updateData,
+      })
+    }
   }
 
   // Get GST rate from store settings (not hardcoded)
@@ -367,6 +387,8 @@ export async function searchContacts(query: string) {
       name: c.name,
       phone: c.phone,
       email: c.email,
+      address: c.address,
+      gstNumber: c.gstNumber,
     })),
   }
 }
@@ -380,6 +402,7 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
     phone: true,
     email: true,
     address: true,
+    gstNumber: true,
     invoices: {
       where: { invoiceStatus: 'ACTIVE' as const },
       select: { total: true, date: true },
@@ -433,6 +456,7 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
       phone: contact.phone,
       email: contact.email,
       address: contact.address,
+      gstNumber: contact.gstNumber,
       invoiceCount: contact.invoices.length,
       orderCount: contact.orders.length,
       customOrderCount: contact.customOrders.length,
