@@ -303,7 +303,8 @@ export async function createPurchaseOrder(data: unknown) {
   const taxable = Math.max(0, subtotal - discountAmt)
   const grossGst = items.reduce((sum, i) => {
     const lineAmount = i.quantity * i.unitCost
-    return sum + Math.round(lineAmount * (i.gstRate || 18) / 100)
+    const rate = typeof i.gstRate === 'number' ? i.gstRate : 18
+    return sum + Math.round(lineAmount * rate / 100)
   }, 0)
   const discountFactor = subtotal > 0 ? (taxable / subtotal) : 1
   const gst = Math.max(0, Math.round(grossGst * discountFactor))
@@ -374,7 +375,8 @@ export async function updatePurchaseOrder(id: number, data: unknown) {
   const taxable = Math.max(0, subtotal - discountAmt)
   const grossGst = items.reduce((sum, i) => {
     const lineAmount = i.quantity * i.unitCost
-    return sum + Math.round(lineAmount * (i.gstRate || 18) / 100)
+    const rate = typeof i.gstRate === 'number' ? i.gstRate : 18
+    return sum + Math.round(lineAmount * rate / 100)
   }, 0)
   const discountFactor = subtotal > 0 ? (taxable / subtotal) : 1
   const gst = Math.max(0, Math.round(grossGst * discountFactor))

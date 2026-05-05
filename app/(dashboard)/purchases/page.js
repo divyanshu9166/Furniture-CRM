@@ -10,9 +10,9 @@ import {
   getSuppliers, createSupplier, updateSupplier, getPurchaseOrders, createPurchaseOrder,
   approvePurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder,
   getPurchaseReturns, createPurchaseReturn, getPurchaseStats, recordPurchaseOrderPayment,
-  sendPurchaseOrderToSupplier, updatePurchaseOrder
+  updatePurchaseOrder
 } from '@/app/actions/purchases'
-import { getProducts } from '@/app/actions/products'
+import { getProducts, createProduct } from '@/app/actions/products'
 import { getStoreSettings } from '@/app/actions/settings'
 import { movePurchaseOrderToDraft } from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
@@ -27,24 +27,14 @@ const poStatusColors = {
 }
 
 const ITC_CATEGORIES = ['INPUTS', 'SERVICES', 'CAPITAL_GOODS', 'INELIGIBLE']
+const CUSTOM_PO_CATEGORY = 'Custom PO'
+const CUSTOM_SKU_PREFIX = 'CPO'
 
 const formatCurrency = (value) => `₹${Number(value || 0).toLocaleString('en-IN')}`
 
 const formatDate = (value) => {
   if (!value) return '—'
   return new Date(value).toLocaleDateString('en-IN')
-}
-
-const normalizePhoneNumber = (value) => {
-  const digits = String(value || '').replace(/\D/g, '').replace(/^0+/, '')
-  if (!digits) return ''
-  return digits.startsWith('91') ? digits : `91${digits}`
-}
-
-const buildWhatsAppUrl = (phone, message) => {
-  const normalized = normalizePhoneNumber(phone)
-  if (!normalized) return ''
-  return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
 }
 
 const buildMailtoUrl = (email, subject, body) => {
@@ -68,6 +58,8 @@ const buildPurchaseOrderShareMessage = (po, storeSettings) => {
   if (storeSettings?.phone) contactBits.push(`Phone: ${storeSettings.phone}`)
   if (storeSettings?.whatsappNumber) contactBits.push(`WhatsApp: ${storeSettings.whatsappNumber}`)
   if (storeSettings?.email) contactBits.push(`Email: ${storeSettings.email}`)
+  if (storeSettings?.gstNumber) contactBits.push(`GSTIN: ${storeSettings.gstNumber}`)
+  if (storeSettings?.address) contactBits.push(`Address: ${storeSettings.address}`)
 
   const itemLines = (po.items || []).map(item => (
     `- ${item.name} (${item.sku}) | Qty ${item.quantity} | INR ${Number(item.amount || 0).toLocaleString('en-IN')}`
@@ -92,6 +84,7 @@ const buildPurchaseOrderDocumentHtml = (po, storeSettings) => {
   const store = storeSettings || {}
   const supplier = po.supplier || {}
   const hasIgst = Number(po.igst || 0) > 0
+  const hasGst = Number(po.gst || 0) > 0 || Number(po.igst || 0) > 0
 
   const itemRows = (po.items || []).map((item, index) => `
     <tr>
@@ -159,6 +152,7 @@ const buildPurchaseOrderDocumentHtml = (po, storeSettings) => {
           <div style="font-weight:600;margin-top:6px">${escapeHtml(store.storeName || 'Furniture Store')}</div>
           ${store.address ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(store.address)}</div>` : ''}
           ${store.phone ? `<div style="font-size:12px;color:#6b7280">${escapeHtml(store.phone)}</div>` : ''}
+          ${store.gstNumber ? `<div style="font-size:12px;color:#6b7280">GSTIN: ${escapeHtml(store.gstNumber)}</div>` : ''}
         </div>
         <div class="box">
           <div class="label">Compliance</div>
@@ -189,10 +183,12 @@ const buildPurchaseOrderDocumentHtml = (po, storeSettings) => {
       <div class="totals">
         <div class="row"><span>Subtotal</span><span>₹${Number(po.subtotal || 0).toLocaleString('en-IN')}</span></div>
         ${Number(po.discount || 0) > 0 ? `<div class="row"><span>Discount</span><span>-₹${Number(po.discount || 0).toLocaleString('en-IN')}</span></div>` : ''}
-        ${hasIgst
-          ? `<div class="row"><span>IGST</span><span>₹${Number(po.igst || 0).toLocaleString('en-IN')}</span></div>`
-          : `<div class="row"><span>CGST</span><span>₹${Number(po.cgst || 0).toLocaleString('en-IN')}</span></div>
-             <div class="row"><span>SGST</span><span>₹${Number(po.sgst || 0).toLocaleString('en-IN')}</span></div>`}
+        ${hasGst
+          ? (hasIgst
+            ? `<div class="row"><span>IGST</span><span>₹${Number(po.igst || 0).toLocaleString('en-IN')}</span></div>`
+            : `<div class="row"><span>CGST</span><span>₹${Number(po.cgst || 0).toLocaleString('en-IN')}</span></div>
+               <div class="row"><span>SGST</span><span>₹${Number(po.sgst || 0).toLocaleString('en-IN')}</span></div>`)
+          : `<div class="row"><span>GST</span><span>₹0</span></div>`}
         <div class="row grand"><span>Total</span><span>₹${Number(po.total || 0).toLocaleString('en-IN')}</span></div>
         ${Number(po.amountPaid || 0) > 0 ? `<div class="row"><span>Paid</span><span>₹${Number(po.amountPaid || 0).toLocaleString('en-IN')}</span></div>` : ''}
         ${Number(po.balanceDue || 0) > 0 ? `<div class="row"><span>Balance Due</span><span>₹${Number(po.balanceDue || 0).toLocaleString('en-IN')}</span></div>` : ''}
@@ -204,6 +200,78 @@ const buildPurchaseOrderDocumentHtml = (po, storeSettings) => {
   `
 }
 
+const buildPurchaseOrderPdfFile = async (po, storeSettings) => {
+  const html = buildPurchaseOrderDocumentHtml(po, storeSettings)
+  if (!html) return null
+
+  const parsed = new DOMParser().parseFromString(html, 'text/html')
+  const wrapper = document.createElement('div')
+  wrapper.style.position = 'fixed'
+  wrapper.style.left = '-10000px'
+  wrapper.style.top = '0'
+  wrapper.style.width = '794px'
+  wrapper.style.background = '#ffffff'
+  wrapper.innerHTML = `${parsed.head.innerHTML}${parsed.body.innerHTML}`
+  document.body.appendChild(wrapper)
+
+  try {
+    const [{ jsPDF }, html2canvasModule] = await Promise.all([
+      import('jspdf'),
+      import('html2canvas'),
+    ])
+    const html2canvas = html2canvasModule.default
+    const canvas = await html2canvas(wrapper, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+    })
+    const imgData = canvas.toDataURL('image/png')
+    const pdf = new jsPDF('p', 'pt', 'a4')
+    const pageWidth = pdf.internal.pageSize.getWidth()
+    const pageHeight = pdf.internal.pageSize.getHeight()
+    const imgWidth = pageWidth
+    const imgHeight = (canvas.height * imgWidth) / canvas.width
+
+    let heightLeft = imgHeight
+    let position = 0
+
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+    heightLeft -= pageHeight
+
+    while (heightLeft > 0) {
+      position = heightLeft - imgHeight
+      pdf.addPage()
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+    }
+
+    const blob = pdf.output('blob')
+    const safeId = String(po?.displayId || 'PO').replace(/[^a-zA-Z0-9_-]/g, '_')
+    return new File([blob], `${safeId}.pdf`, { type: 'application/pdf' })
+  } finally {
+    wrapper.remove()
+  }
+}
+
+const createEmptyPOItem = (overrides = {}) => ({
+  productId: '',
+  quantity: 1,
+  unitCost: 0,
+  gstRate: 18,
+  hsnCode: '',
+  isCustom: false,
+  customName: '',
+  customSku: '',
+  customUom: 'PCS',
+  ...overrides,
+})
+
+const generateCustomSku = (name) => {
+  const base = String(name || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  const stamp = Date.now().toString(36).toUpperCase()
+  return `${CUSTOM_SKU_PREFIX}-${base || 'ITEM'}-${stamp}`
+}
+
 const createEmptyPOForm = () => ({
   supplierId: '',
   expectedDate: '',
@@ -211,8 +279,9 @@ const createEmptyPOForm = () => ({
   isRCM: false,
   itcEligible: true,
   itcCategory: 'INPUTS',
+  applyGst: true,
   notes: '',
-  items: [{ productId: '', quantity: 1, unitCost: 0, gstRate: 18 }],
+  items: [createEmptyPOItem()],
 })
 
 const createEmptySupplierForm = () => ({
@@ -296,11 +365,11 @@ export default function PurchasesPage() {
 
   const poPreview = useMemo(() => {
     const rows = poForm.items
-      .filter(item => item.productId)
+      .filter(item => item.productId || (item.isCustom && item.customName))
       .map(item => {
         const quantity = Math.max(1, Number(item.quantity) || 1)
         const unitCost = Math.max(0, Number(item.unitCost) || 0)
-        const gstRate = Math.max(0, Number(item.gstRate) || 18)
+        const gstRate = poForm.applyGst ? Math.max(0, Number(item.gstRate) || 0) : 0
         return { amount: quantity * unitCost, gstRate }
       })
 
@@ -317,7 +386,7 @@ export default function PurchasesPage() {
       gst,
       total: taxable + gst,
     }
-  }, [poForm.items, poForm.discount])
+  }, [poForm.items, poForm.discount, poForm.applyGst])
 
   const resetSupplierForm = () => {
     setEditingSupplierId(null)
@@ -378,8 +447,14 @@ export default function PurchasesPage() {
       productId: String(item.productId || ''),
       quantity: Number(item.quantity || 1),
       unitCost: Number(item.unitCost || 0),
-      gstRate: Number(item.gstRate || 18),
+      gstRate: typeof item.gstRate === 'number' ? item.gstRate : 18,
+      hsnCode: item.hsnCode || '',
+      isCustom: false,
+      customName: '',
+      customSku: '',
+      customUom: 'PCS',
     }))
+    const applyGst = Number(po.gst || 0) > 0 || (po.items || []).some(item => Number(item.gstRate || 0) > 0)
 
     setEditingPOId(po.id)
     setPOForm({
@@ -389,6 +464,7 @@ export default function PurchasesPage() {
       isRCM: !!po.isRCM,
       itcEligible: po.itcEligible !== false,
       itcCategory: po.itcCategory || 'INPUTS',
+      applyGst,
       notes: po.notes || '',
       items: editableItems.length > 0 ? editableItems : createEmptyPOForm().items,
     })
@@ -399,39 +475,106 @@ export default function PurchasesPage() {
   const handleCreatePO = async () => {
     setSubmitting(true)
     const isEditMode = Boolean(editingPOId)
-    const items = poForm.items.filter(i => i.productId).map(i => {
-      const prod = products.find(p => p.id === Number(i.productId))
-      return {
-        productId: Number(i.productId),
-        name: prod?.name || '',
-        sku: prod?.sku || '',
-        hsnCode: prod?.hsnCode || '',
-        quantity: Number(i.quantity),
-        unitCost: Number(i.unitCost),
-        gstRate: Number(i.gstRate) || 18,
+
+    try {
+      const items = []
+
+      for (const item of poForm.items) {
+        const quantity = Math.max(1, Number(item.quantity) || 1)
+        const unitCost = Math.max(0, Number(item.unitCost) || 0)
+        const gstRate = poForm.applyGst ? Math.max(0, Number(item.gstRate) || 0) : 0
+
+        if (item.isCustom) {
+          if (!item.customName?.trim()) continue
+
+          let sku = item.customSku?.trim()
+          let existingProduct = null
+
+          if (sku) {
+            existingProduct = products.find(p => p.sku === sku) || null
+          }
+
+          let product = existingProduct
+          if (!product) {
+            sku = sku || generateCustomSku(item.customName)
+            const createRes = await createProduct({
+              sku,
+              name: item.customName.trim(),
+              category: CUSTOM_PO_CATEGORY,
+              price: unitCost,
+              costPrice: unitCost,
+              stock: 0,
+              reorderLevel: 0,
+              unitOfMeasure: item.customUom || 'PCS',
+              description: 'Created from purchase order',
+            })
+
+            if (!createRes?.success) {
+              notify(createRes?.error || 'Failed to create custom product', { variant: 'danger' })
+              setSubmitting(false)
+              return
+            }
+            product = createRes.data
+          }
+
+          items.push({
+            productId: Number(product.id),
+            name: product.name || item.customName.trim(),
+            sku: product.sku || sku || '',
+            hsnCode: item.hsnCode || '',
+            quantity,
+            unitCost,
+            gstRate,
+          })
+          continue
+        }
+
+        if (!item.productId) continue
+        const prod = products.find(p => p.id === Number(item.productId))
+        if (!prod) continue
+
+        items.push({
+          productId: Number(item.productId),
+          name: prod?.name || '',
+          sku: prod?.sku || '',
+          hsnCode: item.hsnCode || prod?.hsnCode || '',
+          quantity,
+          unitCost,
+          gstRate,
+        })
       }
-    })
-    const payload = {
-      supplierId: Number(poForm.supplierId),
-      expectedDate: poForm.expectedDate || undefined,
-      discount: Math.max(0, Number(poForm.discount) || 0),
-      isRCM: !!poForm.isRCM,
-      itcEligible: !!poForm.itcEligible,
-      itcCategory: poForm.itcCategory,
-      notes: poForm.notes,
-      items,
+
+      if (items.length === 0) {
+        notify('Add at least one item to create a purchase order', { variant: 'danger' })
+        setSubmitting(false)
+        return
+      }
+
+      const payload = {
+        supplierId: Number(poForm.supplierId),
+        expectedDate: poForm.expectedDate || undefined,
+        discount: Math.max(0, Number(poForm.discount) || 0),
+        isRCM: !!poForm.isRCM,
+        itcEligible: !!poForm.itcEligible,
+        itcCategory: poForm.itcCategory,
+        notes: poForm.notes,
+        items,
+      }
+
+      const res = isEditMode
+        ? await updatePurchaseOrder(editingPOId, payload)
+        : await createPurchaseOrder(payload)
+
+      if (res.success) {
+        setShowPOModal(false)
+        resetPOForm()
+        loadData()
+      } else alert(res.error)
+    } catch (err) {
+      notify(err?.message || 'Failed to create purchase order', { variant: 'danger' })
+    } finally {
+      setSubmitting(false)
     }
-
-    const res = isEditMode
-      ? await updatePurchaseOrder(editingPOId, payload)
-      : await createPurchaseOrder(payload)
-
-    if (res.success) {
-      setShowPOModal(false)
-      resetPOForm()
-      loadData()
-    } else alert(res.error)
-    setSubmitting(false)
   }
 
   const handleApprovePO = async (id) => {
@@ -495,16 +638,6 @@ export default function PurchasesPage() {
     }
   }
 
-  const handleSendPOToSupplier = async (id) => {
-    const res = await sendPurchaseOrderToSupplier(id)
-    if (res.success) {
-      alert(res.message || 'Purchase order sent to supplier')
-      loadData()
-    } else {
-      alert(res.error || 'Unable to send purchase order to supplier')
-    }
-  }
-
   const handleDownloadPO = (po) => {
     if (!po) return
     const printContent = buildPurchaseOrderDocumentHtml(po, storeSettings)
@@ -530,14 +663,36 @@ export default function PurchasesPage() {
     document.body.appendChild(printFrame)
   }
 
-  const handleSharePOWhatsApp = (po) => {
-    const message = buildPurchaseOrderShareMessage(po, storeSettings)
-    const url = buildWhatsAppUrl(po?.supplier?.phone, message)
-    if (!url) {
-      notify('Supplier phone number is missing', { variant: 'danger' })
-      return
+  const handleSharePOWhatsApp = async (po) => {
+    if (!po) return
+    try {
+      const pdfFile = await buildPurchaseOrderPdfFile(po, storeSettings)
+      if (!pdfFile) {
+        notify('Unable to generate PO PDF', { variant: 'danger' })
+        return
+      }
+
+      const shareData = {
+        title: `Purchase Order ${po.displayId}`,
+        text: `Purchase Order ${po.displayId}`,
+        files: [pdfFile],
+      }
+
+      if (navigator.share && (!navigator.canShare || navigator.canShare(shareData))) {
+        await navigator.share(shareData)
+        return
+      }
+
+      const url = URL.createObjectURL(pdfFile)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = pdfFile.name
+      link.click()
+      URL.revokeObjectURL(url)
+      notify('PDF downloaded. Share it on WhatsApp from your device.', { variant: 'info' })
+    } catch (err) {
+      notify(err?.message || 'WhatsApp sharing failed', { variant: 'danger' })
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
   }
 
   const handleSharePOEmail = (po) => {
@@ -617,7 +772,8 @@ export default function PurchasesPage() {
   // Confirm modals
   
 
-  const addPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0, gstRate: 18 }] }))
+  const addPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, createEmptyPOItem()] }))
+  const addCustomPOItem = () => setPOForm(f => ({ ...f, items: [...f.items, createEmptyPOItem({ isCustom: true })] }))
   const addReturnItem = () => setReturnForm(f => ({ ...f, items: [...f.items, { productId: '', quantity: 1, unitCost: 0 }] }))
 
   const tabs = [
@@ -737,15 +893,6 @@ export default function PurchasesPage() {
                         </button>
                       )}
                       {po.status !== 'CANCELLED' && (
-                        <button
-                          onClick={() => handleSendPOToSupplier(po.id)}
-                          className="px-2.5 py-1 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
-                          title="Send PO to supplier"
-                        >
-                          Send PO
-                        </button>
-                      )}
-                      {po.status !== 'CANCELLED' && (
                         <>
                           <button
                             onClick={() => handleDownloadPO(po)}
@@ -757,7 +904,7 @@ export default function PurchasesPage() {
                           <button
                             onClick={() => handleSharePOWhatsApp(po)}
                             className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-400"
-                            title="Share on WhatsApp"
+                            title="Share PDF on WhatsApp"
                           >
                             <MessageSquare className="w-4 h-4" />
                           </button>
@@ -953,7 +1100,7 @@ export default function PurchasesPage() {
                   onClick={() => handleSharePOWhatsApp(selectedPO)}
                   className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20"
                 >
-                  <MessageSquare className="w-3.5 h-3.5 inline-block mr-1" /> WhatsApp
+                  <MessageSquare className="w-3.5 h-3.5 inline-block mr-1" /> WhatsApp (PDF)
                 </button>
                 {selectedPO.supplier?.email && (
                   <button
@@ -975,15 +1122,6 @@ export default function PurchasesPage() {
                     className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
                   >
                     Edit PO
-                  </button>
-                )}
-
-                {selectedPO.status !== 'CANCELLED' && (
-                  <button
-                    onClick={() => handleSendPOToSupplier(selectedPO.id)}
-                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-muted hover:text-accent hover:border-accent/40"
-                  >
-                    Send PO To Supplier
                   </button>
                 )}
 
@@ -1123,7 +1261,7 @@ export default function PurchasesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <label className="flex items-center gap-2 text-xs text-foreground border border-border rounded-lg px-3 py-2">
               <input
                 type="checkbox"
@@ -1140,6 +1278,14 @@ export default function PurchasesPage() {
               />
               RCM Purchase
             </label>
+            <label className="flex items-center gap-2 text-xs text-foreground border border-border rounded-lg px-3 py-2">
+              <input
+                type="checkbox"
+                checked={poForm.applyGst}
+                onChange={e => setPOForm(p => ({ ...p, applyGst: e.target.checked }))}
+              />
+              Apply GST
+            </label>
             <select
               value={poForm.itcCategory}
               onChange={e => setPOForm(p => ({ ...p, itcCategory: e.target.value }))}
@@ -1155,22 +1301,89 @@ export default function PurchasesPage() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm text-muted">Items</label>
-              <button onClick={addPOItem} className="text-xs text-accent hover:underline">+ Add Item</button>
-            </div>
-            {poForm.items.map((item, i) => (
-              <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 mb-4 sm:mb-2 bg-surface sm:bg-transparent border border-border sm:border-none p-3 sm:p-0 rounded-lg sm:rounded-none relative">
-                <button type="button" onClick={() => setPOForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="absolute top-2 right-2 sm:static sm:col-span-1 text-red-400 hover:text-red-300 text-lg flex sm:items-center sm:justify-center">×</button>
-                <select value={item.productId} onChange={e => { const v = [...poForm.items]; v[i].productId = e.target.value; const prod = products.find(p => p.id === Number(e.target.value)); if (prod) v[i].unitCost = prod.costPrice || 0; setPOForm(f => ({ ...f, items: v })) }} className="col-span-5 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground w-full mt-6 sm:mt-0">
-                  <option value="">Select Product</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-                </select>
-                <div className="flex gap-2 col-span-6">
-                  <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...poForm.items]; v[i].quantity = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                  <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                  <input type="number" min="0" max="100" value={item.gstRate || 18} onChange={e => { const v = [...poForm.items]; v[i].gstRate = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="GST%" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                </div>
+              <div className="flex items-center gap-2">
+                <button onClick={addPOItem} className="text-xs text-accent hover:underline">+ Add Inventory</button>
+                <button onClick={addCustomPOItem} className="text-xs text-amber-400 hover:underline">+ Add Custom</button>
               </div>
-            ))}
+            </div>
+            {poForm.items.map((item, i) => {
+              const quantity = Math.max(1, Number(item.quantity) || 1)
+              const unitCost = Math.max(0, Number(item.unitCost) || 0)
+              const gstRate = poForm.applyGst ? Math.max(0, Number(item.gstRate) || 0) : 0
+              const lineSubtotal = quantity * unitCost
+              const lineGst = Math.round(lineSubtotal * gstRate / 100)
+              const lineTotal = lineSubtotal + lineGst
+
+              return (
+                <div key={i} className="flex flex-col sm:grid sm:grid-cols-12 gap-2 mb-4 sm:mb-2 bg-surface sm:bg-transparent border border-border sm:border-none p-3 sm:p-0 rounded-lg sm:rounded-none relative">
+                  <div className="absolute top-2 right-2 sm:static sm:col-span-1 flex items-center justify-end gap-2">
+                    {item.isCustom && <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400">Custom</span>}
+                    <button type="button" onClick={() => setPOForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="text-red-400 hover:text-red-300 text-lg">×</button>
+                  </div>
+
+                  {item.isCustom ? (
+                    <div className="col-span-11 grid grid-cols-1 sm:grid-cols-4 gap-2 mt-6 sm:mt-0">
+                      <input
+                        type="text"
+                        value={item.customName}
+                        onChange={e => { const v = [...poForm.items]; v[i].customName = e.target.value; setPOForm(f => ({ ...f, items: v })) }}
+                        placeholder="Custom item name *"
+                        className="px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+                      />
+                      <input
+                        type="text"
+                        value={item.customSku}
+                        onChange={e => { const v = [...poForm.items]; v[i].customSku = e.target.value; setPOForm(f => ({ ...f, items: v })) }}
+                        placeholder="SKU (optional)"
+                        className="px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+                      />
+                      <input
+                        type="text"
+                        value={item.hsnCode}
+                        onChange={e => { const v = [...poForm.items]; v[i].hsnCode = e.target.value; setPOForm(f => ({ ...f, items: v })) }}
+                        placeholder="HSN (optional)"
+                        className="px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+                      />
+                      <input
+                        type="text"
+                        value={item.customUom || 'PCS'}
+                        onChange={e => { const v = [...poForm.items]; v[i].customUom = e.target.value; setPOForm(f => ({ ...f, items: v })) }}
+                        placeholder="UOM"
+                        className="px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground"
+                      />
+                    </div>
+                  ) : (
+                    <select
+                      value={item.productId}
+                      onChange={e => {
+                        const v = [...poForm.items]
+                        v[i].productId = e.target.value
+                        const prod = products.find(p => p.id === Number(e.target.value))
+                        if (prod) {
+                          v[i].unitCost = prod.costPrice || 0
+                          v[i].hsnCode = prod.hsnCode || ''
+                        }
+                        setPOForm(f => ({ ...f, items: v }))
+                      }}
+                      className="col-span-5 px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground w-full mt-6 sm:mt-0"
+                    >
+                      <option value="">Select Product</option>
+                      {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                    </select>
+                  )}
+
+                  <div className={`flex gap-2 ${item.isCustom ? 'col-span-11' : 'col-span-6'}`}>
+                    <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...poForm.items]; v[i].quantity = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                    <input type="number" min="0" value={item.unitCost} onChange={e => { const v = [...poForm.items]; v[i].unitCost = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="Cost" className="w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                    <input type="number" min="0" max="100" value={item.gstRate || 0} onChange={e => { const v = [...poForm.items]; v[i].gstRate = e.target.value; setPOForm(f => ({ ...f, items: v })) }} placeholder="GST%" disabled={!poForm.applyGst} className={`w-1/3 sm:w-full px-3 sm:px-2 py-2 bg-surface border border-border rounded-lg text-sm ${poForm.applyGst ? 'text-foreground' : 'text-muted/70'}`} />
+                  </div>
+
+                  <div className="col-span-12 text-[11px] text-muted flex justify-end">
+                    Line Total: ₹{lineTotal.toLocaleString('en-IN')}{poForm.applyGst ? ` (GST ₹${lineGst.toLocaleString('en-IN')})` : ''}
+                  </div>
+                </div>
+              )
+            })}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1197,7 +1410,7 @@ export default function PurchasesPage() {
             <textarea value={poForm.notes} onChange={e => setPOForm(p => ({ ...p, notes: e.target.value }))} rows={2} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
           </div>
 
-          <button onClick={handleCreatePO} disabled={submitting || !poForm.supplierId || !poForm.items.some(i => i.productId)} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
+          <button onClick={handleCreatePO} disabled={submitting || !poForm.supplierId || !poForm.items.some(i => i.productId || (i.isCustom && i.customName))} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
             {submitting ? (editingPOId ? 'Updating...' : 'Creating...') : (editingPOId ? 'Update Purchase Order' : 'Create Purchase Order')}
           </button>
         </div>

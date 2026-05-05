@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, RefreshCw,
   ShieldCheck, FlameKindling, Star, Cpu, Activity,
   Download, Edit2, Save, X, FileText, BookTemplate,
-  Clock, DollarSign, Zap, Copy,
+  Clock, DollarSign, Zap, Copy, Upload,
 } from 'lucide-react'
 import {
   getBOMs, createBOM, toggleBOMStatus, deleteBOM,
@@ -23,7 +23,7 @@ import {
   getMRPAnalysis, getManufacturingStats, updateProductionStep,
   getManufacturingCustomOrders, getScrapInventory, getCustomOrderInventory,
 } from '@/app/actions/manufacturing'
-import { getProducts, createProduct, deleteProduct, updateProduct } from '@/app/actions/products'
+import { getProducts, createProduct, deleteProduct, updateProduct, bulkImportRawMaterials } from '@/app/actions/products'
 import Modal from '@/components/Modal'
 
 // ─── Constants ────────────────────────────────────────
@@ -52,6 +52,31 @@ const QUALITY_COLORS = {
 const WC_TYPES = ['Carpentry', 'Polishing', 'Upholstery', 'Finishing', 'Assembly', 'QC', 'Packaging', 'General']
 const INP = 'w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50'
 const SEL = 'w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none'
+
+const RM_COLUMN_ALIASES = {
+  name: ['name', 'material name', 'raw material', 'raw material name'],
+  sku: ['sku', 'sku code', 'material code'],
+  costPrice: ['cost price', 'cost', 'cost price per unit', 'purchase price'],
+  stockQuantity: ['stock quantity', 'current stock quantity', 'opening stock quantity', 'quantity', 'stock'],
+  unitSize: ['measure per quantity', 'unit size', 'uom conversion', 'conversion factor', 'size per qty'],
+  unitOfMeasure: ['unit of measure', 'uom', 'unit'],
+  reorderLevel: ['min stock alert', 'reorder level', 'minimum stock', 'min stock'],
+  description: ['description', 'notes', 'remarks'],
+  image: ['image', 'image url', 'photo', 'image link'],
+}
+
+function mapImportColumns(headers) {
+  const map = {}
+  headers.forEach((header, index) => {
+    const normalized = String(header || '').toLowerCase().trim()
+    Object.entries(RM_COLUMN_ALIASES).forEach(([field, aliases]) => {
+      if (!(field in map) && aliases.includes(normalized)) {
+        map[field] = index
+      }
+    })
+  })
+  return map
+}
 
 // ─── CSV Export Helper ────────────────────────────────
 function downloadBOMCSV(bom) {
@@ -161,10 +186,19 @@ export default function ManufacturingPage() {
   const [submitting, setSubmitting] = useState(false)
 
   // Raw material form
-  const [rmForm, setRmForm] = useState({ name: '', costPrice: 0, stock: 0, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+  const [rmForm, setRmForm] = useState({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+  const [rmImages, setRmImages] = useState([])
   const [rmSearch, setRmSearch] = useState('')
   const [editingRmId, setEditingRmId] = useState(null)
   const [rmEditForm, setRmEditForm] = useState({})
+  const [rmEditImages, setRmEditImages] = useState([])
+  const [showRmImportModal, setShowRmImportModal] = useState(false)
+  const [rmImportRows, setRmImportRows] = useState([])
+  const [rmImportHeaders, setRmImportHeaders] = useState([])
+  const [rmImportColMap, setRmImportColMap] = useState({})
+  const [rmImportLoading, setRmImportLoading] = useState(false)
+  const [rmImportError, setRmImportError] = useState('')
+  const [rmImportResult, setRmImportResult] = useState(null)
 
   // BOM form
   const [bomForm, setBomForm] = useState({
@@ -452,6 +486,107 @@ export default function ManufacturingPage() {
     return `RM-${String(nextNum).padStart(3, '0')}`
   }
 
+  const uploadProductImages = async (files) => {
+    if (!files || files.length === 0) return ''
+    const formData = new FormData()
+    formData.set('folder', 'products')
+    files.forEach(file => formData.append('files', file))
+    const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
+    const uploadData = await uploadRes.json()
+    if (!uploadRes.ok || !uploadData?.success) {
+      throw new Error(uploadData?.error || 'Image upload failed')
+    }
+    return Array.isArray(uploadData.urls) ? uploadData.urls.join(',') : ''
+  }
+
+  const downloadRawMaterialTemplate = () => {
+    const headers = ['Material Name', 'SKU Code', 'Cost Price', 'Stock Quantity', 'Measure Per Quantity', 'Unit of Measure', 'Min Stock Alert', 'Description', 'Image URL']
+    const example = ['Upholstery Fabric Roll', 'RM-001', '95', '10', '4', 'SQM', '5', 'Each roll has 4 square meter', 'https://example.com/images/fabric-roll.jpg']
+    const csv = [headers.join(','), example.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'raw_materials_import_template.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleRmImportFileUpload = async (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setRmImportError('')
+    setRmImportResult(null)
+    setRmImportRows([])
+    setRmImportHeaders([])
+
+    try {
+      const XLSX = (await import('xlsx')).default
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+      if (rawData.length < 2) {
+        setRmImportError('File is empty or has no data rows')
+        return
+      }
+
+      const headers = rawData[0].map(h => String(h))
+      const rows = rawData.slice(1).filter(row => row.some(cell => String(cell).trim()))
+      const colMap = mapImportColumns(headers)
+
+      if (colMap.name === undefined) {
+        setRmImportError('Could not find material name column. Expected a header like "Material Name".')
+        return
+      }
+
+      setRmImportHeaders(headers)
+      setRmImportRows(rows)
+      setRmImportColMap(colMap)
+    } catch {
+      setRmImportError('Failed to parse file. Please use .xlsx, .xls, or .csv format.')
+    }
+
+    event.target.value = ''
+  }
+
+  const handleRmImportSubmit = async () => {
+    if (rmImportRows.length === 0) return
+    setRmImportLoading(true)
+    setRmImportError('')
+
+    try {
+      const payload = rmImportRows
+        .map(row => ({
+          name: String(row[rmImportColMap.name] ?? '').trim(),
+          sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
+          costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
+          stockQuantity: rmImportColMap.stockQuantity !== undefined ? Number(row[rmImportColMap.stockQuantity] ?? 0) : 0,
+          unitSize: rmImportColMap.unitSize !== undefined ? Number(row[rmImportColMap.unitSize] ?? 1) : 1,
+          unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
+          reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
+          description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
+          image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
+        }))
+        .filter(row => row.name)
+
+      const res = await bulkImportRawMaterials(payload)
+      if (res.success) {
+        setRmImportResult(res.data)
+        setRmImportRows([])
+        setRmImportHeaders([])
+        loadData()
+      } else {
+        setRmImportError(res.error || 'Import failed')
+      }
+    } catch {
+      setRmImportError('Import failed. Please try again.')
+    }
+
+    setRmImportLoading(false)
+  }
+
   const handleCreateRawMaterial = async () => {
     if (!rmForm.name) return alert('Name is required')
     setSubmitting(true)
@@ -464,19 +599,34 @@ export default function ManufacturingPage() {
       counter++
       sku = `RM-${String(counter).padStart(3, '0')}`
     }
+
+    let imageUrl = ''
+    if (rmImages.length > 0) {
+      try {
+        imageUrl = await uploadProductImages(rmImages)
+      } catch (err) {
+        alert(err?.message || 'Image upload failed')
+        setSubmitting(false)
+        return
+      }
+    }
+
     const res = await createProduct({
       name: rmForm.name,
       sku,
       category: 'Raw Material',
       price: 0,
       costPrice: Number(rmForm.costPrice) || 0,
-      stock: Number(rmForm.stock) || 0,
+      stock: Number(rmForm.stockQuantity) || 0,
+      unitSize: Number(rmForm.unitSize) || 1,
       unitOfMeasure: rmForm.unitOfMeasure || 'PCS',
       reorderLevel: Number(rmForm.reorderLevel) || 5,
       description: rmForm.description || undefined,
+      image: imageUrl || undefined,
     })
     if (res.success) {
-      setRmForm({ name: '', costPrice: 0, stock: 0, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+      setRmForm({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+      setRmImages([])
       loadData()
     } else {
       alert(res.error)
@@ -494,14 +644,26 @@ export default function ManufacturingPage() {
   }
 
   const handleUpdateRawMaterial = async (id) => {
+    let imageUrl = rmEditForm.image || ''
+    if (rmEditImages.length > 0) {
+      try {
+        imageUrl = await uploadProductImages(rmEditImages)
+      } catch (err) {
+        alert(err?.message || 'Image upload failed')
+        return
+      }
+    }
+
     setSubmitting(true)
     const res = await updateProduct(id, {
       name: rmEditForm.name,
-      stock: Number(rmEditForm.stock) || 0,
+      stock: (Number(rmEditForm.stockQuantity) || 0) * (Number(rmEditForm.unitSize) || 1),
+      unitSize: Number(rmEditForm.unitSize) || 1,
       reorderLevel: Number(rmEditForm.reorderLevel) || 5,
       description: rmEditForm.description || undefined,
+      image: imageUrl || undefined,
     })
-    if (res.success) { setEditingRmId(null); loadData() }
+    if (res.success) { setEditingRmId(null); setRmEditImages([]); loadData() }
     else alert(res.error)
     setSubmitting(false)
   }
@@ -1337,9 +1499,29 @@ export default function ManufacturingPage() {
         <div className="space-y-4">
           {/* Add Raw Material Form */}
           <div className="glass-card p-5">
-            <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-accent" /> Add New Raw Material
-            </h3>
+            <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Plus className="w-4 h-4 text-accent" /> Add New Raw Material
+              </h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={downloadRawMaterialTemplate}
+                  className="px-3 py-2 bg-surface border border-border rounded-lg text-xs text-muted hover:text-foreground flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5" /> Template
+                </button>
+                <button
+                  onClick={() => {
+                    setShowRmImportModal(true)
+                    setRmImportRows([])
+                    setRmImportHeaders([])
+                    setRmImportResult(null)
+                    setRmImportError('')
+                  }}
+                  className="px-3 py-2 bg-surface border border-border rounded-lg text-xs text-muted hover:text-foreground flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5" /> Import Excel/Sheet
+                </button>
+              </div>
+            </div>
             <p className="text-xs text-muted mb-4">SKU code will be auto-generated (e.g. RM-001, RM-002…)</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
               <div>
@@ -1360,16 +1542,25 @@ export default function ManufacturingPage() {
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Current Stock</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Stock Quantity</label>
                 <input
                   type="number" min="0"
-                  value={rmForm.stock}
-                  onChange={e => setRmForm(f => ({ ...f, stock: e.target.value }))}
-                  placeholder="Quantity in hand"
+                  value={rmForm.stockQuantity}
+                  onChange={e => setRmForm(f => ({ ...f, stockQuantity: e.target.value }))}
+                  placeholder="Number of units/rolls/pieces"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+              <div>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Measure Per Quantity</label>
+                <input
+                  type="number" min="0.0001" step="0.0001"
+                  value={rmForm.unitSize}
+                  onChange={e => setRmForm(f => ({ ...f, unitSize: e.target.value }))}
+                  className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                <p className="text-[9px] text-muted mt-0.5">Example: if 1 roll = 4 SQM, set this to 4</p>
+              </div>
               <div>
                 <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Unit of Measure</label>
                 <select
@@ -1379,6 +1570,8 @@ export default function ManufacturingPage() {
                   <option value="PCS">PCS (Pieces)</option>
                   <option value="KG">KG (Kilograms)</option>
                   <option value="MTR">MTR (Meters)</option>
+                  <option value="SQM">SQM (Square Meters)</option>
+                  <option value="SQFT">SQFT (Square Feet)</option>
                   <option value="SFT">SFT (Sq. Feet)</option>
                   <option value="LTR">LTR (Litres)</option>
                   <option value="SET">SET</option>
@@ -1404,6 +1597,21 @@ export default function ManufacturingPage() {
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
             </div>
+            <div className="mb-4">
+              <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Material Image</label>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) setRmImages([file])
+                  e.target.value = ''
+                }}
+                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+              {rmImages.length > 0 && (
+                <p className="text-[10px] text-muted mt-1">Selected: {rmImages[0].name}</p>
+              )}
+            </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={handleCreateRawMaterial}
@@ -1413,7 +1621,10 @@ export default function ManufacturingPage() {
                 {submitting ? 'Adding...' : 'Add Raw Material'}
               </button>
               <button
-                onClick={() => setRmForm({ name: '', costPrice: 0, stock: 0, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })}
+                onClick={() => {
+                  setRmForm({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+                  setRmImages([])
+                }}
                 className="px-4 py-2.5 text-sm text-muted hover:text-foreground transition-colors">
                 Clear Form
               </button>
@@ -1438,7 +1649,7 @@ export default function ManufacturingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface-hover">
-                  {['SKU Code', 'Material Name', 'Cost Price (₹)', 'Stock', 'UoM', 'Min. Alert', 'Status', 'Actions'].map(h => (
+                  {['SKU Code', 'Material Name', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Image', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -1446,7 +1657,7 @@ export default function ManufacturingPage() {
               <tbody>
                 {rawMaterials.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-center py-12 text-muted">
+                    <td colSpan={10} className="text-center py-12 text-muted">
                       {rmSearch ? 'No materials match your search' : 'No raw materials yet. Add one above to get started.'}
                     </td>
                   </tr>
@@ -1462,13 +1673,31 @@ export default function ManufacturingPage() {
                         </td>
                         <td className="px-4 py-3 text-muted text-xs">₹{rm.costPrice}</td>
                         <td className="px-4 py-3">
-                          <input type="number" min="0" value={rmEditForm.stock} onChange={e => setRmEditForm(f => ({ ...f, stock: e.target.value }))}
+                          <input type="number" min="0" value={rmEditForm.stockQuantity} onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value }))}
                             className="w-20 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
                         </td>
                         <td className="px-4 py-3 text-muted text-xs">{rm.unitOfMeasure}</td>
                         <td className="px-4 py-3">
                           <input type="number" min="0" value={rmEditForm.reorderLevel} onChange={e => setRmEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
                             className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                        </td>
+                        <td className="px-4 py-3 text-muted text-xs">
+                          <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
+                            className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) setRmEditImages([file])
+                              e.target.value = ''
+                            }}
+                            className="w-36 text-[10px] text-muted" />
+                          {rmEditImages.length > 0 && (
+                            <p className="text-[10px] text-muted mt-1">{rmEditImages[0].name}</p>
+                          )}
                         </td>
                         <td className="px-4 py-3"></td>
                         <td className="px-4 py-3">
@@ -1477,7 +1706,7 @@ export default function ManufacturingPage() {
                               className="px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center gap-1">
                               <Save className="w-3 h-3" /> Save
                             </button>
-                            <button onClick={() => setEditingRmId(null)}
+                            <button onClick={() => { setEditingRmId(null); setRmEditImages([]) }}
                               className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted">
                               Cancel
                             </button>
@@ -1486,25 +1715,47 @@ export default function ManufacturingPage() {
                       </>
                     ) : (
                       <>
+                        {(() => {
+                          const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
+                          const stockQty = (Number(rm.stock) || 0) / unitSize
+                          const isLow = stockQty <= (Number(rm.reorderLevel) || 0)
+                          const stockQtyLabel = Number.isInteger(stockQty) ? String(stockQty) : stockQty.toFixed(2)
+                          const stockMeasureLabel = Number.isInteger(Number(rm.stock) || 0) ? String(Number(rm.stock) || 0) : Number(rm.stock || 0).toFixed(2)
+                          return (
+                            <>
                         <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
                         <td className="px-4 py-3 text-foreground font-medium">{rm.name}</td>
                         <td className="px-4 py-3 text-foreground">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</td>
                         <td className="px-4 py-3">
-                          <span className={rm.stock <= rm.reorderLevel ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
-                            {rm.stock}
+                          <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+                            {stockQtyLabel}
                           </span>
+                          <p className="text-[10px] text-muted">{stockMeasureLabel} {rm.unitOfMeasure}</p>
                         </td>
                         <td className="px-4 py-3 text-muted">{rm.unitOfMeasure}</td>
                         <td className="px-4 py-3 text-muted">{rm.reorderLevel}</td>
+                        <td className="px-4 py-3 text-muted text-xs">{unitSize}</td>
+                        <td className="px-4 py-3 text-muted text-xs">{rm.image ? 'Uploaded' : 'None'}</td>
                         <td className="px-4 py-3">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${rm.stock <= rm.reorderLevel ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                            {rm.stock <= rm.reorderLevel ? '⚠ Low Stock' : '✓ In Stock'}
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
                           </span>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1.5">
                             <button
-                              onClick={() => { setEditingRmId(rm.id); setRmEditForm({ name: rm.name, stock: rm.stock, reorderLevel: rm.reorderLevel, description: rm.description || '' }) }}
+                              onClick={() => {
+                                setEditingRmId(rm.id)
+                                setRmEditForm({
+                                  name: rm.name,
+                                  stockQuantity: ((Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1)).toFixed(2),
+                                  unitSize: Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1,
+                                  reorderLevel: rm.reorderLevel,
+                                  description: rm.description || '',
+                                  image: rm.image || '',
+                                })
+                                setRmEditImages([])
+                              }}
                               className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted hover:text-accent hover:border-accent/50 transition-colors flex items-center gap-1">
                               <Edit2 className="w-3 h-3" /> Edit
                             </button>
@@ -1516,6 +1767,9 @@ export default function ManufacturingPage() {
                             </button>
                           </div>
                         </td>
+                            </>
+                          )
+                        })()}
                       </>
                     )}
                   </tr>
@@ -1525,6 +1779,60 @@ export default function ManufacturingPage() {
           </div>
         </div>
       )}
+
+      <Modal isOpen={showRmImportModal} onClose={() => setShowRmImportModal(false)} title="Import Raw Materials" size="lg">
+        <div className="space-y-4">
+          <div className="p-3 rounded-lg border border-border bg-surface-hover text-xs text-muted space-y-1">
+            <p>Supported files: .xlsx, .xls, .csv</p>
+            <p>Required column: Material Name</p>
+            <p>Optional columns: SKU Code, Cost Price, Stock Quantity, Measure Per Quantity, Unit of Measure, Min Stock Alert, Description, Image URL</p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleRmImportFileUpload}
+              className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+            <button
+              onClick={downloadRawMaterialTemplate}
+              className="px-3 py-2 bg-surface border border-border rounded-lg text-xs text-muted hover:text-foreground flex items-center gap-1.5">
+              <Download className="w-3.5 h-3.5" /> Download Template
+            </button>
+          </div>
+
+          {rmImportError && (
+            <p className="text-xs text-red-400">{rmImportError}</p>
+          )}
+
+          {rmImportHeaders.length > 0 && (
+            <div className="text-xs text-muted">
+              <p className="mb-2">Detected columns: {rmImportHeaders.join(', ')}</p>
+              <p>Rows ready to import: <span className="text-foreground font-semibold">{rmImportRows.length}</span></p>
+            </div>
+          )}
+
+          {rmImportResult && (
+            <div className="p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-xs text-emerald-300">
+              Imported {rmImportResult.created} of {rmImportResult.total} rows. Skipped: {rmImportResult.skipped}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => setShowRmImportModal(false)}
+              className="px-4 py-2 rounded-lg text-sm text-muted hover:text-foreground">
+              Close
+            </button>
+            <button
+              onClick={handleRmImportSubmit}
+              disabled={rmImportLoading || rmImportRows.length === 0}
+              className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium disabled:opacity-50">
+              {rmImportLoading ? 'Importing...' : 'Import Now'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ─── MODALS ─────────────────────────────────── */}
 

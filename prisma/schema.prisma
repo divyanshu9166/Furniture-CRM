@@ -198,6 +198,7 @@ model Product {
   // Deep inventory fields
   hsnCode       String?
   unitOfMeasure String      @default("PCS")
+  unitSize      Float       @default(1)
   costPrice     Int         @default(0)
   stockGroupId  Int?
   stockGroup    StockGroup? @relation(fields: [stockGroupId], references: [id])

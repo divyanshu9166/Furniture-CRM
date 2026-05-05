@@ -5,6 +5,23 @@ import { revalidatePath } from 'next/cache'
 import { createProductSchema, updateStockSchema } from '@/lib/validations/product'
 import { moveProductToDraft } from './drafts'
 
+export interface BulkRawMaterialRow {
+  name: string
+  sku?: string
+  costPrice?: number | string
+  stockQuantity?: number | string
+  unitSize?: number | string
+  unitOfMeasure?: string
+  reorderLevel?: number | string
+  description?: string
+  image?: string
+}
+
+const toNumber = (value: unknown, fallback = 0) => {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
 export async function getProducts() {
   const products = await prisma.product.findMany({
     include: { category: true, warehouse: true },
@@ -21,7 +38,9 @@ export async function getProducts() {
       categoryId: p.categoryId,
       price: p.price,
       costPrice: p.costPrice,
+      hsnCode: p.hsnCode,
       unitOfMeasure: p.unitOfMeasure,
+      unitSize: p.unitSize,
       stock: p.stock,
       sold: p.sold,
       reorderLevel: p.reorderLevel,
@@ -49,7 +68,7 @@ export async function createProduct(data: unknown) {
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { category, warehouse, unitOfMeasure, godownId, ...rest } = parsed.data
+  const { category, warehouse, unitOfMeasure, unitSize, godownId, ...rest } = parsed.data
 
   // Find or create category
   const cat = await prisma.category.upsert({
@@ -76,7 +95,9 @@ export async function createProduct(data: unknown) {
   }
 
   // Create the product with stock = 0 initially (sync engine will set it)
-  const initialStock = rest.stock || 0
+  const normalizedUnitSize = Number(unitSize) > 0 ? Number(unitSize) : 1
+  const initialStockQty = rest.stock || 0
+  const initialStock = initialStockQty * normalizedUnitSize
   let product
   try {
     product = await prisma.product.create({
@@ -84,6 +105,7 @@ export async function createProduct(data: unknown) {
         ...rest,
         stock: 0, // Will be set by sync engine
         unitOfMeasure: unitOfMeasure || 'PCS',
+        unitSize: normalizedUnitSize,
         categoryId: cat.id,
         warehouseId,
       },
@@ -127,9 +149,92 @@ export async function createProduct(data: unknown) {
   return { success: true, data: product }
 }
 
+export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
+  if (!rows || rows.length === 0) return { success: false, error: 'No raw materials to import' }
+
+  const validRows = rows
+    .map(r => ({
+      name: String(r.name || '').trim(),
+      sku: String(r.sku || '').trim(),
+      costPrice: toNumber(r.costPrice, 0),
+      stockQuantity: toNumber(r.stockQuantity, 0),
+      unitSize: Math.max(0.0001, toNumber(r.unitSize, 1)),
+      unitOfMeasure: String(r.unitOfMeasure || '').trim().toUpperCase() || 'PCS',
+      reorderLevel: Math.max(0, toNumber(r.reorderLevel, 5)),
+      description: String(r.description || '').trim(),
+      image: String(r.image || '').trim(),
+    }))
+    .filter(r => r.name)
+
+  if (validRows.length === 0) {
+    return { success: false, error: 'No valid rows found. Material name is required.' }
+  }
+
+  const existingSkus = new Set(
+    (await prisma.product.findMany({ select: { sku: true } })).map(p => p.sku)
+  )
+
+  let created = 0
+  let skipped = 0
+
+  let counter = (await prisma.product.count({ where: { category: { name: 'Raw Material' } } })) + 1
+
+  for (const row of validRows) {
+    let sku = row.sku
+
+    if (sku && existingSkus.has(sku)) {
+      skipped++
+      continue
+    }
+
+    if (!sku) {
+      sku = `RM-${String(counter).padStart(3, '0')}`
+      while (existingSkus.has(sku)) {
+        counter++
+        sku = `RM-${String(counter).padStart(3, '0')}`
+      }
+    }
+
+    const res = await createProduct({
+      name: row.name,
+      sku,
+      category: 'Raw Material',
+      price: 0,
+      costPrice: Math.max(0, row.costPrice),
+      stock: Math.max(0, row.stockQuantity),
+      unitOfMeasure: row.unitOfMeasure || 'PCS',
+      unitSize: row.unitSize,
+      reorderLevel: row.reorderLevel,
+      description: row.description || undefined,
+      image: row.image || undefined,
+    })
+
+    if (res.success) {
+      existingSkus.add(sku)
+      created++
+    } else {
+      skipped++
+    }
+
+    counter++
+  }
+
+  revalidatePath('/manufacturing')
+  revalidatePath('/inventory')
+
+  return {
+    success: true,
+    data: {
+      total: validRows.length,
+      created,
+      skipped,
+    },
+  }
+}
+
 export async function updateProduct(id: number, data: Partial<{
   name: string; price: number; stock: number; reorderLevel: number;
-  material: string; color: string; description: string; image: string;
+  material: string; color: string; description: string; image: string; unitSize: number;
 }>) {
   const product = await prisma.product.update({
     where: { id },
