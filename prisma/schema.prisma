@@ -170,6 +170,7 @@ model Product {
   reorderLevel  Int        @default(5)
   image         String?
   material      String?
+  brand         String?
   color         String?
   description   String?
   warehouseId   Int?

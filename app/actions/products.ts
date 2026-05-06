@@ -7,7 +7,10 @@ import { moveProductToDraft } from './drafts'
 
 export interface BulkRawMaterialRow {
   name: string
+  brand?: string
   sku?: string
+  size?: number | string
+  instock?: number | string
   costPrice?: number | string
   stockQuantity?: number | string
   unitSize?: number | string
@@ -20,6 +23,13 @@ export interface BulkRawMaterialRow {
 const toNumber = (value: unknown, fallback = 0) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+const toRequiredNumber = (value: unknown) => {
+  const text = String(value ?? '').trim()
+  if (!text) return Number.NaN
+  const n = Number(text)
+  return Number.isFinite(n) ? n : Number.NaN
 }
 
 export async function getProducts() {
@@ -38,6 +48,7 @@ export async function getProducts() {
       categoryId: p.categoryId,
       price: p.price,
       costPrice: p.costPrice,
+      brand: p.brand,
       hsnCode: p.hsnCode,
       unitOfMeasure: p.unitOfMeasure,
       unitSize: p.unitSize,
@@ -155,19 +166,21 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
   const validRows = rows
     .map(r => ({
       name: String(r.name || '').trim(),
+      brand: String(r.brand || '').trim(),
       sku: String(r.sku || '').trim(),
+      sizeLabel: String(r.size ?? '').trim(),
       costPrice: toNumber(r.costPrice, 0),
-      stockQuantity: toNumber(r.stockQuantity, 0),
-      unitSize: Math.max(0.0001, toNumber(r.unitSize, 1)),
+      stockQuantity: toRequiredNumber(r.instock ?? r.stockQuantity),
+      unitSize: Math.max(1, toNumber(r.unitSize, 1)),
       unitOfMeasure: String(r.unitOfMeasure || '').trim().toUpperCase() || 'PCS',
       reorderLevel: Math.max(0, toNumber(r.reorderLevel, 5)),
       description: String(r.description || '').trim(),
       image: String(r.image || '').trim(),
     }))
-    .filter(r => r.name)
+    .filter(r => r.name && Number.isFinite(r.stockQuantity))
 
   if (validRows.length === 0) {
-    return { success: false, error: 'No valid rows found. Material name is required.' }
+    return { success: false, error: 'No valid rows found. Product name, size, and in-stock are required.' }
   }
 
   const existingSkus = new Set(
@@ -179,24 +192,25 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
 
   let counter = (await prisma.product.count({ where: { category: { name: 'Raw Material' } } })) + 1
 
+  const makeUniqueSku = (preferredSku: string) => {
+    const baseSku = String(preferredSku || '').trim()
+    let candidate = baseSku || `RM-${String(counter).padStart(3, '0')}`
+    let suffix = 1
+
+    while (existingSkus.has(candidate)) {
+      candidate = baseSku ? `${baseSku}-${suffix++}` : `RM-${String((counter + suffix - 1)).padStart(3, '0')}`
+    }
+
+    existingSkus.add(candidate)
+    return candidate
+  }
+
   for (const row of validRows) {
-    let sku = row.sku
-
-    if (sku && existingSkus.has(sku)) {
-      skipped++
-      continue
-    }
-
-    if (!sku) {
-      sku = `RM-${String(counter).padStart(3, '0')}`
-      while (existingSkus.has(sku)) {
-        counter++
-        sku = `RM-${String(counter).padStart(3, '0')}`
-      }
-    }
+    const sku = makeUniqueSku(row.sku)
 
     const res = await createProduct({
       name: row.name,
+      brand: row.brand || undefined,
       sku,
       category: 'Raw Material',
       price: 0,
@@ -205,12 +219,11 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       unitOfMeasure: row.unitOfMeasure || 'PCS',
       unitSize: row.unitSize,
       reorderLevel: row.reorderLevel,
-      description: row.description || undefined,
+      description: row.description || row.sizeLabel || undefined,
       image: row.image || undefined,
     })
 
     if (res.success) {
-      existingSkus.add(sku)
       created++
     } else {
       skipped++
@@ -234,7 +247,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
 
 export async function updateProduct(id: number, data: Partial<{
   name: string; price: number; stock: number; reorderLevel: number;
-  material: string; color: string; description: string; image: string; unitSize: number;
+  material: string; brand: string; color: string; description: string; image: string; unitSize: number; unitOfMeasure: string;
 }>) {
   const product = await prisma.product.update({
     where: { id },
@@ -326,4 +339,42 @@ export async function getLowStockProducts() {
 
 export async function deleteProduct(id: number) {
   return moveProductToDraft(id)
+}
+
+export async function deleteRawMaterial(id: number) {
+  try {
+    // Get the product
+    const product = await prisma.product.findUnique({
+      where: { id },
+      include: { category: true },
+    })
+    
+    if (!product) {
+      return { success: false, error: 'Product not found' }
+    }
+
+    // Only allow deletion for raw materials
+    if (product.category.name !== 'Raw Material') {
+      return { success: false, error: 'Only raw materials can be deleted using this function' }
+    }
+
+    // Delete in transaction:
+    // 1. Delete stock ledger entries
+    // 2. Delete godown stock entries
+    // 3. Delete other potential dependencies (batches, BOM items)
+    // 4. Delete the product itself
+    await prisma.$transaction([
+      prisma.stockLedger.deleteMany({ where: { productId: id } }),
+      prisma.godownStock.deleteMany({ where: { productId: id } }),
+      prisma.productBatch.deleteMany({ where: { productId: id } }),
+      prisma.bomItem.deleteMany({ where: { rawMaterialId: id } }),
+      prisma.product.delete({ where: { id } }),
+    ])
+
+    revalidatePath('/manufacturing')
+    return { success: true }
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : 'Failed to delete raw material'
+    return { success: false, error: errMsg }
+  }
 }

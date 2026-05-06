@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronUp, RefreshCw,
   ShieldCheck, FlameKindling, Star, Cpu, Activity,
   Download, Edit2, Save, X, FileText, BookTemplate,
-  Clock, DollarSign, Zap, Copy, Upload,
+  Clock, DollarSign, Zap, Copy, Upload, Check,
 } from 'lucide-react'
 import {
   getBOMs, createBOM, toggleBOMStatus, deleteBOM,
@@ -23,8 +23,9 @@ import {
   getMRPAnalysis, getManufacturingStats, updateProductionStep,
   getManufacturingCustomOrders, getScrapInventory, getCustomOrderInventory,
 } from '@/app/actions/manufacturing'
-import { getProducts, createProduct, deleteProduct, updateProduct, bulkImportRawMaterials } from '@/app/actions/products'
+import { getProducts, createProduct, deleteRawMaterial, updateProduct, updateStock, bulkImportRawMaterials } from '@/app/actions/products'
 import Modal from '@/components/Modal'
+import * as XLSX from 'xlsx'
 
 // ─── Constants ────────────────────────────────────────
 const PRIORITY_COLORS = {
@@ -54,11 +55,12 @@ const INP = 'w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm
 const SEL = 'w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none'
 
 const RM_COLUMN_ALIASES = {
-  name: ['name', 'material name', 'raw material', 'raw material name'],
+  name: ['name', 'product name', 'material name', 'raw material', 'raw material name'],
+  brand: ['brand', 'product brand', 'material brand'],
   sku: ['sku', 'sku code', 'material code'],
   costPrice: ['cost price', 'cost', 'cost price per unit', 'purchase price'],
-  stockQuantity: ['stock quantity', 'current stock quantity', 'opening stock quantity', 'quantity', 'stock'],
-  unitSize: ['measure per quantity', 'unit size', 'uom conversion', 'conversion factor', 'size per qty'],
+  instock: ['in stock', 'instock', 'stock quantity', 'current stock quantity', 'opening stock quantity', 'quantity', 'stock'],
+  size: ['size', 'measure per quantity', 'unit size', 'uom conversion', 'conversion factor', 'size per qty'],
   unitOfMeasure: ['unit of measure', 'uom', 'unit'],
   reorderLevel: ['min stock alert', 'reorder level', 'minimum stock', 'min stock'],
   description: ['description', 'notes', 'remarks'],
@@ -186,7 +188,7 @@ export default function ManufacturingPage() {
   const [submitting, setSubmitting] = useState(false)
 
   // Raw material form
-  const [rmForm, setRmForm] = useState({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+  const [rmForm, setRmForm] = useState({ name: '', size: '', brand: '', sku: '', instock: '', costPrice: '', stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
   const [rmImages, setRmImages] = useState([])
   const [rmSearch, setRmSearch] = useState('')
   const [editingRmId, setEditingRmId] = useState(null)
@@ -199,6 +201,9 @@ export default function ManufacturingPage() {
   const [rmImportLoading, setRmImportLoading] = useState(false)
   const [rmImportError, setRmImportError] = useState('')
   const [rmImportResult, setRmImportResult] = useState(null)
+  const [selectedRmIds, setSelectedRmIds] = useState(new Set())
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
 
   // BOM form
   const [bomForm, setBomForm] = useState({
@@ -207,6 +212,7 @@ export default function ManufacturingPage() {
     steps: [],
     templateId: '',
   })
+  const [bomItemSearch, setBomItemSearch] = useState({})
 
   // Production form
   const [prodForm, setProdForm] = useState({
@@ -487,11 +493,59 @@ export default function ManufacturingPage() {
     return `RM-${String(nextNum).padStart(3, '0')}`
   }
 
+  const compressImage = async (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const max_size = 800; // Small size
+
+          if (width > height) {
+            if (width > max_size) {
+              height *= max_size / width;
+              width = max_size;
+            }
+          } else {
+            if (height > max_size) {
+              width *= max_size / height;
+              height = max_size;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob((blob) => {
+            const compressedFile = new File([blob], file.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now(),
+            });
+            resolve(compressedFile);
+          }, 'image/jpeg', 0.8);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   const uploadProductImages = async (files) => {
     if (!files || files.length === 0) return ''
     const formData = new FormData()
     formData.set('folder', 'products')
-    files.forEach(file => formData.append('files', file))
+    
+    // Compress each file before upload
+    const compressedFiles = await Promise.all(
+      Array.from(files).map(file => compressImage(file))
+    );
+    
+    compressedFiles.forEach(file => formData.append('files', file))
     const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
     const uploadData = await uploadRes.json()
     if (!uploadRes.ok || !uploadData?.success) {
@@ -501,8 +555,8 @@ export default function ManufacturingPage() {
   }
 
   const downloadRawMaterialTemplate = () => {
-    const headers = ['Material Name', 'SKU Code', 'Cost Price', 'Stock Quantity', 'Measure Per Quantity', 'Unit of Measure', 'Min Stock Alert', 'Description', 'Image URL']
-    const example = ['Upholstery Fabric Roll', 'RM-001', '95', '10', '4', 'SQM', '5', 'Each roll has 4 square meter', 'https://example.com/images/fabric-roll.jpg']
+    const headers = ['PRODUCT NAME', 'SIZE', 'brand', 'SKU', 'Instock', 'Cost price']
+    const example = ['OTTER', '1 inch (square)', '', 'RM-001', '1', '']
     const csv = [headers.join(','), example.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -523,8 +577,9 @@ export default function ManufacturingPage() {
     setRmImportHeaders([])
 
     try {
-      const XLSX = (await import('xlsx')).default
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      const buffer = await file.arrayBuffer()
+      const data = new Uint8Array(buffer)
+      const workbook = XLSX.read(data, { type: 'array' })
       const sheet = workbook.Sheets[workbook.SheetNames[0]]
       const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
 
@@ -538,15 +593,25 @@ export default function ManufacturingPage() {
       const colMap = mapImportColumns(headers)
 
       if (colMap.name === undefined) {
-        setRmImportError('Could not find material name column. Expected a header like "Material Name".')
+        setRmImportError('Could not find product name column. Expected a header like "Product Name".')
+        return
+      }
+
+      if (colMap.brand === undefined) {
+        // Brand is optional in the new template.
+      }
+
+      if (colMap.instock === undefined) {
+        setRmImportError('Could not find in stock column. Expected a header like "In Stock".')
         return
       }
 
       setRmImportHeaders(headers)
       setRmImportRows(rows)
       setRmImportColMap(colMap)
-    } catch {
-      setRmImportError('Failed to parse file. Please use .xlsx, .xls, or .csv format.')
+    } catch (err) {
+      console.error('Import error:', err)
+      setRmImportError(`Failed to parse file: ${err.message || 'Unknown error'}. Please use .xlsx, .xls, or .csv format.`)
     }
 
     event.target.value = ''
@@ -558,19 +623,58 @@ export default function ManufacturingPage() {
     setRmImportError('')
 
     try {
-      const payload = rmImportRows
-        .map(row => ({
-          name: String(row[rmImportColMap.name] ?? '').trim(),
-          sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
-          costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
-          stockQuantity: rmImportColMap.stockQuantity !== undefined ? Number(row[rmImportColMap.stockQuantity] ?? 0) : 0,
-          unitSize: rmImportColMap.unitSize !== undefined ? Number(row[rmImportColMap.unitSize] ?? 1) : 1,
-          unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
-          reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
-          description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
-          image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
-        }))
-        .filter(row => row.name)
+        const parseRequiredNumber = (value) => {
+          const text = String(value ?? '').trim()
+          if (!text) return Number.NaN
+          const parsed = Number(text)
+          return Number.isFinite(parsed) ? parsed : Number.NaN
+        }
+
+        const parseNumberWithDefault = (value, defaultValue = 1) => {
+          const text = String(value ?? '').trim()
+          if (!text) return defaultValue
+          const parsed = Number(text)
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue
+        }
+
+        const parsed = rmImportRows
+          .map(row => ({
+            name: String(row[rmImportColMap.name] ?? '').trim(),
+            brand: rmImportColMap.brand !== undefined ? String(row[rmImportColMap.brand] ?? '').trim() : '',
+            sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
+            costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
+            instock: rmImportColMap.instock !== undefined ? parseRequiredNumber(row[rmImportColMap.instock]) : Number.NaN,
+            size: rmImportColMap.size !== undefined ? String(row[rmImportColMap.size] ?? '').trim() : '',
+            unitSize: rmImportColMap.size !== undefined ? parseNumberWithDefault(row[rmImportColMap.size], 1) : 1,
+            unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
+            reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
+            description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
+            image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
+          }))
+      
+        // Debug: check which rows fail and why
+        const failures = []
+        parsed.forEach((row, idx) => {
+          const reasons = []
+          if (!row.name) reasons.push('missing name')
+          if (!Number.isFinite(row.instock)) reasons.push(`invalid instock: "${rmImportRows[idx][rmImportColMap.instock]}"`)
+          if (reasons.length > 0) {
+            failures.push(`Row ${idx + 1} (${row.name || 'unnamed'}): ${reasons.join(', ')}`)
+          }
+        })
+
+        if (failures.length > 0) {
+          console.warn('Skipped rows:', failures)
+        }
+
+        const payload = parsed
+          .filter(row => row.name && Number.isFinite(row.instock))
+
+        if (payload.length === 0) {
+          setRmImportError(`All rows were invalid. Issues:\n${failures.join('\n')}`)
+          setRmImportLoading(false)
+          return
+        }
 
       const res = await bulkImportRawMaterials(payload)
       if (res.success) {
@@ -581,8 +685,8 @@ export default function ManufacturingPage() {
       } else {
         setRmImportError(res.error || 'Import failed')
       }
-    } catch {
-      setRmImportError('Import failed. Please try again.')
+      } catch (err) {
+        setRmImportError(`Import failed: ${err.message}`)
     }
 
     setRmImportLoading(false)
@@ -591,15 +695,6 @@ export default function ManufacturingPage() {
   const handleCreateRawMaterial = async () => {
     if (!rmForm.name) return alert('Name is required')
     setSubmitting(true)
-    // Auto-generate a unique SKU
-    let sku = generateRMSku()
-    // If it already exists, keep incrementing
-    const existingSkus = new Set(products.map(p => p.sku))
-    let counter = products.filter(p => p.category === 'Raw Material').length + 1
-    while (existingSkus.has(sku)) {
-      counter++
-      sku = `RM-${String(counter).padStart(3, '0')}`
-    }
 
     let imageUrl = ''
     if (rmImages.length > 0) {
@@ -612,21 +707,32 @@ export default function ManufacturingPage() {
       }
     }
 
+    // Allow manual SKU, otherwise auto-generate a unique one.
+    let sku = String(rmForm.sku || '').trim() || generateRMSku()
+    // If it already exists, keep incrementing
+    const existingSkus = new Set(products.map(p => p.sku))
+    let counter = products.filter(p => p.category === 'Raw Material').length + 1
+    while (existingSkus.has(sku)) {
+      counter++
+      sku = `RM-${String(counter).padStart(3, '0')}`
+    }
+
     const res = await createProduct({
       name: rmForm.name,
+      brand: rmForm.brand || undefined,
       sku,
       category: 'Raw Material',
       price: 0,
       costPrice: Number(rmForm.costPrice) || 0,
-      stock: Number(rmForm.stockQuantity) || 0,
-      unitSize: Number(rmForm.unitSize) || 1,
+      stock: Number(rmForm.instock) || 0,
+      unitSize: 1,
       unitOfMeasure: rmForm.unitOfMeasure || 'PCS',
-      reorderLevel: Number(rmForm.reorderLevel) || 5,
-      description: rmForm.description || undefined,
+      reorderLevel: 5,
+      description: rmForm.size ? String(rmForm.size).trim() : undefined,
       image: imageUrl || undefined,
     })
     if (res.success) {
-      setRmForm({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
+      setRmForm({ name: '', size: '', brand: '', sku: '', instock: '', costPrice: '', stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
       setRmImages([])
       loadData()
     } else {
@@ -638,7 +744,7 @@ export default function ManufacturingPage() {
   const handleDeleteRawMaterial = async (id, name) => {
     if (!confirm(`Delete raw material "${name}"? This cannot be undone.`)) return
     setSubmitting(true)
-    const res = await deleteProduct(id)
+    const res = await deleteRawMaterial(id)
     if (res.success) loadData()
     else alert(res.error)
     setSubmitting(false)
@@ -658,15 +764,66 @@ export default function ManufacturingPage() {
     setSubmitting(true)
     const res = await updateProduct(id, {
       name: rmEditForm.name,
-      stock: (Number(rmEditForm.stockQuantity) || 0) * (Number(rmEditForm.unitSize) || 1),
+      brand: rmEditForm.brand || undefined,
+      unitOfMeasure: rmEditForm.unitOfMeasure || 'PCS',
       unitSize: Number(rmEditForm.unitSize) || 1,
       reorderLevel: Number(rmEditForm.reorderLevel) || 5,
       description: rmEditForm.description || undefined,
       image: imageUrl || undefined,
     })
-    if (res.success) { setEditingRmId(null); setRmEditImages([]); loadData() }
-    else alert(res.error)
+    if (!res.success) {
+      alert(res.error)
+      setSubmitting(false)
+      return
+    }
+
+    const unitSize = Number(rmEditForm.unitSize) > 0 ? Number(rmEditForm.unitSize) : 1
+    const currentQty = Number(rmEditForm.currentStockQuantity ?? 0)
+    const enteredQty = Math.max(0, Number(rmEditForm.stockQuantity) || 0)
+    const newQty = rmEditForm.stockAction === 'ADD' ? currentQty + enteredQty : enteredQty
+    const stockRes = await updateStock({ id, stock: newQty * unitSize })
+    if (!stockRes.success) {
+      alert(stockRes.error)
+      setSubmitting(false)
+      return
+    }
+
+    setEditingRmId(null)
+    setRmEditImages([])
+    loadData()
     setSubmitting(false)
+  }
+
+  const handleBulkDelete = async () => {
+    setBulkDeleting(true)
+    let deleted = 0
+    let failed = 0
+    const errors = []
+
+    for (const id of selectedRmIds) {
+      const res = await deleteRawMaterial(id)
+      if (res.success) {
+        deleted++
+      } else {
+        failed++
+        const material = rawMaterials.find(rm => rm.id === id)
+        errors.push(`${material?.name}: ${res.error}`)
+      }
+    }
+
+    setShowBulkDeleteModal(false)
+    setSelectedRmIds(new Set())
+    loadData()
+    
+    let message = `Deleted ${deleted} raw material${deleted !== 1 ? 's' : ''}.`
+    if (failed > 0) {
+      message += `\n\nFailed to delete ${failed} item${failed !== 1 ? 's' : ''}:`
+      message += '\n' + errors.slice(0, 5).join('\n')
+      if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
+    }
+    
+    alert(message)
+    setBulkDeleting(false)
   }
 
   // Filter raw materials (products with category "Raw Material")
@@ -1523,95 +1680,88 @@ export default function ManufacturingPage() {
                 </button>
               </div>
             </div>
-            <p className="text-xs text-muted mb-4">SKU code will be auto-generated (e.g. RM-001, RM-002…)</p>
+            <p className="text-xs text-muted mb-4">Use the same columns as the import sheet. SKU is optional and will auto-generate if left blank.</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Material Name *</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">PRODUCT NAME *</label>
                 <input
                   value={rmForm.name}
                   onChange={e => setRmForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="e.g. Teak Wood Plank"
+                  placeholder="e.g. OTTER"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Cost Price per Unit (₹)</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">SIZE *</label>
                 <input
-                  type="number" min="0"
-                  value={rmForm.costPrice}
-                  onChange={e => setRmForm(f => ({ ...f, costPrice: e.target.value }))}
-                  placeholder="Purchase price per unit"
+                  value={rmForm.size}
+                  onChange={e => setRmForm(f => ({ ...f, size: e.target.value }))}
+                  placeholder="e.g. 1 inch (square)"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Stock Quantity</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">brand</label>
                 <input
-                  type="number" min="0"
-                  value={rmForm.stockQuantity}
-                  onChange={e => setRmForm(f => ({ ...f, stockQuantity: e.target.value }))}
-                  placeholder="Number of units/rolls/pieces"
+                  value={rmForm.brand}
+                  onChange={e => setRmForm(f => ({ ...f, brand: e.target.value }))}
+                  placeholder="optional"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Measure Per Quantity</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">SKU</label>
                 <input
-                  type="number" min="0.0001" step="0.0001"
-                  value={rmForm.unitSize}
-                  onChange={e => setRmForm(f => ({ ...f, unitSize: e.target.value }))}
+                  value={rmForm.sku}
+                  onChange={e => setRmForm(f => ({ ...f, sku: e.target.value }))}
+                  placeholder="optional"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
-                <p className="text-[9px] text-muted mt-0.5">Example: if 1 roll = 4 SQM, set this to 4</p>
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Unit of Measure</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">UOM</label>
                 <select
                   value={rmForm.unitOfMeasure}
                   onChange={e => setRmForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50">
-                  <option value="PCS">PCS (Pieces)</option>
-                  <option value="KG">KG (Kilograms)</option>
-                  <option value="MTR">MTR (Meters)</option>
-                  <option value="SQM">SQM (Square Meters)</option>
-                  <option value="SQFT">SQFT (Square Feet)</option>
-                  <option value="SFT">SFT (Sq. Feet)</option>
-                  <option value="LTR">LTR (Litres)</option>
-                  <option value="SET">SET</option>
+                  <option value="PCS">PCS</option>
                   <option value="BOX">BOX</option>
-                  <option value="NOS">NOS (Numbers)</option>
+                  <option value="KG">KG</option>
+                  <option value="G">G</option>
+                  <option value="MTR">MTR</option>
+                  <option value="FT">FT</option>
+                  <option value="INCH">INCH</option>
                 </select>
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Min. Stock Alert</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Instock *</label>
                 <input
                   type="number" min="0"
-                  value={rmForm.reorderLevel}
-                  onChange={e => setRmForm(f => ({ ...f, reorderLevel: e.target.value }))}
+                  value={rmForm.instock}
+                  onChange={e => setRmForm(f => ({ ...f, instock: e.target.value }))}
+                  placeholder="1"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
-                <p className="text-[9px] text-muted mt-0.5">You&apos;ll get a &quot;Low Stock&quot; warning when stock falls to this level</p>
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Description</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Cost price</label>
                 <input
-                  value={rmForm.description}
-                  onChange={e => setRmForm(f => ({ ...f, description: e.target.value }))}
-                  placeholder="Optional notes"
+                  type="number" min="0"
+                  value={rmForm.costPrice}
+                  onChange={e => setRmForm(f => ({ ...f, costPrice: e.target.value }))}
+                  placeholder="optional"
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
-            </div>
-            <div className="mb-4">
-              <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Material Image</label>
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={e => {
-                  const file = e.target.files?.[0]
-                  if (file) setRmImages([file])
-                  e.target.value = ''
-                }}
-                className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-              {rmImages.length > 0 && (
-                <p className="text-[10px] text-muted mt-1">Selected: {rmImages[0].name}</p>
-              )}
+              <div>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Image</label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={e => {
+                    const file = e.target.files?.[0]
+                    if (file) setRmImages([file])
+                    e.target.value = ''
+                  }}
+                  className="w-full px-3 py-[7px] bg-surface border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                {rmImages.length > 0 && <p className="text-[10px] text-muted mt-1 truncate">{rmImages[0].name}</p>}
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -1623,8 +1773,7 @@ export default function ManufacturingPage() {
               </button>
               <button
                 onClick={() => {
-                  setRmForm({ name: '', costPrice: 0, stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
-                  setRmImages([])
+                  setRmForm({ name: '', size: '', brand: '', sku: '', instock: '', costPrice: '', stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
                 }}
                 className="px-4 py-2.5 text-sm text-muted hover:text-foreground transition-colors">
                 Clear Form
@@ -1632,17 +1781,28 @@ export default function ManufacturingPage() {
             </div>
           </div>
 
-          {/* Raw Materials Search */}
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-              <input
-                value={rmSearch}
-                onChange={e => setRmSearch(e.target.value)}
-                placeholder="Search raw materials by name or SKU..."
-                className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+          {/* Raw Materials Search & Bulk Delete Button */}
+          <div className="flex items-center gap-3 flex-wrap justify-between">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+                <input
+                  value={rmSearch}
+                  onChange={e => setRmSearch(e.target.value)}
+                  placeholder="Search raw materials by name or SKU..."
+                  className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+              </div>
+              <span className="text-xs text-muted">{rawMaterials.length} material{rawMaterials.length !== 1 ? 's' : ''}</span>
             </div>
-            <span className="text-xs text-muted">{rawMaterials.length} material{rawMaterials.length !== 1 ? 's' : ''}</span>
+            {selectedRmIds.size > 0 && (
+              <button
+                onClick={() => setShowBulkDeleteModal(true)}
+                disabled={bulkDeleting}
+                className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50">
+                <Trash2 className="w-4 h-4" />
+                Delete {selectedRmIds.size} Item{selectedRmIds.size !== 1 ? 's' : ''}
+              </button>
+            )}
           </div>
 
           {/* Raw Materials Table */}
@@ -1650,7 +1810,20 @@ export default function ManufacturingPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-surface-hover">
-                  {['SKU Code', 'Material Name', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Image', 'Status', 'Actions'].map(h => (
+                  <th className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">
+                    <input
+                      type="checkbox"
+                      checked={selectedRmIds.size > 0 && selectedRmIds.size === rawMaterials.length}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedRmIds(new Set(rawMaterials.map(rm => rm.id)))
+                        } else {
+                          setSelectedRmIds(new Set())
+                        }
+                      }}
+                      className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
+                  </th>
+                  {['SKU Code', 'Material Name', 'Size', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Image', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -1658,26 +1831,70 @@ export default function ManufacturingPage() {
               <tbody>
                 {rawMaterials.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-muted">
+                    <td colSpan={13} className="text-center py-12 text-muted">
                       {rmSearch ? 'No materials match your search' : 'No raw materials yet. Add one above to get started.'}
                     </td>
                   </tr>
                 )}
                 {rawMaterials.map(rm => (
-                  <tr key={rm.id} className="border-b border-border/50 hover:bg-surface-hover/50">
+                  <tr key={rm.id} className={`border-b border-border/50 hover:bg-surface-hover/50 ${selectedRmIds.has(rm.id) ? 'bg-accent/10' : ''}`}>
                     {editingRmId === rm.id ? (
                       <>
+                        <td className="px-4 py-3"></td>
                         <td className="px-4 py-3 text-muted font-mono text-xs">{rm.sku}</td>
                         <td className="px-4 py-3">
-                          <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
-                            className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                          <div className="space-y-1">
+                            <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
+                              className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                            <input value={rmEditForm.brand || ''} onChange={e => setRmEditForm(f => ({ ...f, brand: e.target.value }))}
+                              className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Brand" />
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <input value={rmEditForm.description || ''} onChange={e => setRmEditForm(f => ({ ...f, description: e.target.value }))}
+                            className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="e.g. 1 inch (square)" />
                         </td>
                         <td className="px-4 py-3 text-muted text-xs">₹{rm.costPrice}</td>
                         <td className="px-4 py-3">
-                          <input type="number" min="0" value={rmEditForm.stockQuantity} onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value }))}
-                            className="w-20 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                          {(() => {
+                            const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
+                            const currentQty = (Number(rm.stock) || 0) / unitSize
+                            const currentQtyLabel = Number.isInteger(currentQty) ? String(currentQty) : currentQty.toFixed(2)
+                            return (
+                              <div className="space-y-1">
+                                <p className="text-[10px] text-muted">Current: {currentQtyLabel}</p>
+                                <select
+                                  value={rmEditForm.stockAction || 'SET'}
+                                  onChange={e => setRmEditForm(f => ({ ...f, stockAction: e.target.value }))}
+                                  className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-[10px] text-foreground">
+                                  <option value="SET">Set Stock</option>
+                                  <option value="ADD">Add Stock</option>
+                                </select>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={rmEditForm.stockQuantity}
+                                  onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value, currentStockQuantity: currentQty }))}
+                                  className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground"
+                                  placeholder={rmEditForm.stockAction === 'ADD' ? 'Add Qty' : 'Stock Qty'} />
+                              </div>
+                            )
+                          })()}
                         </td>
-                        <td className="px-4 py-3 text-muted text-xs">{rm.unitOfMeasure}</td>
+                        <td className="px-4 py-3 text-muted text-xs">
+                          <select
+                            value={rmEditForm.unitOfMeasure || rm.unitOfMeasure || 'PCS'}
+                            onChange={e => setRmEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
+                            className="w-20 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground">
+                            <option value="PCS">PCS</option>
+                            <option value="BOX">BOX</option>
+                            <option value="KG">KG</option>
+                            <option value="G">G</option>
+                            <option value="MTR">MTR</option>
+                            <option value="FT">FT</option>
+                            <option value="INCH">INCH</option>
+                          </select>
+                        </td>
                         <td className="px-4 py-3">
                           <input type="number" min="0" value={rmEditForm.reorderLevel} onChange={e => setRmEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
                             className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
@@ -1716,6 +1933,21 @@ export default function ManufacturingPage() {
                       </>
                     ) : (
                       <>
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedRmIds.has(rm.id)}
+                            onChange={e => {
+                              const newSet = new Set(selectedRmIds)
+                              if (e.target.checked) {
+                                newSet.add(rm.id)
+                              } else {
+                                newSet.delete(rm.id)
+                              }
+                              setSelectedRmIds(newSet)
+                            }}
+                            className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
+                        </td>
                         {(() => {
                           const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
                           const stockQty = (Number(rm.stock) || 0) / unitSize
@@ -1725,7 +1957,13 @@ export default function ManufacturingPage() {
                           return (
                             <>
                         <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
-                        <td className="px-4 py-3 text-foreground font-medium">{rm.name}</td>
+                        <td className="px-4 py-3 text-foreground font-medium">
+                          <div>{rm.name}</div>
+                          {rm.brand && <p className="text-[10px] text-muted mt-0.5">Brand: {rm.brand}</p>}
+                        </td>
+                        <td className="px-4 py-3 text-muted text-xs">
+                          {rm.description || '—'}
+                        </td>
                         <td className="px-4 py-3 text-foreground">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</td>
                         <td className="px-4 py-3">
                           <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
@@ -1736,7 +1974,13 @@ export default function ManufacturingPage() {
                         <td className="px-4 py-3 text-muted">{rm.unitOfMeasure}</td>
                         <td className="px-4 py-3 text-muted">{rm.reorderLevel}</td>
                         <td className="px-4 py-3 text-muted text-xs">{unitSize}</td>
-                        <td className="px-4 py-3 text-muted text-xs">{rm.image ? 'Uploaded' : 'None'}</td>
+                        <td className="px-4 py-3">
+                          {rm.image ? (
+                            <img src={rm.image} alt={rm.name} className="w-8 h-8 rounded object-cover border border-border" />
+                          ) : (
+                            <span className="text-muted text-xs">None</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
                             {isLow ? '⚠ Low Stock' : '✓ In Stock'}
@@ -1749,8 +1993,12 @@ export default function ManufacturingPage() {
                                 setEditingRmId(rm.id)
                                 setRmEditForm({
                                   name: rm.name,
+                                  brand: rm.brand || '',
                                   stockQuantity: ((Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1)).toFixed(2),
+                                  currentStockQuantity: (Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1),
+                                  stockAction: 'SET',
                                   unitSize: Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1,
+                                  unitOfMeasure: rm.unitOfMeasure || 'PCS',
                                   reorderLevel: rm.reorderLevel,
                                   description: rm.description || '',
                                   image: rm.image || '',
@@ -1785,8 +2033,8 @@ export default function ManufacturingPage() {
         <div className="space-y-4">
           <div className="p-3 rounded-lg border border-border bg-surface-hover text-xs text-muted space-y-1">
             <p>Supported files: .xlsx, .xls, .csv</p>
-            <p>Required column: Material Name</p>
-            <p>Optional columns: SKU Code, Cost Price, Stock Quantity, Measure Per Quantity, Unit of Measure, Min Stock Alert, Description, Image URL</p>
+            <p>Required columns: PRODUCT NAME, Instock</p>
+            <p>Optional columns: SIZE, brand, SKU, Cost price</p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -1830,6 +2078,32 @@ export default function ManufacturingPage() {
               disabled={rmImportLoading || rmImportRows.length === 0}
               className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium disabled:opacity-50">
               {rmImportLoading ? 'Importing...' : 'Import Now'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showBulkDeleteModal} onClose={() => !bulkDeleting && setShowBulkDeleteModal(false)} title="Delete Raw Materials" size="sm">
+        <div className="space-y-4">
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30">
+            <p className="text-sm text-red-400">
+              Are you sure you want to delete <span className="font-semibold">{selectedRmIds.size}</span> raw material{selectedRmIds.size !== 1 ? 's' : ''}?
+            </p>
+            <p className="text-xs text-red-400/70 mt-2">This action cannot be undone. Materials used in BOMs or production orders cannot be deleted.</p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              onClick={() => setShowBulkDeleteModal(false)}
+              disabled={bulkDeleting}
+              className="px-4 py-2 rounded-lg text-sm text-muted hover:text-foreground disabled:opacity-50">
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="px-4 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-2">
+              <Trash2 className="w-4 h-4" />
+              {bulkDeleting ? 'Deleting...' : 'Delete All'}
             </button>
           </div>
         </div>
@@ -1989,23 +2263,58 @@ export default function ManufacturingPage() {
                 <div key={i} className="p-3 bg-surface-hover rounded-lg border border-border/60">
                   {/* Row 1: Material + delete */}
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] text-muted block mb-0.5">Material</label>
-                      <select value={item.rawMaterialId}
-                        onChange={e => {
-                          const selected = products.find(p => String(p.id) === String(e.target.value))
-                          const v = [...bomForm.items]
-                          v[i].rawMaterialId = e.target.value
-                          if (selected?.unitOfMeasure) v[i].unitOfMeasure = selected.unitOfMeasure
-                          if (selected?.costPrice) v[i].unitCost = selected.costPrice
-                          setBomForm(f => ({ ...f, items: v }))
-                        }}
-                        className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground">
-                        <option value="">— Select raw material —</option>
-                        {products.filter(p => p.category === 'Raw Material').map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-                      </select>
+                    <div className="flex-1 relative">
+                      <label className="text-[10px] text-muted block mb-0.5">Material (Search by name or SKU)</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Type material name or SKU..."
+                          value={bomItemSearch[i] || ''}
+                          onChange={e => setBomItemSearch(s => ({ ...s, [i]: e.target.value }))}
+                          className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                        />
+                        {(bomItemSearch[i] || '').length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
+                            {(() => {
+                              const search = (bomItemSearch[i] || '').toLowerCase()
+                              const filtered = products.filter(p => 
+                                p.category === 'Raw Material' && 
+                                (p.name.toLowerCase().includes(search) || p.sku.toLowerCase().includes(search))
+                              )
+                              return filtered.length > 0 ? (
+                                filtered.map(p => (
+                                  <button
+                                    key={p.id}
+                                    onClick={() => {
+                                      const v = [...bomForm.items]
+                                      v[i].rawMaterialId = p.id
+                                      if (p.unitOfMeasure) v[i].unitOfMeasure = p.unitOfMeasure
+                                      if (p.costPrice) v[i].unitCost = p.costPrice
+                                      setBomForm(f => ({ ...f, items: v }))
+                                      setBomItemSearch(s => ({ ...s, [i]: '' }))
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-accent/10 border-b border-border/30 last:border-0">
+                                    <div className="font-medium">{p.name}</div>
+                                    <div className="text-muted text-[10px]">SKU: {p.sku} • UOM: {p.unitOfMeasure}</div>
+                                  </button>
+                                ))
+                              ) : (
+                                <div className="px-3 py-2 text-xs text-muted">No materials found</div>
+                              )
+                            })()}
+                          </div>
+                        )}
+                        {item.rawMaterialId && !bomItemSearch[i] && (
+                          <div className="text-xs text-muted mt-1">
+                            Selected: {products.find(p => String(p.id) === String(item.rawMaterialId))?.name} ({products.find(p => String(p.id) === String(item.rawMaterialId))?.sku})
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <button onClick={() => setBomForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))}
+                    <button onClick={() => {
+                      setBomForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))
+                      setBomItemSearch(s => ({ ...s, [i]: '' }))
+                    }}
                       className="mt-4 p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded">×</button>
                   </div>
                   {/* Row 2: Qty + UoM + Wastage */}

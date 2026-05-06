@@ -876,6 +876,8 @@ export async function moveProductToDraft(productId: number) {
   }
 
   await prisma.$transaction([
+    prisma.stockLedger.deleteMany({ where: { productId } }),
+    prisma.godownStock.deleteMany({ where: { productId } }),
     prisma.draft.create({
       data: {
         sourceType: 'Product',

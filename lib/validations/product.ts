@@ -9,6 +9,7 @@ export const createProductSchema = z.object({
   stock: z.number().min(0).default(0),
   reorderLevel: z.number().min(0).default(5),
   material: z.string().optional(),
+  brand: z.string().optional(),
   color: z.string().optional(),
   description: z.string().optional(),
   warehouse: z.string().optional(),
