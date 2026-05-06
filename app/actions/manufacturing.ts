@@ -889,9 +889,21 @@ export async function completeProduction(data: unknown) {
     for (const c of consumptions) {
       const planned = order.consumptions.find(oc => oc.rawMaterialId === c.rawMaterialId)
       const materialScrapQty = c.scrapQty || 0
-      const consumedFromStock = roundQty(c.actualQty + materialScrapQty)
-      const returnedQty = planned ? Math.max(0, roundQty(planned.plannedQty - consumedFromStock)) : 0
-      const cost = planned ? Math.round(consumedFromStock * planned.unitCost) : 0
+      const issuedQty = roundQty(c.issuedQty || 0)  // Use issued instead of planned
+      const actualQtyRounded = roundQty(c.actualQty || 0)
+      const totalConsumedAndScrap = roundQty(actualQtyRounded + materialScrapQty)
+      
+      // Calculate returned: issued - actual - scrap
+      const returnedQty = Math.max(0, roundQty(issuedQty - totalConsumedAndScrap))
+      
+      // Detect over-consumption: if actual + scrap > issued
+      const isOverConsumed = totalConsumedAndScrap > issuedQty
+      
+      // Stock deduction: always use what was actually consumed + scrapped, but if over-consumed, adjust
+      const consumedFromStock = isOverConsumed ? totalConsumedAndScrap : issuedQty
+      
+      // Cost calculation based on actual consumption + scrap
+      const cost = planned ? Math.round(totalConsumedAndScrap * planned.unitCost) : 0
       totalMaterialCost += cost
 
       await adjustManufacturingStockWithTx(tx, c.rawMaterialId, -consumedFromStock, 'PRODUCTION', {
@@ -904,9 +916,11 @@ export async function completeProduction(data: unknown) {
         await tx.materialConsumption.update({
           where: { id: planned.id },
           data: {
-            actualQty: c.actualQty,
+            issuedQty,
+            actualQty: actualQtyRounded,
             scrapQty: materialScrapQty,
             returnedQty,
+            isOverConsumed,
             scrapReason: c.scrapReason,
             totalCost: cost,
           },

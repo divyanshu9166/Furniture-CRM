@@ -1501,9 +1501,11 @@ model MaterialConsumption {
   rawMaterialId     Int
   rawMaterial       Product         @relation("MaterialConsumed", fields: [rawMaterialId], references: [id])
   plannedQty        Float
-  actualQty         Float           @default(0)
-  scrapQty          Float           @default(0)
-  returnedQty       Float           @default(0)
+  issuedQty         Float           @default(0)  // How much was issued to production floor
+  actualQty         Float           @default(0)  // How much was actually consumed
+  scrapQty          Float           @default(0)  // How much was scrapped/wasted
+  returnedQty       Float           @default(0)  // (issuedQty - actualQty - scrapQty)
+  isOverConsumed    Boolean         @default(false)  // Flag if actualQty + scrapQty > issuedQty
   scrapReason       String?
   unitCost          Int             @default(0)
   totalCost         Int             @default(0)

@@ -59,6 +59,7 @@ export const completeProductionSchema = z.object({
   notes: z.string().optional(),
   consumptions: z.array(z.object({
     rawMaterialId: z.number(),
+    issuedQty: z.number().min(0).default(0),  // Qty issued to production floor
     actualQty: z.number().min(0),
     scrapQty: z.number().min(0).default(0),
     scrapReason: z.string().optional(),

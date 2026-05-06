@@ -401,7 +401,7 @@ export default function ManufacturingPage() {
       machineCost: 0,
       scrapQty: 0, scrapReason: '',
       qualityStatus: 'PASSED', qualityNotes: '', notes: '',
-      consumptions: order.consumptions?.map(c => ({ rawMaterialId: c.rawMaterialId, plannedQty: c.plannedQty, actualQty: c.plannedQty, scrapQty: 0, scrapReason: '' })) || [],
+      consumptions: order.consumptions?.map(c => ({ rawMaterialId: c.rawMaterialId, plannedQty: c.plannedQty, issuedQty: c.plannedQty, actualQty: c.plannedQty, scrapQty: 0, scrapReason: '' })) || [],
       stepActuals,
     })
     setSelectedOrder(order)
@@ -419,6 +419,7 @@ export default function ManufacturingPage() {
       scrapQty: Number(completeForm.scrapQty),
       consumptions: completeForm.consumptions.map(c => ({
         rawMaterialId: c.rawMaterialId,
+        issuedQty: Number(c.issuedQty) || 0,
         actualQty: Number(c.actualQty),
         scrapQty: Number(c.scrapQty) || 0,
         scrapReason: c.scrapReason || undefined,
@@ -2323,25 +2324,50 @@ export default function ManufacturingPage() {
 
           {completeForm.consumptions.length > 0 && (
             <div>
-              <label className="text-xs font-medium text-muted uppercase tracking-wide mb-2 block">Actual Material Consumption</label>
-              <div className="space-y-2">
+              <label className="text-xs font-medium text-muted uppercase tracking-wide mb-2 block">Material Consumption Tracking</label>
+              <div className="space-y-3">
                 {completeForm.consumptions.map((c, i) => {
                   const prod = products.find(p => p.id === c.rawMaterialId)
-                  const returned = Math.max(0, Number(c.plannedQty || 0) - Number(c.actualQty || 0) - Number(c.scrapQty || 0))
+                  const issuedQty = Number(c.issuedQty || 0)
+                  const actualQty = Number(c.actualQty || 0)
+                  const scrapQty = Number(c.scrapQty || 0)
+                  const totalConsumed = actualQty + scrapQty
+                  const returnedQty = Math.max(0, issuedQty - totalConsumed)
+                  const isOverConsumed = totalConsumed > issuedQty
+                  const overConsumption = isOverConsumed ? totalConsumed - issuedQty : 0
+                  
                   return (
-                    <div key={i} className="grid grid-cols-12 gap-2 items-center p-2 bg-surface-hover rounded-lg">
-                      <span className="col-span-12 sm:col-span-3 text-sm text-foreground">{prod?.name || `Material #${c.rawMaterialId}`}</span>
-                      <span className="col-span-3 sm:col-span-2 text-xs text-muted">Plan {Number(c.plannedQty).toFixed(2)} {prod?.unitOfMeasure}</span>
-                      <div className="col-span-3 sm:col-span-2">
-                        <label className="text-[10px] text-muted block mb-0.5">Used</label>
-                        <input type="number" min="0" step="0.01" value={c.actualQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].actualQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                    <div key={i} className={`p-3 rounded-lg border transition-colors ${
+                      isOverConsumed ? 'bg-red-500/10 border-red-500/30' : 'bg-surface-hover border-border'
+                    }`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-foreground">{prod?.name || `Material #${c.rawMaterialId}`}</span>
+                        {isOverConsumed && <span className="text-xs font-semibold text-red-400 bg-red-500/20 px-2 py-1 rounded">⚠ Over-consumed by {overConsumption.toFixed(2)}</span>}
                       </div>
-                      <div className="col-span-3 sm:col-span-2">
-                        <label className="text-[10px] text-muted block mb-0.5">Scrap</label>
-                        <input type="number" min="0" step="0.01" value={c.scrapQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                      <div className="grid grid-cols-12 gap-2 items-end">
+                        <div className="col-span-3">
+                          <label className="text-[10px] text-muted block mb-0.5">Planned</label>
+                          <div className="px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-muted">{Number(c.plannedQty || 0).toFixed(2)}</div>
+                        </div>
+                        <div className="col-span-3">
+                          <label className="text-[10px] text-muted block mb-0.5">Issued to Floor</label>
+                          <input type="number" min="0" step="0.01" value={c.issuedQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].issuedQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-muted block mb-0.5">Consumed</label>
+                          <input type="number" min="0" step="0.01" value={c.actualQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].actualQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[10px] text-muted block mb-0.5">Scrap</label>
+                          <input type="number" min="0" step="0.01" value={c.scrapQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
+                        </div>
+                        <div className={`col-span-2 text-center px-2 py-1.5 rounded-lg text-xs font-semibold ${
+                          isOverConsumed ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
+                        }`}>
+                          {isOverConsumed ? `Over: ${overConsumption.toFixed(2)}` : `Return: ${returnedQty.toFixed(2)}`}
+                        </div>
                       </div>
-                      <span className="col-span-3 sm:col-span-1 text-xs text-emerald-400">Return {returned.toFixed(2)}</span>
-                      <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Reason" className="col-span-12 sm:col-span-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
+                      <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Scrap reason..." className="w-full col-span-12 mt-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                     </div>
                   )
                 })}
