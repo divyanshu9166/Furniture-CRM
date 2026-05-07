@@ -1573,6 +1573,7 @@ export default function ManufacturingPage() {
               {[
                 { label: 'Total Material Cost', value: completedOrders.reduce((s, o) => s + (o.totalMaterialCost || 0), 0) },
                 { label: 'Total Labour Cost', value: completedOrders.reduce((s, o) => s + (o.totalLabourCost || 0), 0) },
+                { label: 'Total Machine Cost', value: completedOrders.reduce((s, o) => s + (o.machineCost || 0), 0) },
                 { label: 'Total Other Expenses', value: completedOrders.reduce((s, o) => s + (o.overheadCost || 0), 0) },
                 { label: 'Total Manufacturing Cost', value: completedOrders.reduce((s, o) => s + (o.totalCost || 0), 0) },
               ].map((s, i) => (
@@ -1603,6 +1604,7 @@ export default function ManufacturingPage() {
                 {[
                   { label: 'Material Cost', value: o.totalMaterialCost || 0 },
                   { label: 'Labour Cost', value: o.totalLabourCost || 0 },
+                  { label: 'Machine Cost', value: o.machineCost || 0 },
                   { label: 'Other Expenses', value: o.overheadCost || 0 },
                   { label: 'Total Cost', value: o.totalCost || 0 },
                   { label: 'Cost/Unit', value: o.costPerUnit || 0 },
@@ -2177,6 +2179,7 @@ export default function ManufacturingPage() {
                 {[
                   ['Material', selectedOrder.totalMaterialCost],
                   ['Labour', selectedOrder.totalLabourCost],
+                  ['Machine', selectedOrder.machineCost],
                   ['Other Expenses', selectedOrder.overheadCost],
                   ['Total', selectedOrder.totalCost],
                 ].map(([l, v]) => (

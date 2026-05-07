@@ -1455,8 +1455,9 @@ model ProductionOrder {
   cancelReason       String?
   totalMaterialCost  Int             @default(0)
   totalLabourCost    Int             @default(0)
-  overheadCost       Int             @default(0) // electricity, tool wear, etc.
-  totalCost          Int             @default(0) // material + labour + overhead
+  machineCost        Int             @default(0)
+  overheadCost       Int             @default(0) // other expenses, etc.
+  totalCost          Int             @default(0) // material + labour + machine + overhead
   costPerUnit        Int             @default(0)
   standardMins       Int             @default(0)
   actualMins         Int             @default(0)

@@ -1076,7 +1076,8 @@ export async function completeProduction(data: unknown) {
         actualQty,
         totalMaterialCost,
         totalLabourCost: roundedLabourCost,
-        overheadCost: (machineCost ?? 0) + overheadCost, // store combined overhead
+        machineCost: machineCost ?? 0,
+        overheadCost, // other expenses
         totalCost,
         costPerUnit,
         actualMins: refreshedOrder?.actualMins || 0,
