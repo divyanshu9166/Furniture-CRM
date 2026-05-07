@@ -46,6 +46,8 @@ services:
       R2_BUCKET_NAME: "${R2_BUCKET_NAME:-furniture-crm}"
       R2_PUBLIC_URL: "${R2_PUBLIC_URL}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      # Explicit upload path — process.cwd() in standalone builds ≠ /app
+      UPLOAD_DIR: "/app/uploads"
     depends_on:
       db:
         condition: service_healthy

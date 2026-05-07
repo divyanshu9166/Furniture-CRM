@@ -549,10 +549,12 @@ export async function getMRPAnalysis(bomId: number, qty: number) {
 
 // ─── PRODUCTION ORDERS ───────────────────────────────
 
+const PRIORITY_SORT: Record<string, number> = { CRITICAL: 1, HIGH: 2, NORMAL: 3 }
+
 export async function getProductionOrders() {
   unstable_noStore()
   const orders = await prisma.productionOrder.findMany({
-    orderBy: [{ status: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
     include: {
       bom: {
         select: {
@@ -581,12 +583,21 @@ export async function getProductionOrders() {
   })
   return {
     success: true,
-    data: orders.map(order => {
-      const standardMins = order.standardMins || order.productionSteps.reduce((sum, step) => sum + (step.plannedMins || 0), 0)
-      const actualMins = order.actualMins || order.productionSteps.reduce((sum, step) => sum + getActualStepMins(step), 0)
-      const labourVarianceMins = actualMins > 0 ? actualMins - standardMins : order.labourVarianceMins
-      return { ...order, standardMins, actualMins, labourVarianceMins }
-    }),
+    data: orders
+      .map(order => {
+        const standardMins = order.standardMins || order.productionSteps.reduce((sum, step) => sum + (step.plannedMins || 0), 0)
+        const actualMins = order.actualMins || order.productionSteps.reduce((sum, step) => sum + getActualStepMins(step), 0)
+        const labourVarianceMins = actualMins > 0 ? actualMins - standardMins : order.labourVarianceMins
+        return { ...order, standardMins, actualMins, labourVarianceMins }
+      })
+      // Sort: CRITICAL → HIGH → NORMAL, then by due date
+      .sort((a, b) => {
+        const pa = PRIORITY_SORT[a.priority] ?? 9
+        const pb = PRIORITY_SORT[b.priority] ?? 9
+        if (pa !== pb) return pa - pb
+        if (a.dueDate && b.dueDate) return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+        return 0
+      }),
   }
 }
 
@@ -803,15 +814,42 @@ export async function holdProduction(id: number) {
 
 export async function cancelProductionOrder(id: number, reason: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  const order = await prisma.productionOrder.findUnique({ where: { id } })
+  const order = await prisma.productionOrder.findUnique({
+    where: { id },
+    include: {
+      consumptions: {
+        select: { rawMaterialId: true, issuedQty: true, rawMaterial: { select: { name: true } } },
+      },
+    },
+  })
   if (!order) return { success: false, error: 'Order not found' }
   if (order.status === 'COMPLETED') return { success: false, error: 'Cannot cancel a completed order' }
 
-  await prisma.productionOrder.update({
-    where: { id },
-    data: { status: 'CANCELLED', cancelReason: reason, cancelledDate: new Date() },
+  await prisma.$transaction(async (tx) => {
+    // If materials were already issued (order was IN_PROGRESS or ON_HOLD),
+    // return them back to stock — industry standard for order cancellation.
+    if ((order.status === 'IN_PROGRESS' || order.status === 'ON_HOLD') && order.consumptions.length > 0) {
+      for (const c of order.consumptions) {
+        const issued = roundQty(c.issuedQty || 0)
+        if (issued > 0) {
+          await adjustManufacturingStockWithTx(tx, c.rawMaterialId, issued, 'RETURN', {
+            referenceType: 'Production',
+            referenceId: id,
+            notes: `Material returned — order ${order.displayId} cancelled`,
+            createdBy: 'Manufacturing',
+          })
+        }
+      }
+    }
+
+    await tx.productionOrder.update({
+      where: { id },
+      data: { status: 'CANCELLED', cancelReason: reason, cancelledDate: new Date() },
+    })
   })
+
   revalidatePath('/manufacturing')
+  revalidatePath('/inventory')
   return { success: true }
 }
 
@@ -996,7 +1034,9 @@ export async function completeProduction(data: unknown) {
     const roundedLabourCost = Math.round(effectiveLabourCost)
     const totalCost = totalMaterialCost + roundedLabourCost + (machineCost ?? 0) + overheadCost
     const costPerUnit = actualQty > 0 ? Math.round(totalCost / actualQty) : 0
-    const yieldRate = order.plannedQty > 0 ? Math.round((actualQty / order.plannedQty) * 100 * 10) / 10 : 0
+    // Yield = good units / planned (good units = actual produced minus scrapped defects)
+    const goodUnits = Math.max(0, actualQty - scrapQty)
+    const yieldRate = order.plannedQty > 0 ? Math.round((goodUnits / order.plannedQty) * 100 * 10) / 10 : 0
 
     if (costPerUnit > 0 && !order.customOrderId) {
       await tx.product.update({
@@ -1194,13 +1234,8 @@ export async function getManufacturingStats() {
 
 export async function getStaffProductionOrders(staffId: number) {
   const orders = await prisma.productionOrder.findMany({
-    where: {
-      OR: [
-        { assignedStaffId: staffId },
-        { assignedTo: { not: null } },
-      ],
-    },
-    orderBy: [{ priority: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
+    where: { assignedStaffId: staffId },  // Only fetch orders assigned to THIS staff
+    orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
     include: {
       bom: {
         select: {
@@ -1229,13 +1264,10 @@ export async function getStaffProductionOrders(staffId: number) {
     },
   })
 
-  // Filter to only orders actually assigned to this staff (by ID)
-  const staffOrders = orders.filter(o => o.assignedStaffId === staffId)
-
   // Normalize customOrder to expose customer name cleanly
   return {
     success: true,
-    data: staffOrders.map(o => ({
+    data: orders.map(o => ({
       ...o,
       customOrder: o.customOrder
         ? { ...o.customOrder, customer: o.customOrder.contact?.name || o.customOrder.displayId }

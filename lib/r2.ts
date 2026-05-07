@@ -36,6 +36,13 @@ function getR2Config() {
 
 // ─── Local filesystem fallback (when R2 is not configured) ───────────
 
+// In Next.js standalone builds, process.cwd() resolves to .next/standalone/
+// NOT the project root. We use UPLOAD_DIR env var (set in docker-compose)
+// so files always land in the Docker volume mount at /app/uploads.
+function getUploadsRoot(): string {
+  return process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
+}
+
 async function uploadFileLocal(
   file: Buffer,
   fileName: string,
@@ -43,8 +50,7 @@ async function uploadFileLocal(
 ): Promise<string> {
   const ext = fileName.split('.').pop() || 'bin'
   const uniqueName = `${randomUUID()}.${ext}`
-  // Store in ./uploads/ (not public/) — served via /api/uploads/[...path] route
-  const dir = join(process.cwd(), 'uploads', folder)
+  const dir = join(getUploadsRoot(), folder)
   await mkdir(dir, { recursive: true })
   const filePath = join(dir, uniqueName)
   await writeFile(filePath, file)
@@ -54,7 +60,7 @@ async function uploadFileLocal(
 async function deleteFileLocal(key: string): Promise<void> {
   // key looks like "/api/uploads/products/uuid.jpg"
   const relativePath = key.replace(/^\/api\/uploads\//, '')
-  const filePath = join(process.cwd(), 'uploads', relativePath)
+  const filePath = join(getUploadsRoot(), relativePath)
   try {
     await unlink(filePath)
   } catch {

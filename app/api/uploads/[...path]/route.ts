@@ -12,8 +12,10 @@ const MIME_TYPES: Record<string, string> = {
   '.pdf': 'application/pdf',
 }
 
-// Serves files from the ./uploads directory (outside public/)
-// This works in both dev and standalone production mode.
+// In standalone Next.js builds, process.cwd() ≠ /app — use UPLOAD_DIR env var
+const UPLOADS_ROOT = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
+
+// Serves files from the uploads directory
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -26,7 +28,7 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
   }
 
-  const filePath = join(process.cwd(), 'uploads', relativePath)
+  const filePath = join(UPLOADS_ROOT, relativePath)
 
   try {
     const fileStat = await stat(filePath)
