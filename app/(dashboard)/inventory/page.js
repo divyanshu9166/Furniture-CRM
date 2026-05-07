@@ -465,13 +465,15 @@ export default function InventoryPage() {
               <Upload className="w-4 h-4" /> Bulk Import
             </button>
           )}
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            {tab === 'products' && productType === 'rawMaterial' ? 'Add Raw Material' : 'Add Product'}
-          </button>
+          {!(tab === 'products' && productType === 'rawMaterial') && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Add Product
+            </button>
+          )}
         </div>
       </div>
 
@@ -616,13 +618,15 @@ export default function InventoryPage() {
                         <span className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-accent/90 text-white">RAW MAT</span>
                       )}
                       <span className="absolute top-2 right-12 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
-                   <button
-                      onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
-                      className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
-                      title="Edit Product"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
+                   {!product.isRawMaterial && (
+                     <button
+                        onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
+                        className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
+                        title="Edit Product"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                   )}
                       <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="absolute top-2 right-2 p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -675,7 +679,7 @@ export default function InventoryPage() {
                   </p>
                   <p className="text-xs text-muted mt-1">
                     {productType === 'rawMaterial'
-                      ? 'Click “Add Raw Material” to add your first raw material for manufacturing.'
+                      ? 'Add raw materials from the Manufacturing module.'
                       : 'Click “Add Product” to add your first product.'}
                   </p>
                 </div>
@@ -749,9 +753,11 @@ export default function InventoryPage() {
                               <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
                                 Update Stock
                               </button>
-                              <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
-                                <Pencil className="w-3 h-3" /> Edit
-                              </button>
+                              {!product.isRawMaterial && (
+                                <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                  <Pencil className="w-3 h-3" /> Edit
+                                </button>
+                              )}
                               <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
