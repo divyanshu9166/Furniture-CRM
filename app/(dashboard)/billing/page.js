@@ -539,9 +539,28 @@ export default function BillingPage() {
     URL.revokeObjectURL(url);
   };
 
+  // ─── html2pdf LOADER (loads once into main document — works on iOS/Android) ─
+
+  const loadHtml2Pdf = () => new Promise((resolve, reject) => {
+    if (window.html2pdf) { resolve(window.html2pdf); return; }
+    const existing = document.querySelector('script[data-html2pdf]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.html2pdf));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.setAttribute('data-html2pdf', '1');
+    script.onload  = () => resolve(window.html2pdf);
+    script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
+    document.head.appendChild(script);
+  });
+
   // ─── PRINT INVOICE ─────────────────────────────────────
 
   const handlePrintInvoice = (inv) => {
+
     const store = storeSettings || {};
     const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
     const printContent = `
@@ -684,54 +703,35 @@ export default function BillingPage() {
         ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
         <div class="footer">Thank you for your purchase!</div>
       </div>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-      <script>
-        window.onload = () => {
-          setTimeout(() => {
-            const element = document.querySelector('.invoice-container') || document.body;
-            const opt = {
-              margin: 0.2,
-              filename: 'Invoice_${inv.id}.pdf',
-              image: { type: 'jpeg', quality: 0.98 },
-              html2canvas: { scale: 2, useCORS: true },
-              jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-            };
-            html2pdf().set(opt).from(element).save().then(() => {
-              window.parent.postMessage('pdf_download_complete_invoice', '*');
-            });
-          }, 800);
-        };
-      </script>
       </body></html>`;
 
-    const downloadFrame = document.createElement('iframe');
-    downloadFrame.style.position = 'fixed';
-    downloadFrame.style.left = '-9999px';
-    downloadFrame.style.width = '900px';
-    downloadFrame.style.height = '1200px';
-    downloadFrame.style.border = '0';
-    
-    document.body.appendChild(downloadFrame);
-    downloadFrame.contentWindow.document.open();
-    downloadFrame.contentWindow.document.write(printContent);
-    downloadFrame.contentWindow.document.close();
+    // Use div in main document (not iframe) — works on iOS Safari & Android Chrome
+    loadHtml2Pdf().then(html2pdf => {
+      const container = document.createElement('div');
+      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:900px;background:#fff;z-index:-1;';
+      container.innerHTML = printContent;
+      document.body.appendChild(container);
 
-    const handleMessage = (e) => {
-      if (e.data === 'pdf_download_complete_invoice') {
-        if (document.body.contains(downloadFrame)) document.body.removeChild(downloadFrame);
-        window.removeEventListener('message', handleMessage);
-      }
-    };
-    window.addEventListener('message', handleMessage);
+      const element = container.querySelector('.invoice-container') || container;
+      const opt = {
+        margin: 0.2,
+        filename: `Invoice_${inv.id}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+      };
 
-    // Fallback cleanup
-    setTimeout(() => {
-      if (document.body.contains(downloadFrame)) {
-        document.body.removeChild(downloadFrame);
-        window.removeEventListener('message', handleMessage);
-      }
-    }, 15000);
+      html2pdf().set(opt).from(element).save().then(() => {
+        document.body.removeChild(container);
+      }).catch(() => {
+        document.body.removeChild(container);
+      });
+    }).catch(() => {
+      // Fallback: open print dialog
+      handlePrintInvoice(inv);
+    });
   };
+
 
   const handleShareInvoiceWhatsApp = (inv) => {
     if (!inv?.phone) {

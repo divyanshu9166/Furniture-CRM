@@ -1083,56 +1083,54 @@ export default function QuotationsPage() {
     }, 300)
   }
 
-  const handleDownload = quotation => {
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.width = '900px';
-    iframe.style.height = '1200px';
-    iframe.style.left = '-9999px';
-    document.body.appendChild(iframe);
+  // Loads html2pdf.js once into the main document (safe for all browsers including iOS)
+  const loadHtml2Pdf = () => new Promise((resolve, reject) => {
+    if (window.html2pdf) { resolve(window.html2pdf); return; }
+    const existing = document.querySelector('script[data-html2pdf]');
+    if (existing) {
+      // Already loading — wait for it
+      existing.addEventListener('load', () => resolve(window.html2pdf));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+    script.setAttribute('data-html2pdf', '1');
+    script.onload  = () => resolve(window.html2pdf);
+    script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
+    document.head.appendChild(script);
+  });
 
-    const htmlContent = buildPrintHtml(quotation, storeSettings);
-    
-    iframe.contentWindow.document.open();
-    iframe.contentWindow.document.write(`
-      ${htmlContent}
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-      <script>
-        window.onload = () => {
-          setTimeout(() => {
-            const element = document.querySelector('.sheet') || document.body;
-            const opt = {
-              margin: 0,
-              filename: 'Quotation_${quotation.id}.pdf',
-              image: { type: 'jpeg', quality: 0.98 },
-              html2canvas: { scale: 2, useCORS: true },
-              jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-            };
-            html2pdf().set(opt).from(element).save().then(() => {
-              window.parent.postMessage('pdf_download_complete_quotation', '*');
-            });
-          }, 800);
-        };
-      </script>
-    `);
-    iframe.contentWindow.document.close();
+  const handleDownload = async (quotation) => {
+    try {
+      const html2pdf = await loadHtml2Pdf();
 
-    const handleMessage = (e) => {
-      if (e.data === 'pdf_download_complete_quotation') {
-        if (document.body.contains(iframe)) document.body.removeChild(iframe);
-        window.removeEventListener('message', handleMessage);
-      }
-    };
-    window.addEventListener('message', handleMessage);
+      // Render into a hidden div in the MAIN document (not an iframe)
+      // This avoids all iframe sandboxing and cross-origin restrictions on mobile
+      const container = document.createElement('div');
+      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:900px;background:#fff;z-index:-1;';
+      container.innerHTML = buildPrintHtml(quotation, storeSettings);
+      document.body.appendChild(container);
 
-    // Fallback cleanup
-    setTimeout(() => {
-      if (document.body.contains(iframe)) {
-        document.body.removeChild(iframe);
-        window.removeEventListener('message', handleMessage);
-      }
-    }, 15000);
+      const element = container.querySelector('.sheet') || container;
+      const opt = {
+        margin: 0,
+        filename: `Quotation_${quotation.id}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
+      };
+
+      await html2pdf().set(opt).from(element).save();
+      document.body.removeChild(container);
+    } catch (err) {
+      console.error('PDF download failed:', err);
+      // Graceful fallback: open print dialog (works on all mobile browsers)
+      handlePrint(quotation);
+    }
   }
+
+
 
   const handleShareQuotationWhatsApp = (quotation) => {
     if (!quotation?.phone) {

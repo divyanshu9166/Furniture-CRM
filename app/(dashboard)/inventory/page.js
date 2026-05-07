@@ -176,19 +176,19 @@ export default function InventoryPage() {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
         const data = await res.json();
         if (!res.ok || !data?.success) throw new Error(data?.error || 'Image upload failed');
-        imageUrl = Array.isArray(data.urls) ? data.urls.join(',') : imageUrl;
+        imageUrl = Array.isArray(data.urls) && data.urls.length > 0 ? data.urls[0] : imageUrl;
       }
 
       const updateData = {
         name: editForm.name,
-        price: Number(editForm.price),
-        costPrice: Number(editForm.costPrice),
-        reorderLevel: Number(editForm.reorderLevel),
-        material: editForm.material,
-        color: editForm.color,
-        description: editForm.description,
-        brand: editForm.brand,
-        unitOfMeasure: editForm.unitOfMeasure,
+        price: Number(editForm.price) || 0,
+        costPrice: Number(editForm.costPrice) || 0,
+        reorderLevel: Number(editForm.reorderLevel) || 0,
+        material: editForm.material || '',
+        color: editForm.color || '',
+        description: editForm.description || '',
+        brand: editForm.brand || '',
+        unitOfMeasure: editForm.unitOfMeasure || 'PCS',
         image: imageUrl,
       };
 
@@ -197,11 +197,13 @@ export default function InventoryPage() {
       if (!res.success) throw new Error(res.error || 'Update failed');
 
       await refreshProducts();
-      notify('Product updated successfully!', { variant: 'success' });
+      notify('Updated successfully!', { variant: 'success' });
       setShowEditModal(false);
       setEditProduct(null);
     } catch (err) {
-      setEditError(err.message || 'Failed to update product');
+      const msg = err.message || 'Failed to update';
+      setEditError(msg);
+      notify(msg, { variant: 'danger' });
     }
     setEditSaving(false);
   };
@@ -538,11 +540,7 @@ export default function InventoryPage() {
                 }`}>{rawMaterials.length}</span>
               </button>
             </div>
-            {productType === 'rawMaterial' && (
-              <span className="text-[10px] text-accent font-medium px-2 py-1 bg-accent/10 border border-accent/20 rounded-lg">
-                Raw materials are used in manufacturing — not sold directly
-              </span>
-            )}
+
           </div>
 
           {/* Stats */}
@@ -1265,8 +1263,12 @@ export default function InventoryPage() {
               const uploadData = await uploadRes.json();
               if (uploadData.success && uploadData.urls.length > 0) {
                 imageUrl = uploadData.urls.join(',');
+              } else if (uploadData.error) {
+                notify(uploadData.error, { variant: 'danger' });
               }
-            } catch (err) { console.error('Image upload failed:', err); }
+            } catch (err) {
+              notify('Image upload failed — product will be saved without image.', { variant: 'warning' });
+            }
           }
           const selectedGodownId = f.godownId?.value ? Number(f.godownId.value) : undefined;
           const res = await createProduct({

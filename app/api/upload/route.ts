@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { uploadFile } from '@/lib/r2'
 
-const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const ALLOWED_TYPES = [
+  'image/jpeg', 'image/jpg',  // Standard JPEG (jpeg = jpg, but browsers may report either)
+  'image/png',
+  'image/webp',
+  'image/heic', 'image/heif', // iPhone default photo format
+  'image/gif',
+]
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
 export async function POST(req: NextRequest) {
