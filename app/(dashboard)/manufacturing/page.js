@@ -1753,7 +1753,7 @@ export default function ManufacturingPage() {
                 <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Image</label>
                 <input
                   type="file"
-                  accept="image/jpeg,image/png,image/webp"
+                  accept="image/*"
                   onChange={e => {
                     const file = e.target.files?.[0]
                     if (file) setRmImages([file])
@@ -1807,7 +1807,8 @@ export default function ManufacturingPage() {
 
           {/* Raw Materials Table */}
           <div className="glass-card overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[1000px]">
               <thead>
                 <tr className="border-b border-border bg-surface-hover">
                   <th className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">
@@ -1906,7 +1907,7 @@ export default function ManufacturingPage() {
                         <td className="px-4 py-3">
                           <input
                             type="file"
-                            accept="image/jpeg,image/png,image/webp"
+                            accept="image/*"
                             onChange={e => {
                               const file = e.target.files?.[0]
                               if (file) setRmEditImages([file])
@@ -2025,6 +2026,7 @@ export default function ManufacturingPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
