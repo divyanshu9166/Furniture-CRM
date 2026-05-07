@@ -876,8 +876,8 @@ export default function QuotationsPage() {
     const file = files?.[0]
     if (!file) return
 
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      notify('Please upload a JPG, PNG, or WebP image', { variant: 'danger' })
+    if (!file.type.startsWith('image/')) {
+      notify('Please upload a valid image file', { variant: 'danger' })
       return
     }
     if (file.size > 5 * 1024 * 1024) {
@@ -914,6 +914,27 @@ export default function QuotationsPage() {
     } catch (error) {
       console.error(error)
       notify('QR upload failed. Please try again.', { variant: 'danger' })
+    } finally {
+      setUploadingPaymentQr(false)
+    }
+  }
+
+  const handleDeletePaymentQr = async () => {
+    if (!confirm('Are you sure you want to remove the Payment QR code?')) return
+
+    setUploadingPaymentQr(true)
+    try {
+      const saveRes = await updateStoreSettings({ paymentQr: null })
+      if (!saveRes?.success) {
+        notify(saveRes?.error || 'Failed to remove payment QR', { variant: 'danger' })
+        return
+      }
+
+      setStoreSettings(prev => ({ ...(prev || {}), paymentQr: '' }))
+      notify('Payment QR removed successfully', { variant: 'success' })
+    } catch (error) {
+      console.error(error)
+      notify('Failed to remove QR. Please try again.', { variant: 'danger' })
     } finally {
       setUploadingPaymentQr(false)
     }
@@ -1556,7 +1577,7 @@ export default function QuotationsPage() {
                     {uploadingPaymentQr ? 'Uploading...' : storeSettings?.paymentQr ? 'Change QR' : 'Upload QR'}
                     <input
                       type="file"
-                      accept="image/jpeg,image/png,image/webp"
+                      accept="image/*"
                       className="hidden"
                       disabled={uploadingPaymentQr}
                       onChange={e => {
@@ -1565,6 +1586,16 @@ export default function QuotationsPage() {
                       }}
                     />
                   </label>
+                  {storeSettings?.paymentQr && (
+                    <button
+                      type="button"
+                      onClick={handleDeletePaymentQr}
+                      disabled={uploadingPaymentQr}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-danger/20 text-xs text-danger hover:bg-danger/10 transition-colors"
+                    >
+                      Remove QR
+                    </button>
+                  )}
                 </div>
 
                 {storeSettings?.paymentQr ? (
