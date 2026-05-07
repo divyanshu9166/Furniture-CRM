@@ -1573,7 +1573,7 @@ export default function ManufacturingPage() {
               {[
                 { label: 'Total Material Cost', value: completedOrders.reduce((s, o) => s + (o.totalMaterialCost || 0), 0) },
                 { label: 'Total Labour Cost', value: completedOrders.reduce((s, o) => s + (o.totalLabourCost || 0), 0) },
-                { label: 'Total Overhead', value: completedOrders.reduce((s, o) => s + (o.overheadCost || 0), 0) },
+                { label: 'Total Other Expenses', value: completedOrders.reduce((s, o) => s + (o.overheadCost || 0), 0) },
                 { label: 'Total Manufacturing Cost', value: completedOrders.reduce((s, o) => s + (o.totalCost || 0), 0) },
               ].map((s, i) => (
                 <div key={i} className="glass-card p-4">
@@ -1603,7 +1603,7 @@ export default function ManufacturingPage() {
                 {[
                   { label: 'Material Cost', value: o.totalMaterialCost || 0 },
                   { label: 'Labour Cost', value: o.totalLabourCost || 0 },
-                  { label: 'Overhead', value: o.overheadCost || 0 },
+                  { label: 'Other Expenses', value: o.overheadCost || 0 },
                   { label: 'Total Cost', value: o.totalCost || 0 },
                   { label: 'Cost/Unit', value: o.costPerUnit || 0 },
                   { label: 'Extra Time Cost', value: o.labourVarianceCost || 0 },
@@ -2177,7 +2177,7 @@ export default function ManufacturingPage() {
                 {[
                   ['Material', selectedOrder.totalMaterialCost],
                   ['Labour', selectedOrder.totalLabourCost],
-                  ['Overhead', selectedOrder.overheadCost],
+                  ['Other Expenses', selectedOrder.overheadCost],
                   ['Total', selectedOrder.totalCost],
                 ].map(([l, v]) => (
                   <div key={l} className="bg-surface-hover p-2.5 rounded-lg">
@@ -2530,33 +2530,65 @@ export default function ManufacturingPage() {
 
       {/* Complete Production Modal */}
       <Modal isOpen={showCompleteModal} onClose={() => setShowCompleteModal(false)} title="Complete Production Order" size="lg">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+
+          {/* Qty + Scrap Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted mb-1 block">Actual Quantity Produced *</label>
               <input type="number" min="0" value={completeForm.actualQty} onChange={e => setCompleteForm(p => ({ ...p, actualQty: e.target.value }))} className={INP} />
             </div>
             <div>
-              <label className="text-xs text-muted mb-1 block">Scrap Quantity</label>
+              <label className="text-xs text-muted mb-1 block">Scrap Quantity (Defective Units)</label>
               <input type="number" min="0" value={completeForm.scrapQty} onChange={e => setCompleteForm(p => ({ ...p, scrapQty: e.target.value }))} className={INP} />
             </div>
-            <div className="col-span-2 bg-blue-500/10 p-2 rounded text-blue-700 text-xs border border-blue-500/20">
-              <strong>Good Items going to Inventory: </strong> 
-              {Math.max(0, Number(completeForm.actualQty) - Number(completeForm.scrapQty))}
+          </div>
+
+          {/* Good items info */}
+          <div className="bg-blue-500/10 p-2.5 rounded-lg text-blue-700 text-xs border border-blue-500/20 flex items-center justify-between flex-wrap gap-2">
+            <span><strong>Good Items → Inventory:</strong> {Math.max(0, Number(completeForm.actualQty) - Number(completeForm.scrapQty))}</span>
+            <span className="text-[10px] text-muted">Planned: {selectedOrder?.plannedQty || '—'}</span>
+          </div>
+
+          {/* ── Cost Breakdown Section ── */}
+          <div className="space-y-3 p-3 bg-surface-hover rounded-xl border border-border">
+            <h4 className="text-xs font-semibold text-muted uppercase tracking-wide">Production Cost Breakdown</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[11px] text-muted mb-1 block flex items-center gap-1"><Clock className="w-3 h-3" /> Labour Cost (₹)</label>
+                <input type="number" min="0" value={completeForm.totalLabourCost} onChange={e => setCompleteForm(p => ({ ...p, totalLabourCost: e.target.value }))} className={INP} placeholder="Auto from steps" />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted mb-1 block flex items-center gap-1"><Zap className="w-3 h-3" /> Machine Cost (₹)</label>
+                <input type="number" min="0" value={completeForm.machineCost} onChange={e => setCompleteForm(p => ({ ...p, machineCost: e.target.value }))} className={INP} placeholder="CNC, lathe, tools..." />
+              </div>
+              <div>
+                <label className="text-[11px] text-muted mb-1 block flex items-center gap-1">💰 Other Expenses (₹)</label>
+                <input type="number" min="0" value={completeForm.overheadCost} onChange={e => setCompleteForm(p => ({ ...p, overheadCost: e.target.value }))} placeholder="Transport, packing, electricity..." className={INP} />
+              </div>
             </div>
 
-            <div>
-              <label className="text-xs text-muted mb-1 block flex items-center gap-1"><Clock className="w-3 h-3" /> Labour Cost (₹)</label>
-              <input type="number" min="0" value={completeForm.totalLabourCost} onChange={e => setCompleteForm(p => ({ ...p, totalLabourCost: e.target.value }))} className={INP} placeholder="Total labour cost" />
+            {/* Cost summary row */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-border/50 text-center">
+              {[
+                { label: 'Labour', value: Number(completeForm.totalLabourCost) || 0 },
+                { label: 'Machine', value: Number(completeForm.machineCost) || 0 },
+                { label: 'Other', value: Number(completeForm.overheadCost) || 0 },
+                { label: 'Material', value: null },
+                { label: 'Total Est.', value: (Number(completeForm.totalLabourCost) || 0) + (Number(completeForm.machineCost) || 0) + (Number(completeForm.overheadCost) || 0), highlight: true },
+              ].map((c, i) => (
+                <div key={i} className={c.highlight ? 'bg-accent/10 p-2 rounded-lg' : 'p-2'}>
+                  <p className="text-[10px] text-muted">{c.label}</p>
+                  <p className={`text-sm font-bold ${c.highlight ? 'text-accent' : 'text-foreground'}`}>
+                    {c.value === null ? '(auto)' : `₹${c.value.toLocaleString('en-IN')}`}
+                  </p>
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="text-xs text-muted mb-1 block flex items-center gap-1"><Zap className="w-3 h-3" /> Machine Cost (₹)</label>
-              <input type="number" min="0" value={completeForm.machineCost} onChange={e => setCompleteForm(p => ({ ...p, machineCost: e.target.value }))} className={INP} placeholder="CNC, lathe, power tools..." />
-            </div>
-            <div>
-              <label className="text-xs text-muted mb-1 block">Overhead Cost (₹)</label>
-              <input type="number" min="0" value={completeForm.overheadCost} onChange={e => setCompleteForm(p => ({ ...p, overheadCost: e.target.value }))} placeholder="Electricity, tool wear..." className={INP} />
-            </div>
+          </div>
+
+          {/* Quality */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-muted mb-1 block">Quality Status</label>
               <select value={completeForm.qualityStatus} onChange={e => setCompleteForm(p => ({ ...p, qualityStatus: e.target.value }))} className={SEL}>
@@ -2565,30 +2597,21 @@ export default function ManufacturingPage() {
                 <option value="FAILED">FAILED</option>
               </select>
             </div>
-            <div className="col-span-2">
+            <div>
+              <label className="text-xs text-muted mb-1 block">Quality Notes</label>
+              <input value={completeForm.qualityNotes} onChange={e => setCompleteForm(p => ({ ...p, qualityNotes: e.target.value }))} className={INP} placeholder="Inspection notes..." />
+            </div>
+          </div>
+
+          {/* Scrap reason - only show when scrap > 0 */}
+          {Number(completeForm.scrapQty) > 0 && (
+            <div>
               <label className="text-xs text-muted mb-1 block">Scrap Reason</label>
-              <input value={completeForm.scrapReason} onChange={e => setCompleteForm(p => ({ ...p, scrapReason: e.target.value }))} placeholder="Why scrapped?" className={INP} />
+              <input value={completeForm.scrapReason} onChange={e => setCompleteForm(p => ({ ...p, scrapReason: e.target.value }))} placeholder="Why were units scrapped?" className={INP} />
             </div>
-          </div>
+          )}
 
-          {/* Cost summary */}
-          <div className="p-3 bg-surface-hover rounded-lg">
-            <p className="text-xs text-muted mb-2 font-medium">Cost Preview</p>
-            <div className="grid grid-cols-4 gap-2 text-center">
-              {[
-                { label: 'Labour', value: Number(completeForm.totalLabourCost) || 0 },
-                { label: 'Machine', value: Number(completeForm.machineCost) || 0 },
-                { label: 'Overhead', value: Number(completeForm.overheadCost) || 0 },
-                { label: 'Total', value: (Number(completeForm.totalLabourCost) || 0) + (Number(completeForm.machineCost) || 0) + (Number(completeForm.overheadCost) || 0) },
-              ].map((c, i) => (
-                <div key={i} className={i === 3 ? 'bg-accent/10 p-2 rounded' : 'p-2'}>
-                  <p className="text-[10px] text-muted">{c.label}</p>
-                  <p className={`text-sm font-bold ${i === 3 ? 'text-accent' : 'text-foreground'}`}>₹{c.value.toLocaleString('en-IN')}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
+          {/* ── Step Time Variance ── */}
           {completeForm.stepActuals.length > 0 && (() => {
             const standardMins = completeForm.stepActuals.reduce((sum, s) => sum + Number(s.plannedMins || 0), 0)
             const actualMins = completeForm.stepActuals.reduce((sum, s) => sum + Number(s.actualMins || 0), 0)
@@ -2599,7 +2622,7 @@ export default function ManufacturingPage() {
             }, 0)
             return (
               <div className="p-3 bg-surface-hover rounded-lg">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <label className="text-xs font-medium text-muted uppercase tracking-wide">Production Time Variance</label>
                   <span className={`text-xs font-semibold ${extraMins > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                     {actualMins} / {standardMins} min · {extraMins > 0 ? '+' : ''}{extraMins} min · ₹{Math.round(extraCost).toLocaleString('en-IN')}
@@ -2607,10 +2630,10 @@ export default function ManufacturingPage() {
                 </div>
                 <div className="space-y-2">
                   {completeForm.stepActuals.map((s, i) => (
-                    <div key={s.stepId} className="grid grid-cols-12 gap-2 items-center">
-                      <span className="col-span-1 text-xs text-muted text-center">{s.stepNumber}</span>
-                      <span className="col-span-5 text-sm text-foreground truncate">{s.operationName}</span>
-                      <span className="col-span-2 text-xs text-muted">Std {s.plannedMins}m</span>
+                    <div key={s.stepId} className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted w-5 text-center flex-shrink-0">{s.stepNumber}</span>
+                      <span className="text-sm text-foreground flex-1 min-w-[80px] truncate">{s.operationName}</span>
+                      <span className="text-xs text-muted flex-shrink-0">Std {s.plannedMins}m</span>
                       <input
                         type="number"
                         min="0"
@@ -2621,9 +2644,9 @@ export default function ManufacturingPage() {
                           const labour = Math.round(v.reduce((sum, step) => sum + (Number(step.actualMins || 0) / 60) * Number(step.labourRatePerHour || 0), 0))
                           setCompleteForm(f => ({ ...f, stepActuals: v, totalLabourCost: labour }))
                         }}
-                        className="col-span-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground"
+                        className="w-16 px-2 py-1.5 bg-surface border border-border rounded-lg text-sm text-foreground flex-shrink-0"
                       />
-                      <span className={`col-span-2 text-xs ${Number(s.actualMins || 0) > Number(s.plannedMins || 0) ? 'text-red-400' : 'text-emerald-400'}`}>
+                      <span className={`text-xs flex-shrink-0 ${Number(s.actualMins || 0) > Number(s.plannedMins || 0) ? 'text-red-400' : 'text-emerald-400'}`}>
                         {Number(s.actualMins || 0) - Number(s.plannedMins || 0) > 0 ? '+' : ''}{Number(s.actualMins || 0) - Number(s.plannedMins || 0)}m
                       </span>
                     </div>
@@ -2633,11 +2656,7 @@ export default function ManufacturingPage() {
             )
           })()}
 
-          <div>
-            <label className="text-xs text-muted mb-1 block">Quality Notes</label>
-            <input value={completeForm.qualityNotes} onChange={e => setCompleteForm(p => ({ ...p, qualityNotes: e.target.value }))} className={INP} />
-          </div>
-
+          {/* ── Material Consumption ── */}
           {completeForm.consumptions.length > 0 && (
             <div>
               <label className="text-xs font-medium text-muted uppercase tracking-wide mb-2 block">Material Consumption Tracking</label>
@@ -2649,41 +2668,43 @@ export default function ManufacturingPage() {
                   const scrapQty = Number(c.scrapQty || 0)
                   const totalConsumed = actualQty + scrapQty
                   const returnedQty = Math.max(0, issuedQty - totalConsumed)
-                  const isOverConsumed = totalConsumed > issuedQty
+                  const isOverConsumed = totalConsumed > issuedQty + 0.001
                   const overConsumption = isOverConsumed ? totalConsumed - issuedQty : 0
                   
                   return (
                     <div key={i} className={`p-3 rounded-lg border transition-colors ${
                       isOverConsumed ? 'bg-red-500/10 border-red-500/30' : 'bg-surface-hover border-border'
                     }`}>
-                      <div className="flex items-center justify-between mb-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span className="text-sm font-medium text-foreground">{prod?.name || `Material #${c.rawMaterialId}`}</span>
                         {isOverConsumed && <span className="text-xs font-semibold text-red-400 bg-red-500/20 px-2 py-1 rounded">⚠ Over-consumed by {overConsumption.toFixed(2)}</span>}
                       </div>
-                      <div className="grid grid-cols-12 gap-2 items-end">
-                        <div className="col-span-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+                        <div>
                           <label className="text-[10px] text-muted block mb-0.5">Planned</label>
                           <div className="px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-muted">{Number(c.plannedQty || 0).toFixed(2)}</div>
                         </div>
-                        <div className="col-span-3">
+                        <div>
                           <label className="text-[10px] text-muted block mb-0.5">Issued to Floor</label>
                           <input type="number" min="0" step="0.01" value={c.issuedQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].issuedQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <label className="text-[10px] text-muted block mb-0.5">Consumed</label>
                           <input type="number" min="0" step="0.01" value={c.actualQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].actualQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <label className="text-[10px] text-muted block mb-0.5">Scrap</label>
                           <input type="number" min="0" step="0.01" value={c.scrapQty} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapQty = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                         </div>
-                        <div className={`col-span-2 text-center px-2 py-1.5 rounded-lg text-xs font-semibold ${
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <div className={`text-center px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 ${
                           isOverConsumed ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
                         }`}>
                           {isOverConsumed ? `Over: ${overConsumption.toFixed(2)}` : `Return: ${returnedQty.toFixed(2)}`}
                         </div>
+                        <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Scrap reason..." className="flex-1 min-w-[140px] px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                       </div>
-                      <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Scrap reason..." className="w-full col-span-12 mt-2 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                     </div>
                   )
                 })}
@@ -2691,10 +2712,12 @@ export default function ManufacturingPage() {
             </div>
           )}
 
+          {/* Notes */}
           <div>
             <label className="text-xs text-muted mb-1 block">Notes</label>
-            <textarea value={completeForm.notes} onChange={e => setCompleteForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={INP} />
+            <textarea value={completeForm.notes} onChange={e => setCompleteForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={INP} placeholder="Any additional notes..." />
           </div>
+
           <button onClick={handleCompleteProd} disabled={submitting || !completeForm.actualQty} className="w-full py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-600/90 disabled:opacity-50">
             {submitting ? 'Completing...' : 'Complete Production & Update Stock'}
           </button>
