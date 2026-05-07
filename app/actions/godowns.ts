@@ -76,6 +76,19 @@ export async function adjustGodownStock(
     // Sync product total stock
     const totalStock = await syncProductStockFromGodowns(productId, tx)
 
+    // ─── Update lastRestocked whenever stock is added ─────────────────
+    const isStockIn = quantity > 0 && (
+      entryType === 'IN' ||
+      entryType === 'ADJUSTMENT' ||
+      entryType === 'TRANSFER_IN'
+    )
+    if (isStockIn) {
+      await tx.product.update({
+        where: { id: productId },
+        data: { lastRestocked: new Date() },
+      })
+    }
+
     return { godownBalance: newQty, totalStock }
   })
 }

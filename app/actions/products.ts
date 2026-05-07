@@ -46,6 +46,7 @@ export async function getProducts() {
       name: p.name,
       category: p.category.name,
       categoryId: p.categoryId,
+      isRawMaterial: p.category.name === 'Raw Material',
       price: p.price,
       costPrice: p.costPrice,
       brand: p.brand,
@@ -242,6 +243,99 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       created,
       skipped,
     },
+  }
+}
+
+export interface BulkProductRow {
+  name: string
+  sku?: string
+  category: string
+  price: number | string
+  instock: number | string
+  description?: string
+  material?: string
+  color?: string
+  reorderLevel?: number | string
+  warehouse?: string
+}
+
+export async function bulkImportProducts(rows: BulkProductRow[]) {
+  if (!rows || rows.length === 0) return { success: false, error: 'No products to import' }
+
+  const validRows = rows
+    .map(r => ({
+      name: String(r.name || '').trim(),
+      sku: String(r.sku || '').trim(),
+      category: String(r.category || 'General').trim(),
+      price: toRequiredNumber(r.price),
+      instock: toRequiredNumber(r.instock),
+      description: String(r.description || '').trim(),
+      material: String(r.material || '').trim(),
+      color: String(r.color || '').trim(),
+      reorderLevel: Math.max(0, toNumber(r.reorderLevel, 5)),
+      warehouse: String(r.warehouse || '').trim(),
+    }))
+    .filter(r => r.name && Number.isFinite(r.price) && Number.isFinite(r.instock))
+
+  if (validRows.length === 0) {
+    return { success: false, error: 'No valid rows found. Product name, price, and in-stock quantity are required.' }
+  }
+
+  const existingSkus = new Set(
+    (await prisma.product.findMany({ select: { sku: true } })).map(p => p.sku)
+  )
+
+  let created = 0
+  let skipped = 0
+
+  let counter = (await prisma.product.count()) + 1
+
+  const makeUniqueSku = (preferredSku: string) => {
+    const baseSku = String(preferredSku || '').trim()
+    let candidate = baseSku || `PRD-${String(counter).padStart(4, '0')}`
+    let suffix = 1
+
+    while (existingSkus.has(candidate)) {
+      candidate = baseSku ? `${baseSku}-${suffix++}` : `PRD-${String((counter + suffix - 1)).padStart(4, '0')}`
+    }
+
+    existingSkus.add(candidate)
+    return candidate
+  }
+
+  for (const row of validRows) {
+    const sku = makeUniqueSku(row.sku)
+
+    const res = await createProduct({
+      name: row.name,
+      sku,
+      category: row.category,
+      price: Math.max(0, row.price as number),
+      costPrice: 0,
+      stock: Math.max(0, row.instock as number),
+      reorderLevel: row.reorderLevel,
+      description: row.description || undefined,
+      material: row.material || undefined,
+      color: row.color || undefined,
+      warehouse: row.warehouse || undefined,
+      unitOfMeasure: 'PCS',
+      unitSize: 1,
+    })
+
+    if (res.success) {
+      created++
+    } else {
+      skipped++
+    }
+
+    counter++
+  }
+
+  revalidatePath('/inventory')
+
+  return {
+    success: true,
+    data: { total: validRows.length, created, skipped },
   }
 }
 

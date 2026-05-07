@@ -16,27 +16,22 @@ import { sendEmail } from '@/lib/email'
 
 const statusMap: Record<string, CustomOrderStatus> = {
   'Measurement Scheduled': 'MEASUREMENT_SCHEDULED',
-  'Design Phase': 'DESIGN_PHASE',
   'In Production': 'IN_PRODUCTION',
   'Quality Check': 'QUALITY_CHECK',
-  'Installation': 'INSTALLATION',
   'Delivered': 'DELIVERED',
 }
+
 const statusDisplay: Record<CustomOrderStatus, string> = {
   MEASUREMENT_SCHEDULED: 'Measurement Scheduled',
-  DESIGN_PHASE: 'Design Phase',
   IN_PRODUCTION: 'In Production',
   QUALITY_CHECK: 'Quality Check',
-  INSTALLATION: 'Installation',
   DELIVERED: 'Delivered',
 }
 
 const statusOrder: CustomOrderStatus[] = [
   'MEASUREMENT_SCHEDULED',
-  'DESIGN_PHASE',
   'IN_PRODUCTION',
   'QUALITY_CHECK',
-  'INSTALLATION',
   'DELIVERED',
 ]
 
@@ -60,6 +55,13 @@ export async function getCustomOrders() {
       fieldVisits: {
         include: { staff: { select: { id: true, name: true, role: true } } },
         orderBy: { date: 'desc' },
+      },
+      inventoryItems: {
+        include: {
+          product: { select: { name: true, sku: true } },
+          productionOrder: { select: { displayId: true } },
+        },
+        orderBy: { createdAt: 'desc' },
       },
     },
     orderBy: { date: 'desc' },
@@ -122,9 +124,23 @@ export async function getCustomOrders() {
         photos: fv.photos,
         photoUrls: fv.photoUrls,
       })),
+      // ── Finished goods from production ──
+      inventoryItems: o.inventoryItems.map(i => ({
+        id: i.id,
+        productName: i.product?.name || 'Product',
+        productSku: i.product?.sku || '',
+        quantity: i.quantity,
+        status: i.status,         // READY | DELIVERED | DAMAGED
+        unitCost: i.unitCost,
+        totalCost: i.totalCost,
+        productionOrderId: i.productionOrder?.displayId || null,
+        notes: i.notes,
+        createdAt: i.createdAt.toISOString().split('T')[0],
+      })),
     })),
   }
 }
+
 
 // ─── CREATE CUSTOM ORDER ────────────────────────────────
 
@@ -734,10 +750,8 @@ export async function sendProgressNotification(data: {
         const templateName = cfg?.templateName
         const statusDisplay: Record<string, string> = {
           MEASUREMENT_SCHEDULED: 'Measurement Scheduled',
-          DESIGN_PHASE: 'Design Phase',
           IN_PRODUCTION: 'In Production',
           QUALITY_CHECK: 'Quality Check',
-          INSTALLATION: 'Installation',
           DELIVERED: 'Delivered',
         }
         const statusLabel = statusDisplay[order.status] || order.status

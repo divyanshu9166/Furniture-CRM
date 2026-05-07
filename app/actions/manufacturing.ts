@@ -1036,6 +1036,11 @@ export async function completeProduction(data: unknown) {
     })
 
     if (order.customOrderId) {
+      await tx.customOrder.update({
+        where: { id: order.customOrderId },
+        data: { status: 'QUALITY_CHECK' }
+      })
+
       await tx.customOrderTimeline.create({
         data: {
           customOrderId: order.customOrderId,
@@ -1192,14 +1197,31 @@ export async function getStaffProductionOrders(staffId: number) {
     where: {
       OR: [
         { assignedStaffId: staffId },
-        { assignedTo: { not: null } }, // we'll filter these client-side by staff name
+        { assignedTo: { not: null } },
       ],
     },
     orderBy: [{ priority: 'asc' }, { dueDate: 'asc' }, { createdAt: 'desc' }],
     include: {
-      bom: { select: { name: true, version: true } },
+      bom: {
+        select: {
+          name: true,
+          version: true,
+          items: {
+            include: {
+              rawMaterial: { select: { name: true, sku: true, unitOfMeasure: true, stock: true } },
+            },
+          },
+        },
+      },
       finishedProduct: { select: { name: true, sku: true } },
       workCenter: { select: { name: true } },
+      customOrder: {
+        select: {
+          displayId: true,
+          type: true,
+          contact: { select: { name: true } },
+        },
+      },
       productionSteps: {
         include: { workCenter: { select: { name: true } } },
         orderBy: { stepNumber: 'asc' },
@@ -1210,10 +1232,19 @@ export async function getStaffProductionOrders(staffId: number) {
   // Filter to only orders actually assigned to this staff (by ID)
   const staffOrders = orders.filter(o => o.assignedStaffId === staffId)
 
-  return { success: true, data: staffOrders }
+  // Normalize customOrder to expose customer name cleanly
+  return {
+    success: true,
+    data: staffOrders.map(o => ({
+      ...o,
+      customOrder: o.customOrder
+        ? { ...o.customOrder, customer: o.customOrder.contact?.name || o.customOrder.displayId }
+        : null,
+    })),
+  }
 }
 
-export async function staffUpdateProductionStep(staffId: number, stepId: number, status: string) {
+export async function staffUpdateProductionStep(staffId: number, stepId: number, status: string, notes?: string) {
   // Verify the step belongs to an order assigned to this staff
   const step = await prisma.productionStep.findUnique({
     where: { id: stepId },
@@ -1239,6 +1270,7 @@ export async function staffUpdateProductionStep(staffId: number, stepId: number,
         actualMins,
         startedAt: status === 'IN_PROGRESS' ? new Date() : undefined,
         completedAt,
+        ...(notes !== undefined ? { notes } : {}),
       },
     })
     await updateProductionTimeVarianceWithTx(tx, step.productionOrderId)
@@ -1247,6 +1279,22 @@ export async function staffUpdateProductionStep(staffId: number, stepId: number,
   revalidatePath('/manufacturing')
   return { success: true }
 }
+
+export async function staffAddStepNote(staffId: number, stepId: number, notes: string) {
+  const step = await prisma.productionStep.findUnique({
+    where: { id: stepId },
+    include: { productionOrder: { select: { assignedStaffId: true } } },
+  })
+  if (!step) return { success: false, error: 'Step not found' }
+  if (step.productionOrder.assignedStaffId !== staffId) {
+    return { success: false, error: 'Not assigned to this order' }
+  }
+  await prisma.productionStep.update({ where: { id: stepId }, data: { notes } })
+  revalidatePath('/staff-portal')
+  revalidatePath('/manufacturing')
+  return { success: true }
+}
+
 
 export async function staffUpdateProductionProgress(staffId: number, orderId: number, actualQty: number, notes?: string) {
   const order = await prisma.productionOrder.findUnique({ where: { id: orderId } })

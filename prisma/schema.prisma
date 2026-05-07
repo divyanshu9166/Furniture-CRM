@@ -445,10 +445,8 @@ model CreditNote {
 
 enum CustomOrderStatus {
   MEASUREMENT_SCHEDULED
-  DESIGN_PHASE
   IN_PRODUCTION
   QUALITY_CHECK
-  INSTALLATION
   DELIVERED
 }
 
@@ -1587,7 +1585,7 @@ model Payslip {
   staffId          Int
   staff            Staff      @relation(fields: [staffId], references: [id])
   workingDays      Int        @default(26)
-  presentDays      Int        @default(0)
+  presentDays      Float      @default(0)
   basicSalary      Int        @default(0)
   hra              Int        @default(0)
   da               Int        @default(0)

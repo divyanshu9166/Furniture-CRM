@@ -3,6 +3,9 @@ import { z } from 'zod'
 export const generatePayrollSchema = z.object({
   period: z.string().regex(/^\d{4}-\d{2}$/, 'Period must be YYYY-MM format'),
   workingDays: z.number().min(1).max(31).default(26),
+  // Optional per-staff LOP overrides from the Attendance Summary panel
+  // Record<staffId (string), lopDays (number)>
+  lopOverrides: z.record(z.string(), z.number().min(0).max(31)).optional(),
 })
 
 export const updateStaffPayrollSchema = z.object({

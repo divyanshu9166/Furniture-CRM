@@ -25,18 +25,13 @@ import { getChannelConfigs } from '@/app/actions/channels';
 import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 
-const customOrderStatuses = ['All', 'Measurement Scheduled', 'Design Phase', 'In Production', 'Quality Check', 'Installation', 'Delivered'];
+const customOrderStatuses = ['All', 'Measurement Scheduled', 'In Production', 'Quality Check', 'Delivered'];
 
 const notifyTemplateOptions = [
   {
     key: 'ORDER_CONFIRMED',
     label: 'Order Confirmed',
     buildMessage: (o) => `Hi ${o.customer}! Your custom furniture order ${o.id} has been confirmed. Our team will visit you at ${o.address} to take measurements. We'll keep you updated every step of the way! 🛋️`,
-  },
-  {
-    key: 'INSTALLATION',
-    label: 'Installation',
-    buildMessage: (o) => `Hi ${o.customer}! Exciting news — your custom ${o.type} (Order ${o.id}) is ready for installation! Our team will contact you shortly to schedule a convenient time. 🚚`,
   },
   {
     key: 'DELIVERED',
@@ -46,20 +41,17 @@ const notifyTemplateOptions = [
 ];
 
 const defaultNotifyTemplateForStatus = {
-  Installation: 'INSTALLATION',
   Delivered: 'DELIVERED',
 };
 
 const statusConfig = {
   'Measurement Scheduled': { cls: 'bg-blue-500/10 text-blue-700 border-blue-500/20', icon: Ruler, step: 0 },
-  'Design Phase': { cls: 'bg-purple-500/10 text-purple-700 border-purple-500/20', icon: FileText, step: 1 },
-  'In Production': { cls: 'bg-amber-500/10 text-amber-700 border-amber-500/20', icon: Hammer, step: 2 },
-  'Quality Check': { cls: 'bg-teal-500/10 text-teal-700 border-teal-500/20', icon: Eye, step: 3 },
-  'Installation': { cls: 'bg-orange-500/10 text-orange-700 border-orange-500/20', icon: Package, step: 4 },
-  'Delivered': { cls: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20', icon: CheckCircle2, step: 5 },
+  'In Production': { cls: 'bg-amber-500/10 text-amber-700 border-amber-500/20', icon: Hammer, step: 1 },
+  'Quality Check': { cls: 'bg-teal-500/10 text-teal-700 border-teal-500/20', icon: Eye, step: 2 },
+  'Delivered': { cls: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/20', icon: CheckCircle2, step: 3 },
 };
 
-const statusSteps = ['Measurement Scheduled', 'Design Phase', 'In Production', 'Quality Check', 'Installation', 'Delivered'];
+const statusSteps = ['Measurement Scheduled', 'In Production', 'Quality Check', 'Delivered'];
 
 export default function CustomOrdersPage() {
   const [customOrders, setCustomOrders] = useState([]);
@@ -468,16 +460,17 @@ export default function CustomOrdersPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map(order => {
-            const sc = statusConfig[order.status] || statusConfig['Design Phase'];
+            const sc = statusConfig[order.status] || statusConfig['Measurement Scheduled'];
             const StatusIcon = sc.icon;
             const currentStep = sc.step;
             const pendingVisits = order.fieldVisits.filter(v => v.status === 'Scheduled').length;
+            const readyItems = order.inventoryItems?.filter(i => i.status === 'READY') || [];
 
             return (
               <div key={order.id} className="glass-card p-5 cursor-pointer hover:border-accent/30 transition-all" onClick={() => setSelectedOrder(order)}>
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-mono text-sm text-accent font-medium">{order.id}</span>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium border flex items-center gap-1 ${sc.cls}`}>
                         <StatusIcon className="w-3 h-3" /> {order.status}
@@ -485,6 +478,11 @@ export default function CustomOrdersPage() {
                       {pendingVisits > 0 && (
                         <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-700 border border-blue-500/20">
                           {pendingVisits} visit{pendingVisits > 1 ? 's' : ''} pending
+                        </span>
+                      )}
+                      {readyItems.length > 0 && (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-1">
+                          ✅ {readyItems.length} lot{readyItems.length > 1 ? 's' : ''} ready
                         </span>
                       )}
                     </div>
@@ -535,7 +533,7 @@ export default function CustomOrdersPage() {
           ═══════════════════════════════════════════════════ */}
       <Modal isOpen={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Custom Order Details" size="xl">
         {selectedOrder && (() => {
-          const sc = statusConfig[selectedOrder.status] || statusConfig['Design Phase'];
+          const sc = statusConfig[selectedOrder.status] || statusConfig['Measurement Scheduled'];
           const StatusIcon = sc.icon;
           const currentStep = sc.step;
           const meas = selectedOrder.measurements || {};
@@ -582,20 +580,26 @@ export default function CustomOrdersPage() {
                 <div className="mt-4 space-y-2">
                   {/* Forward: next stages */}
                   {currentStep < statusSteps.length - 1 && (
-                    <div className="flex gap-2 flex-wrap">
+                    <div className="flex gap-2 flex-wrap items-center">
                       {statusSteps.map((step, idx) => {
                         if (idx <= currentStep) return null;
+                        if (step === 'In Production' || step === 'Quality Check') return null;
                         return (
                           <button
                             key={step}
                             disabled={saving}
                             onClick={(e) => { e.stopPropagation(); handleStatusUpdate(selectedOrder, step); }}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${idx === currentStep + 1 ? 'bg-accent text-white hover:bg-accent-hover' : 'bg-surface-hover text-muted hover:text-foreground'}`}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${idx === currentStep + 1 || (currentStep === 2 && step === 'Delivered') ? 'bg-accent text-white hover:bg-accent-hover' : 'bg-surface-hover text-muted hover:text-foreground'}`}
                           >
                             <ArrowRight className="w-3 h-3 inline mr-1" />{step}
                           </button>
                         );
                       })}
+                      {(currentStep === 0 || currentStep === 1) && (
+                        <span className="text-[10px] text-accent font-medium px-2 py-1 bg-accent/10 rounded ml-1 border border-accent/20">
+                          Automated via Manufacturing
+                        </span>
+                      )}
                     </div>
                   )}
                   {/* Backward: correct a mistake */}
@@ -604,6 +608,7 @@ export default function CustomOrdersPage() {
                       <span className="text-[10px] text-muted">Correct to:</span>
                       {statusSteps.map((step, idx) => {
                         if (idx >= currentStep) return null;
+                        if (step === 'In Production' || step === 'Quality Check') return null;
                         return (
                           <button
                             key={step}
@@ -779,6 +784,50 @@ export default function CustomOrdersPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* ── Production Ready Items ── */}
+              {selectedOrder.inventoryItems?.length > 0 && (
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
+                  <h4 className="text-sm font-semibold text-emerald-700 mb-3 flex items-center gap-2">
+                    <span>✅</span> Production Ready ({selectedOrder.inventoryItems.length} lot{selectedOrder.inventoryItems.length !== 1 ? 's' : ''})
+                  </h4>
+                  <div className="space-y-2">
+                    {selectedOrder.inventoryItems.map(item => (
+                      <div key={item.id} className="bg-white/50 dark:bg-surface/50 rounded-lg px-3 py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{item.productName}</p>
+                          <p className="text-[11px] text-muted">
+                            {item.productSku && <span className="mr-2">{item.productSku}</span>}
+                            {item.productionOrderId && <span>PRD: {item.productionOrderId}</span>}
+                            {item.createdAt && <span className="ml-2">· {item.createdAt}</span>}
+                          </p>
+                          {item.notes && <p className="text-[11px] text-muted mt-0.5 italic">{item.notes}</p>}
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-foreground">{item.quantity} unit{item.quantity !== 1 ? 's' : ''}</p>
+                            {item.unitCost > 0 && (
+                              <p className="text-[10px] text-muted">Cost: ₹{item.unitCost.toLocaleString()}/unit</p>
+                            )}
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ${
+                            item.status === 'READY' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
+                            item.status === 'DELIVERED' ? 'bg-blue-500/10 text-blue-700 border border-blue-500/20' :
+                            'bg-red-500/10 text-red-700 border border-red-500/20'
+                          }`}>
+                            {item.status === 'READY' ? '✓ Ready' : item.status === 'DELIVERED' ? '📦 Delivered' : '⚠ Damaged'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {selectedOrder.inventoryItems.some(i => i.status === 'READY') && (
+                    <p className="text-xs text-emerald-600 mt-3 font-medium">
+                      🎯 Items are ready — update order status to "Delivered" and notify the customer.
+                    </p>
+                  )}
                 </div>
               )}
 

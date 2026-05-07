@@ -4,12 +4,14 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Wallet, Users, Calendar, CheckCircle, Eye, CreditCard,
   AlertCircle, IndianRupee, Printer, Edit2, Save, X,
-  FileText, ShieldCheck, BadgeCheck, PiggyBank, Plus, Landmark, Mail, MessageSquare
+  FileText, ShieldCheck, BadgeCheck, PiggyBank, Plus, Landmark, Mail, MessageSquare,
+  CalendarCheck, ChevronDown, ChevronUp, RefreshCw
 } from 'lucide-react'
 import {
   generatePayroll, getPayrollHistory, getPayrollRun, getAllPayslips,
   approvePayroll, markPayrollPaid, getStaffForPayroll, updateStaffPayrollInfo,
-  getStaffLoans, createStaffLoan, closeStaffLoan, getPayrollReadiness
+  getStaffLoans, createStaffLoan, closeStaffLoan, getPayrollReadiness,
+  getAttendanceSummaryForPayroll
 } from '@/app/actions/payroll'
 import Modal from '@/components/Modal'
 
@@ -19,7 +21,6 @@ const statusColors = {
   PAID: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20',
 }
 
-const PT_STATES = ['None', 'Maharashtra', 'Karnataka', 'West Bengal', 'Tamil Nadu', 'Gujarat', 'Andhra', 'Telangana']
 
 const fmt = (v) => `₹${(v || 0).toLocaleString('en-IN')}`
 
@@ -84,6 +85,12 @@ export default function PayrollPage() {
   const [readiness, setReadiness] = useState(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
 
+  // Attendance summary + LOP overrides
+  const [attendanceSummary, setAttendanceSummary]   = useState([])
+  const [attLoading, setAttLoading]                 = useState(false)
+  const [lopOverrides, setLopOverrides]             = useState({}) // { [staffId]: lopDays }
+  const [showAttPanel, setShowAttPanel]             = useState(false)
+
   // Payslips
   const [payslips, setPayslips] = useState([])
   const [payslipPeriodFilter, setPayslipPeriodFilter] = useState('')
@@ -117,6 +124,17 @@ export default function PayrollPage() {
     if (res.success) setPayslips(res.data)
   }, [])
 
+  const loadAttendanceSummary = useCallback(async (p) => {
+    setAttLoading(true)
+    const res = await getAttendanceSummaryForPayroll(p || period)
+    if (res.success) {
+      setAttendanceSummary(res.data)
+      // Reset LOP overrides when period changes
+      setLopOverrides({})
+    }
+    setAttLoading(false)
+  }, [period])
+
   const loadReadiness = useCallback(async (periodToCheck = period) => {
     setReadinessLoading(true)
     const res = await getPayrollReadiness(periodToCheck)
@@ -137,9 +155,9 @@ export default function PayrollPage() {
 
   useEffect(() => {
     if (tab !== 'process' && tab !== 'setup') return
-    const timer = setTimeout(() => { void loadReadiness(period) }, 0)
+    const timer = setTimeout(() => { void loadReadiness(period); void loadAttendanceSummary(period) }, 0)
     return () => clearTimeout(timer)
-  }, [tab, period, loadReadiness])
+  }, [tab, period, loadReadiness, loadAttendanceSummary])
 
   // ── Staff setup ──
   const startEditStaff = (s) => {
@@ -212,8 +230,12 @@ export default function PayrollPage() {
 
     setGenerating(true)
     setGeneratedRun(null)
-    const res = await generatePayroll({ period, workingDays: Number(workingDays) })
-    if (res.success) { setGeneratedRun(res.data); loadAll(); loadReadiness(period) }
+    // Convert lopOverrides values to numbers before sending to server
+    const lopOverridesNumeric = Object.fromEntries(
+      Object.entries(lopOverrides).map(([k, v]) => [k, Number(v)])
+    )
+    const res = await generatePayroll({ period, workingDays: Number(workingDays), lopOverrides: lopOverridesNumeric })
+    if (res.success) { setGeneratedRun(res.data); loadAll(); loadReadiness(period); loadAttendanceSummary(period) }
     else alert(res.error)
     setGenerating(false)
   }
@@ -413,9 +435,12 @@ export default function PayrollPage() {
                         </td>
                         <td className="px-3 py-2"><input value={staffForm.esiNumber} onChange={e => setStaffForm(p => ({ ...p, esiNumber: e.target.value }))} className="w-24 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground" placeholder="ESI No." /></td>
                         <td className="px-3 py-2">
-                          <select value={staffForm.professionalTaxState} onChange={e => setStaffForm(p => ({ ...p, professionalTaxState: e.target.value }))} className="w-28 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground">
-                            {PT_STATES.map(st => <option key={st} value={st}>{st}</option>)}
-                          </select>
+                          <input
+                            value={staffForm.professionalTaxState === 'None' ? '' : (staffForm.professionalTaxState || '')}
+                            onChange={e => setStaffForm(p => ({ ...p, professionalTaxState: e.target.value || 'None' }))}
+                            className="w-28 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground placeholder:text-muted"
+                            placeholder="e.g. Rajasthan"
+                          />
                         </td>
                         <td className="px-3 py-2"><input type="number" min="0" value={staffForm.tdsMonthly} onChange={e => setStaffForm(p => ({ ...p, tdsMonthly: e.target.value }))} className="w-20 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground" /></td>
                         <td className="px-3 py-2"><input value={staffForm.bankAccount} onChange={e => setStaffForm(p => ({ ...p, bankAccount: e.target.value }))} className="w-24 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground" placeholder="Acct No." /></td>
@@ -437,7 +462,7 @@ export default function PayrollPage() {
                         <td className="px-3 py-3 text-muted text-xs">{s.uanNumber || '—'}</td>
                         <td className="px-3 py-3"><span className={`text-xs flex items-center gap-1 ${s.esiEnrolled ? 'text-emerald-400' : 'text-muted'}`}>{s.esiEnrolled ? <><BadgeCheck className="w-3 h-3" />Yes</> : 'No'}</span></td>
                         <td className="px-3 py-3 text-muted text-xs">{s.esiNumber || '—'}</td>
-                        <td className="px-3 py-3 text-muted text-xs">{s.professionalTaxState || 'None'}</td>
+                        <td className="px-3 py-3 text-muted text-xs">{(s.professionalTaxState && s.professionalTaxState !== 'None') ? s.professionalTaxState : '—'}</td>
                         <td className="px-3 py-3 text-muted text-xs">{s.tdsMonthly ? fmt(s.tdsMonthly) : '—'}</td>
                         <td className="px-3 py-3 text-muted text-xs">{s.bankAccount ? `****${s.bankAccount.slice(-4)}` : '—'}</td>
                         <td className="px-3 py-3 text-muted text-xs">{s.panNumber || '—'}</td>
@@ -527,6 +552,158 @@ export default function PayrollPage() {
             </div>
           </div>
 
+          {/* ── ATTENDANCE SUMMARY PANEL (Keka / GreytHR style) ── */}
+          <div className="glass-card overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-surface-hover">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="w-4 h-4 text-accent" />
+                <p className="text-sm font-semibold text-foreground">Attendance Summary for Payroll</p>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">{period}</span>
+                {attLoading && <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-accent" />}
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-[11px] text-muted hidden md:block">Salary = (Basic / Working Days) × Payable Days + OT − LOP</p>
+                <button onClick={() => { loadAttendanceSummary(period) }}
+                  className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-accent" title="Refresh">
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setShowAttPanel(v => !v)}
+                  className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground">
+                  {showAttPanel ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Summary stat pills */}
+            {attendanceSummary.length > 0 && (
+              <div className="flex flex-wrap gap-3 px-5 py-3 border-b border-border/50">
+                {(() => {
+                  const totalPresent = attendanceSummary.reduce((s, x) => s + x.present, 0)
+                  const totalAbsent  = attendanceSummary.reduce((s, x) => s + x.absent, 0)
+                  const totalHalf    = attendanceSummary.reduce((s, x) => s + x.halfDay, 0)
+                  const totalOT      = attendanceSummary.reduce((s, x) => s + x.otHours, 0)
+                  const noAtt        = attendanceSummary.filter(x => !x.hasAttendance).length
+                  return (
+                    <>
+                      <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-medium">
+                        ✓ {totalPresent} Present days
+                      </span>
+                      <span className="text-[11px] px-2.5 py-1 rounded-full bg-red-500/10 text-red-400 font-medium">
+                        ✗ {totalAbsent} Absent (LOP)
+                      </span>
+                      {totalHalf > 0 && (
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 font-medium">
+                          ½ {totalHalf} Half Days
+                        </span>
+                      )}
+                      {totalOT > 0 && (
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 font-medium">
+                          ⏱ {totalOT.toFixed(1)}h OT
+                        </span>
+                      )}
+                      {noAtt > 0 && (
+                        <span className="text-[11px] px-2.5 py-1 rounded-full bg-surface-hover text-muted font-medium">
+                          ⚠ {noAtt} staff — no attendance logged (full pay assumed)
+                        </span>
+                      )}
+                    </>
+                  )
+                })()}
+              </div>
+            )}
+
+            {showAttPanel && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs min-w-[900px]">
+                  <thead>
+                    <tr className="border-b border-border">
+                      {['Staff', 'Role', 'Basic', 'Present', 'Absent', 'Half Day', 'Late', 'OT Hrs',
+                        'Payable Days', 'LOP Override', 'Est. Net Pay'].map(h => (
+                        <th key={h} className="px-3 py-2.5 text-left font-medium text-muted whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendanceSummary.map(s => {
+                      const lop = lopOverrides[s.id] !== undefined ? Number(lopOverrides[s.id]) : s.lopDays
+                      const payableDays = Math.max(0, Number(workingDays) - lop)
+                      const dailyRate   = Number(workingDays) > 0 ? s.basicSalary / Number(workingDays) : 0
+                      const effBasic    = Math.round(dailyRate * payableDays)
+                      const hra         = Math.round(effBasic * 0.40)
+                      const da          = Math.round(effBasic * 0.10)
+                      const otPay       = Math.round((effBasic > 0 ? Math.round(effBasic / (Number(workingDays) * 8)) : 0) * s.otHours * 2)
+                      const gross       = effBasic + hra + da + otPay
+                      const pf          = Math.round(effBasic * 0.12)
+                      const esi         = gross <= 21000 ? Math.round(gross * 0.0075) : 0
+                      const estNet      = Math.max(0, gross - pf - esi)
+                      const isOverridden = lopOverrides[s.id] !== undefined
+                      return (
+                        <tr key={s.id} className={`border-b border-border/40 hover:bg-surface-hover/50 transition-colors ${!s.hasAttendance ? 'opacity-60' : ''}`}>
+                          <td className="px-3 py-2.5 font-medium text-foreground">
+                            <div className="flex items-center gap-1.5">
+                              {s.name}
+                              {!s.hasAttendance && <span className="text-[9px] px-1.5 py-0.5 bg-amber-500/10 text-amber-400 rounded">No Att.</span>}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted">{s.role}</td>
+                          <td className="px-3 py-2.5 text-foreground font-medium">{fmt(s.basicSalary)}</td>
+                          <td className="px-3 py-2.5">
+                            <span className="text-emerald-400 font-medium">{s.present}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={s.absent > 0 ? 'text-red-400 font-medium' : 'text-muted'}>{s.absent}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={s.halfDay > 0 ? 'text-amber-400' : 'text-muted'}>{s.halfDay}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={s.late > 0 ? 'text-orange-400' : 'text-muted'}>{s.late}</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={s.otHours > 0 ? 'text-blue-400 font-medium' : 'text-muted'}>
+                              {s.otHours > 0 ? `${s.otHours}h` : '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-medium text-foreground">{payableDays}d</span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number" min="0" max={workingDays} step="0.5"
+                                value={lopOverrides[s.id] !== undefined ? lopOverrides[s.id] : s.lopDays}
+                                onChange={e => setLopOverrides(prev => ({ ...prev, [s.id]: e.target.value }))}
+                                className={`w-14 px-1.5 py-1 rounded border text-xs text-foreground bg-surface ${
+                                  isOverridden ? 'border-accent/60 bg-accent/5' : 'border-border'
+                                }`}
+                              />
+                              {isOverridden && (
+                                <button onClick={() => setLopOverrides(prev => { const n = {...prev}; delete n[s.id]; return n })}
+                                  className="text-muted hover:text-red-400" title="Reset">
+                                  <X className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="font-semibold text-accent">{fmt(estNet)}</span>
+                            {s.lopDays > 0 && (
+                              <span className="text-[9px] text-red-400 ml-1">-{s.lopDays}d LOP</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                {attendanceSummary.length === 0 && (
+                  <div className="text-center py-8 text-muted text-sm">
+                    {attLoading ? 'Loading attendance...' : 'No active staff found.'}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {/* Generated result */}
           {generatedRun && (
             <div className="glass-card p-6">

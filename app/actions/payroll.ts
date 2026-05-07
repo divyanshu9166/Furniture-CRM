@@ -6,6 +6,75 @@ import { requireRole } from '@/lib/auth-helpers'
 import { generatePayrollSchema, updateStaffPayrollSchema } from '@/lib/validations/payroll'
 import { z } from 'zod'
 
+// ─── ATTENDANCE SUMMARY FOR PAYROLL ──────────────────
+// Used to display per-staff attendance breakdown before payroll generation
+// (Like Keka / GreytHR's "Attendance Summary" pre-payroll screen)
+
+export async function getAttendanceSummaryForPayroll(period: string) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+
+  const [year, month] = period.split('-').map(Number)
+  const monthStart = new Date(year, month - 1, 1)
+  const nextMonth  = month === 12 ? new Date(year + 1, 0, 1) : new Date(year, month, 1)
+
+  const staffList = await prisma.staff.findMany({
+    where: { status: 'Active' },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      basicSalary: true,
+      attendance: {
+        where: { date: { gte: monthStart, lt: nextMonth } },
+        select: { status: true, hours: true, clockIn: true, clockOut: true, date: true, isLate: true },
+        orderBy: { date: 'asc' },
+      },
+    },
+    orderBy: { name: 'asc' },
+  })
+
+  const summary = staffList.map(s => {
+    const att = s.attendance
+    const present  = att.filter(a => { const n = (a.status||'').toLowerCase(); return n === 'present' || n === 'late' }).length
+    const absent   = att.filter(a => { const n = (a.status||'').toLowerCase(); return n === 'absent' }).length
+    const halfDay  = att.filter(a => { const n = (a.status||'').toLowerCase(); return n === 'half day' || n === 'half-day' }).length
+    const late     = att.filter(a => a.isLate).length
+    const otDays   = att.filter(a => (a.status||'').toUpperCase() === 'OT').length
+    const totalHrs = att.reduce((sum, a) => sum + (a.hours || 0), 0)
+    const otHours  = att.reduce((sum, a) => {
+      const status = (a.status || '').toUpperCase()
+      if (status === 'OT') return sum + Math.max(0, a.hours || 0)
+      const dayCredit = (status === 'ABSENT' || status === 'OFF DUTY') ? 0 : (status === 'HALF DAY' || status === 'HALF-DAY') ? 0.5 : 1
+      if (dayCredit <= 0 || a.hours == null) return sum
+      const baseline = dayCredit >= 1 ? 8 : 4
+      return sum + Math.max(0, a.hours - baseline)
+    }, 0)
+
+    const payableDays  = present + (halfDay * 0.5)
+    const lopDays      = absent + (halfDay * 0.5)
+
+    return {
+      id: s.id,
+      name: s.name,
+      role: s.role,
+      basicSalary: s.basicSalary || 0,
+      totalLogged: att.length,
+      present,
+      absent,
+      halfDay,
+      late,
+      otDays,
+      otHours: Math.round(otHours * 10) / 10,
+      totalHrs: Math.round(totalHrs * 10) / 10,
+      payableDays: Math.round(payableDays * 10) / 10,
+      lopDays: Math.round(lopDays * 10) / 10,
+      hasAttendance: att.length > 0,
+    }
+  })
+
+  return { success: true, data: summary }
+}
+
 // ─── PROFESSIONAL TAX SLABS (state-wise) ─────────────
 // Monthly gross → PT amount
 const PT_SLABS: Record<string, { upTo: number; tax: number }[]> = {
@@ -264,7 +333,7 @@ export async function generatePayroll(data: unknown) {
   const parsed = generatePayrollSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { period, workingDays } = parsed.data
+  const { period, workingDays, lopOverrides = {} } = parsed.data
 
   // Check if already finalized
   const existing = await prisma.payrollRun.findFirst({ where: { period } })
@@ -302,14 +371,36 @@ export async function generatePayroll(data: unknown) {
   let totalGross = 0, totalDeductions = 0, totalNet = 0, totalEmployerContributions = 0
 
   const payslipData = staffList.map(staff => {
-    // Attendance
-    const attendanceCredits = staff.attendance.length > 0
-      ? staff.attendance.reduce((sum, entry) => sum + attendanceDayCredit(entry.status), 0)
-      : workingDays
+    // ── Attendance-based day credits ──────────────────────────────────────
+    // If admin has provided a manual LOP override for this staff, use it.
+    // Otherwise fall back to attendance records (or assume full month if none logged).
+    const hasAttendance = staff.attendance.length > 0
+    const manualLopDays = lopOverrides[String(staff.id)] !== undefined
+      ? Number(lopOverrides[String(staff.id)])
+      : null
+
+    let attendanceCredits: number
+    let presentDaysCalc: number
+
+    if (manualLopDays !== null) {
+      // Admin explicitly set LOP — trust it
+      attendanceCredits = workingDays - manualLopDays
+      presentDaysCalc   = attendanceCredits
+    } else if (hasAttendance) {
+      attendanceCredits = staff.attendance.reduce((sum, entry) => sum + attendanceDayCredit(entry.status), 0)
+      presentDaysCalc   = staff.attendance.reduce((sum, entry) => {
+        const credit = attendanceDayCredit(entry.status)
+        return sum + (credit > 0 ? credit : 0)
+      }, 0)
+    } else {
+      // No attendance logged → full working days (warning already surfaced in readiness)
+      attendanceCredits = workingDays
+      presentDaysCalc   = workingDays
+    }
+
     const payableDays = Math.min(workingDays, Math.max(0, attendanceCredits))
-    const presentDays = staff.attendance.length > 0
-      ? Math.min(workingDays, staff.attendance.filter(a => attendanceDayCredit(a.status) > 0).length)
-      : workingDays
+    // presentDays stored as Int (schema); round to nearest half
+    const presentDays = Math.round(Math.min(workingDays, presentDaysCalc) * 2) / 2
 
     // OT: explicitly marked OT entries or hours beyond baseline shift.
     const otHours = overtimeHoursFromAttendance(staff.attendance)

@@ -2235,7 +2235,7 @@ export default function ManufacturingPage() {
               <label className="text-xs text-muted mb-1 block">Finished Product *</label>
               <select value={bomForm.finishedProductId} onChange={e => setBomForm(p => ({ ...p, finishedProductId: e.target.value }))} className={SEL}>
                 <option value="">Select Product</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                {products.filter(p => p.category !== 'Raw Material').map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
               </select>
             </div>
             <div>
@@ -2538,6 +2538,11 @@ export default function ManufacturingPage() {
               <label className="text-xs text-muted mb-1 block">Scrap Quantity</label>
               <input type="number" min="0" value={completeForm.scrapQty} onChange={e => setCompleteForm(p => ({ ...p, scrapQty: e.target.value }))} className={INP} />
             </div>
+            <div className="col-span-2 bg-blue-500/10 p-2 rounded text-blue-700 text-xs border border-blue-500/20">
+              <strong>Good Items going to Inventory: </strong> 
+              {Math.max(0, Number(completeForm.actualQty) - Number(completeForm.scrapQty))}
+            </div>
+
             <div>
               <label className="text-xs text-muted mb-1 block flex items-center gap-1"><Clock className="w-3 h-3" /> Labour Cost (₹)</label>
               <input type="number" min="0" value={completeForm.totalLabourCost} onChange={e => setCompleteForm(p => ({ ...p, totalLabourCost: e.target.value }))} className={INP} placeholder="Total labour cost" />

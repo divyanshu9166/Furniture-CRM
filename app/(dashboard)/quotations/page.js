@@ -15,6 +15,7 @@ import {
   Phone,
   Plus,
   Printer,
+  Download,
   QrCode,
   Search,
   Upload,
@@ -1082,14 +1083,108 @@ export default function QuotationsPage() {
     }, 300)
   }
 
+  const handleDownload = quotation => {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.width = '900px';
+    iframe.style.height = '1200px';
+    iframe.style.left = '-9999px';
+    document.body.appendChild(iframe);
+
+    const htmlContent = buildPrintHtml(quotation, storeSettings);
+    
+    iframe.contentWindow.document.open();
+    iframe.contentWindow.document.write(`
+      ${htmlContent}
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+      <script>
+        window.onload = () => {
+          setTimeout(() => {
+            const element = document.querySelector('.sheet') || document.body;
+            const opt = {
+              margin: 0,
+              filename: 'Quotation_${quotation.id}.pdf',
+              image: { type: 'jpeg', quality: 0.98 },
+              html2canvas: { scale: 2, useCORS: true },
+              jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+            };
+            html2pdf().set(opt).from(element).save().then(() => {
+              window.parent.postMessage('pdf_download_complete_quotation', '*');
+            });
+          }, 800);
+        };
+      </script>
+    `);
+    iframe.contentWindow.document.close();
+
+    const handleMessage = (e) => {
+      if (e.data === 'pdf_download_complete_quotation') {
+        if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        window.removeEventListener('message', handleMessage);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+
+    // Fallback cleanup
+    setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+        window.removeEventListener('message', handleMessage);
+      }
+    }, 15000);
+  }
+
   const handleShareQuotationWhatsApp = (quotation) => {
-    const message = buildQuotationShareMessage(quotation, storeSettings)
-    const url = buildWhatsAppUrl(quotation?.phone, message)
-    if (!url) {
+    if (!quotation?.phone) {
       notify('Customer phone number is missing', { variant: 'danger' })
       return
     }
-    window.open(url, '_blank', 'noopener,noreferrer')
+
+    const message = buildQuotationShareMessage(quotation, storeSettings) + '\n\n*(Quotation PDF is attached)*'
+
+    // For mobile devices, try to use native Web Share API to attach the file directly
+    if (navigator.share && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+      notify('Preparing PDF for sharing...', { variant: 'info' })
+      const element = document.createElement('div')
+      element.innerHTML = buildPrintHtml(quotation, storeSettings)
+      
+      const opt = {
+        margin: 0,
+        filename: 'Quotation_${quotation.id}.pdf',
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+      }
+      
+      html2pdf().set(opt).from(element).outputPdf('blob').then(async (pdfBlob) => {
+        const file = new File([pdfBlob], 'Quotation_${quotation.id}.pdf', { type: 'application/pdf' })
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: 'Quotation ${quotation.id}',
+              text: buildQuotationShareMessage(quotation, storeSettings)
+            })
+            return
+          } catch (err) {
+            console.warn('Share failed', err)
+          }
+        }
+        // Fallback if sharing fails
+        fallbackShare(quotation, message)
+      })
+    } else {
+      fallbackShare(quotation, message)
+    }
+  }
+
+  const fallbackShare = (quotation, message) => {
+    handleDownload(quotation)
+    notify('PDF downloaded! Please attach it to the WhatsApp chat.', { variant: 'success' })
+    const url = buildWhatsAppUrl(quotation.phone, message)
+    setTimeout(() => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }, 600)
   }
 
   const handleShareQuotationEmail = (quotation) => {
@@ -1263,6 +1358,13 @@ export default function QuotationsPage() {
                         title="Print"
                       >
                         <Printer className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDownload(quotation)}
+                        className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors"
+                        title="Download PDF"
+                      >
+                        <Download className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleMoveToDraft(quotation)}
@@ -1829,6 +1931,12 @@ export default function QuotationsPage() {
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-accent hover:border-accent/40"
                 >
                   <Printer className="w-3.5 h-3.5" /> Print
+                </button>
+                <button
+                  onClick={() => handleDownload(selectedQuotation)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted hover:text-accent hover:border-accent/40"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
                 </button>
                 <button
                   onClick={() => handleMoveToDraft(selectedQuotation)}

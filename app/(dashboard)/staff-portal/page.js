@@ -11,6 +11,7 @@ import {
   Warehouse, Timer, Home,
   Lock, User, Trash2,
   ChevronLeft, ChevronRight, Fingerprint,
+  ClipboardList, Boxes, Info, MessageSquare, ChevronDown, ChevronUp, Flame,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useSession } from '@/components/AuthProvider';
@@ -19,7 +20,7 @@ import { getStaff, getStaffPortalProfile, clockIn as serverClockIn, clockOut as 
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';
 import { moveSelfVisitToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
-import { getStaffProductionOrders, staffUpdateProductionStep, staffUpdateProductionProgress } from '@/app/actions/manufacturing';
+import { getStaffProductionOrders, staffUpdateProductionStep, staffUpdateProductionProgress, staffAddStepNote } from '@/app/actions/manufacturing';
 
 const activityIcons = {
   call: { icon: Phone, color: 'bg-blue-500/10 text-blue-700', label: 'Call' },
@@ -190,6 +191,9 @@ export default function StaffPortalPage() {
   const [productionOrders, setProductionOrders] = useState([]);
   const [productionLoading, setProductionLoading] = useState(false);
   const [stepUpdating, setStepUpdating] = useState(null);
+  const [expandedOrderId, setExpandedOrderId] = useState(null); // for materials panel
+  const [stepNotes, setStepNotes] = useState({}); // { [stepId]: string } draft notes per step
+  const [savingNoteId, setSavingNoteId] = useState(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -866,6 +870,15 @@ export default function StaffPortalPage() {
                 const inProgressSteps = order.productionSteps?.filter(s => s.status === 'IN_PROGRESS').length || 0;
                 const qtyPct = order.plannedQty > 0 ? Math.round((order.actualQty / order.plannedQty) * 100) : 0;
 
+                // Due date urgency
+                const dueDaysLeft = order.dueDate ? Math.ceil((new Date(order.dueDate) - new Date()) / 86400000) : null;
+                const isOverdue = dueDaysLeft !== null && dueDaysLeft < 0 && order.status !== 'COMPLETED';
+                const isDueSoon = dueDaysLeft !== null && dueDaysLeft >= 0 && dueDaysLeft <= 2 && order.status !== 'COMPLETED';
+
+                // Materials from BOM
+                const bomItems = order.bom?.items || [];
+                const isExpanded = expandedOrderId === order.id;
+
                 // Determine current phase
                 let currentPhase = 'planned';
                 let phaseLabel = 'Planned';
@@ -899,10 +912,29 @@ export default function StaffPortalPage() {
 
                     {/* ── Card Header ── */}
                     <div className="p-4 pb-3">
+                      {/* Urgency Banner */}
+                      {isOverdue && (
+                        <div className="flex items-center gap-1.5 mb-2 px-2.5 py-1.5 bg-red-500/10 border border-red-500/20 rounded-lg">
+                          <Flame className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+                          <span className="text-xs font-semibold text-red-600">OVERDUE by {Math.abs(dueDaysLeft)} day{Math.abs(dueDaysLeft) !== 1 ? 's' : ''} — complete immediately</span>
+                        </div>
+                      )}
+                      {isDueSoon && !isOverdue && (
+                        <div className="flex items-center gap-1.5 mb-2 px-2.5 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                          <span className="text-xs font-semibold text-amber-600">Due {dueDaysLeft === 0 ? 'TODAY' : `in ${dueDaysLeft} day${dueDaysLeft !== 1 ? 's' : ''}`} — prioritise this order</span>
+                        </div>
+                      )}
+
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-foreground truncate">{order.finishedProduct?.name}</p>
-                          <p className="text-[11px] text-muted mt-0.5">{order.displayId} · {order.bom?.name} v{order.bom?.version}</p>
+                          <p className="text-[11px] text-muted mt-0.5">{order.displayId} · BOM: {order.bom?.name} v{order.bom?.version}</p>
+                          {order.customOrder && (
+                            <p className="text-[11px] text-accent font-medium mt-0.5">
+                              👤 Customer: {order.customOrder.customer || order.customOrder.displayId}
+                            </p>
+                          )}
                         </div>
                         <span className={`text-[11px] px-2.5 py-1 rounded-full font-semibold flex-shrink-0 flex items-center gap-1 ${phaseColor}`}>
                           <span>{phaseIcon}</span> {phaseLabel}
@@ -910,12 +942,14 @@ export default function StaffPortalPage() {
                       </div>
 
                       {/* Info row */}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2.5 text-[11px] text-muted">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 text-[11px] text-muted">
+                        <span className="font-semibold text-foreground">📦 {order.plannedQty} unit{order.plannedQty !== 1 ? 's' : ''}</span>
                         {order.dueDate && (
-                          <span className="flex items-center gap-1">
-                            📅 <span className={new Date(order.dueDate) < new Date() && order.status !== 'COMPLETED' ? 'text-red-600 font-semibold' : ''}>
-                              {new Date(order.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                            </span>
+                          <span className={`flex items-center gap-1 ${isOverdue ? 'text-red-600 font-semibold' : isDueSoon ? 'text-amber-600 font-semibold' : ''}`}>
+                            📅 {new Date(order.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            {dueDaysLeft !== null && order.status !== 'COMPLETED' && (
+                              <span>({dueDaysLeft < 0 ? `${Math.abs(dueDaysLeft)}d overdue` : dueDaysLeft === 0 ? 'today' : `${dueDaysLeft}d left`})</span>
+                            )}
                           </span>
                         )}
                         {order.workCenter && <span>📍 {order.workCenter.name}</span>}
@@ -1045,66 +1079,128 @@ export default function StaffPortalPage() {
                     {totalSteps > 0 && (
                       <div className="border-t border-border">
                         <div className="px-4 py-2 bg-surface-hover/30 flex items-center justify-between">
-                          <span className="text-[10px] text-muted uppercase tracking-wide font-semibold">Manufacturing Steps</span>
+                          <span className="text-[10px] text-muted uppercase tracking-wide font-semibold flex items-center gap-1.5">
+                            <ClipboardList className="w-3 h-3" /> Manufacturing Steps
+                          </span>
                           <span className="text-[10px] font-medium text-muted">{doneSteps}/{totalSteps} done</span>
                         </div>
                         <div className="divide-y divide-border/50">
                           {order.productionSteps.map(step => {
                             const stepIcon = { PENDING: '⏳', IN_PROGRESS: '🔨', DONE: '✅', SKIPPED: '⏭️' };
+                            // Estimated time: plannedMins is per-unit * qty, so show per-unit (divide by plannedQty)
+                            const estMinsPerUnit = order.plannedQty > 0 ? Math.round((step.plannedMins || 0) / order.plannedQty) : (step.plannedMins || 0);
+                            const draftNote = stepNotes[step.id] ?? (step.notes || '');
                             return (
                               <div key={step.id} className={`px-4 py-3 ${step.status === 'IN_PROGRESS' ? 'bg-blue-500/5' : step.status === 'DONE' ? 'bg-emerald-500/5' : ''}`}>
-                                <div className="flex items-center gap-3">
-                                  <span className="text-lg flex-shrink-0">{stepIcon[step.status] || '⏳'}</span>
+                                <div className="flex items-start gap-3">
+                                  <span className="text-lg flex-shrink-0 mt-0.5">{stepIcon[step.status] || '⏳'}</span>
                                   <div className="flex-1 min-w-0">
                                     <p className={`text-sm ${step.status === 'DONE' ? 'line-through text-muted' : 'text-foreground font-medium'}`}>
                                       {step.stepNumber}. {step.operationName}
                                     </p>
-                                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted mt-0.5">
-                                      {step.plannedMins > 0 && <span>⏱ {step.plannedMins}m</span>}
+                                    {/* Meta row: estimated time, work center, actual time */}
+                                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-muted mt-1">
+                                      {estMinsPerUnit > 0 && (
+                                        <span className="flex items-center gap-0.5">
+                                          <Timer className="w-2.5 h-2.5" />
+                                          Est. {estMinsPerUnit >= 60 ? `${Math.floor(estMinsPerUnit/60)}h ${estMinsPerUnit%60}m` : `${estMinsPerUnit}m`}
+                                        </span>
+                                      )}
                                       {step.workCenter?.name && <span>📍 {step.workCenter.name}</span>}
-                                      {step.startedAt && <span>Started {new Date(step.startedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
-                                      {step.completedAt && <span className="text-emerald-600">Done {new Date(step.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>}
+                                      {step.status === 'IN_PROGRESS' && step.startedAt && (
+                                        <span className="text-blue-600 font-medium flex items-center gap-0.5">
+                                          <Clock className="w-2.5 h-2.5 animate-pulse" />
+                                          Started {new Date(step.startedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                      )}
+                                      {step.status === 'DONE' && step.actualMins > 0 && (
+                                        <span className={`font-medium ${step.actualMins > estMinsPerUnit && estMinsPerUnit > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                          ✓ Took {step.actualMins >= 60 ? `${Math.floor(step.actualMins/60)}h ${step.actualMins%60}m` : `${step.actualMins}m`}
+                                          {estMinsPerUnit > 0 && step.actualMins > estMinsPerUnit && ' (over estimate)'}
+                                        </span>
+                                      )}
+                                      {step.completedAt && (
+                                        <span className="text-emerald-600">Done {new Date(step.completedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                      )}
                                     </div>
+
+                                    {/* Existing saved note */}
+                                    {step.notes && step.status === 'DONE' && (
+                                      <p className="mt-1.5 text-[10px] text-amber-700 bg-amber-500/5 px-2 py-1 rounded flex items-start gap-1">
+                                        <MessageSquare className="w-2.5 h-2.5 flex-shrink-0 mt-0.5" />
+                                        {step.notes}
+                                      </p>
+                                    )}
+
+                                    {/* Step notes input — show when IN_PROGRESS */}
+                                    {order.status === 'IN_PROGRESS' && step.status === 'IN_PROGRESS' && (
+                                      <div className="mt-2 flex gap-2 items-start">
+                                        <textarea
+                                          value={draftNote}
+                                          onChange={e => setStepNotes(n => ({ ...n, [step.id]: e.target.value }))}
+                                          placeholder="Add note / report issue (optional)..."
+                                          rows={2}
+                                          className="flex-1 px-2 py-1.5 text-[11px] bg-surface border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-accent/50 resize-none text-foreground placeholder:text-muted"
+                                        />
+                                        <button
+                                          disabled={savingNoteId === step.id || !draftNote.trim()}
+                                          onClick={async () => {
+                                            setSavingNoteId(step.id);
+                                            await staffAddStepNote(loggedInStaff.id, step.id, draftNote.trim());
+                                            const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                            if (refresh.success) setProductionOrders(refresh.data);
+                                            setSavingNoteId(null);
+                                          }}
+                                          className="px-2 py-1.5 bg-accent text-white rounded-lg text-[10px] font-semibold disabled:opacity-40 flex-shrink-0"
+                                        >
+                                          {savingNoteId === step.id ? '...' : 'Save'}
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Action buttons */}
-                                  {order.status === 'IN_PROGRESS' && step.status === 'PENDING' && (
-                                    <button
-                                      disabled={stepUpdating === step.id}
-                                      onClick={async () => {
-                                        setStepUpdating(step.id);
-                                        const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'IN_PROGRESS');
-                                        if (res.success) {
-                                          const refresh = await getStaffProductionOrders(loggedInStaff.id);
-                                          if (refresh.success) setProductionOrders(refresh.data);
-                                        } else { alert(res.error); }
-                                        setStepUpdating(null);
-                                      }}
-                                      className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all flex-shrink-0"
-                                    >
-                                      ▶ Start
-                                    </button>
-                                  )}
-                                  {order.status === 'IN_PROGRESS' && step.status === 'IN_PROGRESS' && (
-                                    <button
-                                      disabled={stepUpdating === step.id}
-                                      onClick={async () => {
-                                        setStepUpdating(step.id);
-                                        const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'DONE');
-                                        if (res.success) {
-                                          const refresh = await getStaffProductionOrders(loggedInStaff.id);
-                                          if (refresh.success) setProductionOrders(refresh.data);
-                                        } else { alert(res.error); }
-                                        setStepUpdating(null);
-                                      }}
-                                      className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all flex-shrink-0"
-                                    >
-                                      ✓ Done
-                                    </button>
-                                  )}
-                                  {step.status === 'DONE' && (
-                                    <span className="text-[10px] text-emerald-600 font-semibold flex-shrink-0">Completed</span>
-                                  )}
+                                  <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                                    {order.status === 'IN_PROGRESS' && step.status === 'PENDING' && (
+                                      <button
+                                        disabled={stepUpdating === step.id}
+                                        onClick={async () => {
+                                          setStepUpdating(step.id);
+                                          const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'IN_PROGRESS');
+                                          if (res.success) {
+                                            const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                            if (refresh.success) setProductionOrders(refresh.data);
+                                          } else { alert(res.error); }
+                                          setStepUpdating(null);
+                                        }}
+                                        className="px-3 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 active:scale-95 disabled:opacity-50 transition-all"
+                                      >
+                                        ▶ Start
+                                      </button>
+                                    )}
+                                    {order.status === 'IN_PROGRESS' && step.status === 'IN_PROGRESS' && (
+                                      <button
+                                        disabled={stepUpdating === step.id}
+                                        onClick={async () => {
+                                          setStepUpdating(step.id);
+                                          const note = (stepNotes[step.id] ?? '').trim() || undefined;
+                                          const res = await staffUpdateProductionStep(loggedInStaff.id, step.id, 'DONE', note);
+                                          if (res.success) {
+                                            setStepNotes(n => { const c = {...n}; delete c[step.id]; return c; });
+                                            const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                                            if (refresh.success) setProductionOrders(refresh.data);
+                                          } else { alert(res.error); }
+                                          setStepUpdating(null);
+                                        }}
+                                        className="px-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 active:scale-95 disabled:opacity-50 transition-all"
+                                      >
+                                        ✓ Done
+                                      </button>
+                                    )}
+                                    {step.status === 'DONE' && (
+                                      <span className="text-[10px] text-emerald-600 font-semibold">Completed</span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -1113,10 +1209,67 @@ export default function StaffPortalPage() {
                       </div>
                     )}
 
-                    {/* Notes */}
+                    {/* ── Manager Notes ── */}
                     {order.notes && (
-                      <div className="px-4 py-2.5 border-t border-border bg-surface-hover/20">
-                        <p className="text-[11px] text-muted">📝 {order.notes}</p>
+                      <div className="px-4 py-2.5 border-t border-border bg-amber-500/5">
+                        <p className="text-[11px] text-amber-700 flex items-start gap-1.5">
+                          <MessageSquare className="w-3 h-3 flex-shrink-0 mt-0.5" />
+                          <span><span className="font-semibold">Manager note:</span> {order.notes}</span>
+                        </p>
+                      </div>
+                    )}
+
+                    {/* ── BOM Materials Checklist (with stock availability) ── */}
+                    {bomItems.length > 0 && (
+                      <div className="border-t border-border">
+                        <button
+                          onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                          className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-surface-hover/50 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 text-[11px] font-semibold text-muted uppercase tracking-wide">
+                            <Boxes className="w-3.5 h-3.5" />
+                            Required Materials ({bomItems.length})
+                          </span>
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5 text-muted" /> : <ChevronDown className="w-3.5 h-3.5 text-muted" />}
+                        </button>
+                        {isExpanded && (
+                          <div className="divide-y divide-border/40 bg-surface-hover/20">
+                            {bomItems.map((item, idx) => {
+                              const needed = item.quantity * order.plannedQty * (1 + (item.wastagePercent || 0) / 100);
+                              const inStock = item.rawMaterial?.stock ?? 0;
+                              const hasEnough = inStock >= needed;
+                              return (
+                                <div key={idx} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${hasEnough ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                                      <Boxes className={`w-3 h-3 ${hasEnough ? 'text-emerald-500' : 'text-red-500'}`} />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-medium text-foreground truncate">{item.rawMaterial?.name || 'Material'}</p>
+                                      <p className="text-[10px] text-muted">{item.rawMaterial?.sku} · Stock: {inStock} {item.rawMaterial?.unitOfMeasure}</p>
+                                    </div>
+                                  </div>
+                                  <div className="text-right flex-shrink-0">
+                                    <p className={`text-xs font-bold ${hasEnough ? 'text-emerald-600' : 'text-red-600'}`}>
+                                      {Math.ceil(needed * 10) / 10} {item.unitOfMeasure || item.rawMaterial?.unitOfMeasure || 'PCS'}
+                                    </p>
+                                    <p className={`text-[10px] font-medium ${hasEnough ? 'text-emerald-600' : 'text-red-500'}`}>
+                                      {hasEnough ? '✓ Available' : '⚠ Shortage'}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {bomItems.some(item => {
+                              const needed = item.quantity * order.plannedQty * (1 + (item.wastagePercent || 0) / 100);
+                              return (item.rawMaterial?.stock ?? 0) < needed;
+                            }) && (
+                              <div className="px-4 py-2 bg-red-500/5">
+                                <p className="text-[10px] text-red-600 font-medium">⚠️ Some materials are short — inform your manager before starting</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
