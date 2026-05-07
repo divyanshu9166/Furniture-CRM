@@ -926,47 +926,30 @@ export async function completeProduction(data: unknown) {
 
     for (const c of consumptions) {
       const planned = order.consumptions.find(oc => oc.rawMaterialId === c.rawMaterialId)
-      const materialScrapQty = roundQty(c.scrapQty || 0)
-      const issuedQty = roundQty(c.issuedQty || 0)
+      const materialScrapQty = c.scrapQty || 0
+      const issuedQty = roundQty(c.issuedQty || 0)  // Use issued instead of planned
       const actualQtyRounded = roundQty(c.actualQty || 0)
       const totalConsumedAndScrap = roundQty(actualQtyRounded + materialScrapQty)
       
-      // Calculate returned: issued - (consumed + scrap)
+      // Calculate returned: issued - actual - scrap
       const returnedQty = Math.max(0, roundQty(issuedQty - totalConsumedAndScrap))
       
       // Detect over-consumption: if actual + scrap > issued
-      const isOverConsumed = totalConsumedAndScrap > issuedQty + 0.001
-
-      // ── Stock Deduction Logic ──
-      // Materials physically go to the production floor.
-      // We deduct what was consumed + scrapped from inventory.
-      // If there was over-consumption beyond issued, we only deduct the extra
-      // from warehouse stock (the rest was already on the floor).
-      // If under-consumed, returned material is added back.
-      if (isOverConsumed) {
-        // Extra material beyond what was issued must come from warehouse
-        const extraFromWarehouse = roundQty(totalConsumedAndScrap - issuedQty)
-        // Deduct full issued qty + extra from warehouse
-        await adjustManufacturingStockWithTx(tx, c.rawMaterialId, -(issuedQty + extraFromWarehouse), 'PRODUCTION', {
-          referenceType: 'Production',
-          referenceId: productionOrderId,
-          notes: `Consumed for ${order.displayId} (over-consumed by ${extraFromWarehouse})`,
-          createdBy: 'Manufacturing',
-        })
-      } else {
-        // Normal case: deduct only what was consumed + scrapped (return the rest)
-        await adjustManufacturingStockWithTx(tx, c.rawMaterialId, -totalConsumedAndScrap, 'PRODUCTION', {
-          referenceType: 'Production',
-          referenceId: productionOrderId,
-          notes: `Consumed for ${order.displayId}${returnedQty > 0 ? ` (returned ${returnedQty})` : ''}`,
-          createdBy: 'Manufacturing',
-        })
-      }
-
+      const isOverConsumed = totalConsumedAndScrap > issuedQty
+      
+      // Stock deduction: always use what was actually consumed + scrapped, but if over-consumed, adjust
+      const consumedFromStock = isOverConsumed ? totalConsumedAndScrap : issuedQty
+      
       // Cost calculation based on actual consumption + scrap
       const cost = planned ? Math.round(totalConsumedAndScrap * planned.unitCost) : 0
       totalMaterialCost += cost
 
+      await adjustManufacturingStockWithTx(tx, c.rawMaterialId, -consumedFromStock, 'PRODUCTION', {
+        referenceType: 'Production',
+        referenceId: productionOrderId,
+        notes: `Consumed for production ${order.displayId}`,
+        createdBy: 'Manufacturing',
+      })
       if (planned) {
         await tx.materialConsumption.update({
           where: { id: planned.id },
@@ -1076,8 +1059,7 @@ export async function completeProduction(data: unknown) {
         actualQty,
         totalMaterialCost,
         totalLabourCost: roundedLabourCost,
-        machineCost: machineCost ?? 0,
-        overheadCost, // other expenses
+        overheadCost: (machineCost ?? 0) + overheadCost, // store combined overhead
         totalCost,
         costPerUnit,
         actualMins: refreshedOrder?.actualMins || 0,
