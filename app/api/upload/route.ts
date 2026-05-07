@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { uploadFile } from '@/lib/r2'
 
 const ALLOWED_TYPES = [
-  'image/jpeg', 'image/jpg',  // Standard JPEG (jpeg = jpg, but browsers may report either)
+  'image/jpeg', 'image/jpg',
   'image/png',
   'image/webp',
   'image/heic', 'image/heif', // iPhone default photo format
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     for (const file of files) {
       if (!ALLOWED_TYPES.includes(file.type)) {
         return NextResponse.json(
-          { error: `Invalid file type: ${file.name}. Only JPG, PNG, and WebP allowed.` },
+          { error: `Invalid file type: ${file.name}. Only JPG, PNG, WebP, HEIC, and GIF allowed.` },
           { status: 400 }
         )
       }
@@ -51,19 +51,15 @@ export async function POST(req: NextRequest) {
 
       const bytes = await file.arrayBuffer()
       const buffer = Buffer.from(bytes)
-      
+
       const url = await uploadFile(buffer, file.name, file.type, folder)
       urls.push(url)
     }
 
     return NextResponse.json({ success: true, urls })
   } catch (error) {
-    // Log the REAL error to docker logs (check with: docker compose logs app)
-    const msg = error instanceof Error ? error.message : String(error)
-    console.error('[Upload API] REAL ERROR:', msg)
-    return NextResponse.json(
-      { error: `Upload failed: ${msg}` },
-      { status: 500 }
-    )
+    const msg = error instanceof Error ? error.message : 'Upload failed'
+    console.error('[Upload API] Error:', msg)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

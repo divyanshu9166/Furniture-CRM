@@ -1,163 +1,77 @@
+/**
+ * File Upload — Local VPS Storage
+ *
+ * All images/files are stored on the VPS at the Docker volume mount:
+ *   /app/uploads  (container path, persisted via Docker named volume)
+ *
+ * The UPLOAD_DIR env var is set in docker-compose.yml to "/app/uploads".
+ * In local dev (no env var set), files go to <project_root>/uploads.
+ *
+ * Files are served back via /api/uploads/[...path]/route.ts
+ */
+
 import { randomUUID } from 'crypto'
 import { writeFile, mkdir, unlink } from 'fs/promises'
 import { join } from 'path'
 
-// Dynamic import to avoid Turbopack ESM/CJS bundling issues with @aws-sdk
-async function getS3Modules() {
-  const { S3Client, PutObjectCommand, DeleteObjectCommand } = await import('@aws-sdk/client-s3')
-  const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner')
-  return { S3Client, PutObjectCommand, DeleteObjectCommand, getSignedUrl }
-}
+// ─── Path Resolution ──────────────────────────────────────────────────
 
-const BUCKET = process.env.R2_BUCKET_NAME || 'furniture-crm'
-
-function isR2Configured(): boolean {
-  return !!(
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY
-  )
-}
-
-function getR2Config() {
-  const accountId = process.env.R2_ACCOUNT_ID
-  if (!accountId) {
-    throw new Error('R2_ACCOUNT_ID is not set')
-  }
-  return {
-    region: 'auto' as const,
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-    credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID || '',
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || '',
-    },
-  }
-}
-
-// ─── Local filesystem fallback (when R2 is not configured) ───────────
-
-// In Next.js standalone builds, process.cwd() resolves to .next/standalone/
-// NOT the project root. We use UPLOAD_DIR env var (set in docker-compose)
-// so files always land in the Docker volume mount at /app/uploads.
 function getUploadsRoot(): string {
+  // UPLOAD_DIR is set in docker-compose to "/app/uploads" (the Docker volume)
+  // In local dev this env var is not set, so we fall back to cwd/uploads
   return process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
 }
 
-async function uploadFileLocal(
+// ─── Upload ───────────────────────────────────────────────────────────
+
+export async function uploadFile(
   file: Buffer,
   fileName: string,
+  _contentType: string,   // kept for API compatibility — not used for local storage
   folder: string
 ): Promise<string> {
-  const ext = fileName.split('.').pop() || 'bin'
+  const ext = (fileName.split('.').pop() || 'bin').toLowerCase()
   const uniqueName = `${randomUUID()}.${ext}`
   const root = getUploadsRoot()
   const dir = join(root, folder)
   const filePath = join(dir, uniqueName)
 
-  console.log(`[Upload Local] UPLOAD_DIR env: ${process.env.UPLOAD_DIR}`)
-  console.log(`[Upload Local] process.cwd(): ${process.cwd()}`)
-  console.log(`[Upload Local] Writing to: ${filePath}`)
+  console.log(`[Upload] Saving to: ${filePath}`)
 
   try {
     await mkdir(dir, { recursive: true })
     await writeFile(filePath, file)
-    console.log(`[Upload Local] SUCCESS: ${filePath}`)
+    console.log(`[Upload] SUCCESS: /api/uploads/${folder}/${uniqueName}`)
   } catch (err) {
-    console.error(`[Upload Local] FAILED to write ${filePath}:`, err)
-    throw err  // re-throw so API catch block gets the real error
+    console.error(`[Upload] FAILED writing ${filePath}:`, err)
+    throw err
   }
 
   return `/api/uploads/${folder}/${uniqueName}`
 }
 
-async function deleteFileLocal(key: string): Promise<void> {
-  // key looks like "/api/uploads/products/uuid.jpg"
+// ─── Delete ───────────────────────────────────────────────────────────
+
+export async function deleteFile(key: string): Promise<void> {
+  // key is like "/api/uploads/products/uuid.jpg"
   const relativePath = key.replace(/^\/api\/uploads\//, '')
   const filePath = join(getUploadsRoot(), relativePath)
   try {
     await unlink(filePath)
+    console.log(`[Upload] Deleted: ${filePath}`)
   } catch {
-    // File may not exist, ignore
+    // File may not exist — ignore silently
   }
 }
 
-// ─── Public API ──────────────────────────────────────────────────────
-
-export async function uploadFile(
-  file: Buffer,
-  fileName: string,
-  contentType: string,
-  folder: string
-): Promise<string> {
-  // Use local filesystem if R2 is not configured
-  if (!isR2Configured()) {
-    console.log('[Upload] R2 not configured — saving to local filesystem')
-    return uploadFileLocal(file, fileName, folder)
-  }
-
-  const { S3Client, PutObjectCommand } = await getS3Modules()
-  const client = new S3Client(getR2Config())
-  const ext = fileName.split('.').pop() || 'bin'
-  const key = `${folder}/${randomUUID()}.${ext}`
-
-  await client.send(
-    new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-      Body: file,
-      ContentType: contentType,
-    })
-  )
-
-  const publicUrl = process.env.R2_PUBLIC_URL
-  if (publicUrl) {
-    return `${publicUrl}/${key}`
-  }
-
-  return key
-}
+// ─── Presigned URL stub (not needed for local storage) ────────────────
 
 export async function getPresignedUploadUrl(
   folder: string,
   fileName: string,
-  contentType: string
+  _contentType: string
 ): Promise<{ url: string; key: string }> {
-  if (!isR2Configured()) {
-    // For local mode, presigned URLs aren't applicable — return a direct upload endpoint
-    const ext = fileName.split('.').pop() || 'bin'
-    const key = `/uploads/${folder}/${randomUUID()}.${ext}`
-    return { url: '/api/upload', key }
-  }
-
-  const { S3Client, PutObjectCommand, getSignedUrl } = await getS3Modules()
-  const client = new S3Client(getR2Config())
-  const ext = fileName.split('.').pop() || 'bin'
-  const key = `${folder}/${randomUUID()}.${ext}`
-
-  const url = await getSignedUrl(
-    client,
-    new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-      ContentType: contentType,
-    }),
-    { expiresIn: 600 }
-  )
-
-  return { url, key }
-}
-
-export async function deleteFile(key: string): Promise<void> {
-  if (!isR2Configured()) {
-    return deleteFileLocal(key)
-  }
-
-  const { S3Client, DeleteObjectCommand } = await getS3Modules()
-  const client = new S3Client(getR2Config())
-  await client.send(
-    new DeleteObjectCommand({
-      Bucket: BUCKET,
-      Key: key,
-    })
-  )
+  const ext = (fileName.split('.').pop() || 'bin').toLowerCase()
+  const key = `/api/uploads/${folder}/${randomUUID()}.${ext}`
+  return { url: '/api/upload', key }
 }

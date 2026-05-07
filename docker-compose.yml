@@ -50,13 +50,8 @@ services:
       SESSION_SECRET: "${SESSION_SECRET}"
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
-      R2_ACCOUNT_ID: "${R2_ACCOUNT_ID}"
-      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID}"
-      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY}"
-      R2_BUCKET_NAME: "${R2_BUCKET_NAME:-furniture-crm}"
-      R2_PUBLIC_URL: "${R2_PUBLIC_URL}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
-      # Explicit upload path — process.cwd() in standalone builds ≠ /app
+      # Images stored on VPS local volume — no cloud storage needed
       UPLOAD_DIR: "/app/uploads"
     depends_on:
       db:
