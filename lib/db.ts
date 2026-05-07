@@ -7,7 +7,15 @@ const globalForPrisma = globalThis as unknown as {
 }
 
 function createPrismaClient() {
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
+  const pool = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    // Production connection pool tuning
+    max: 20,                  // max open connections (Postgres default is 100, keep headroom)
+    idleTimeoutMillis: 30000, // close idle connections after 30s to free resources
+    connectionTimeoutMillis: 5000, // fail fast after 5s if no connection available
+    keepAlive: true,          // detect dead connections via TCP keepalive
+    keepAliveInitialDelayMillis: 10000,
+  })
   const adapter = new PrismaPg(pool as any)
   return new PrismaClient({ adapter })
 }

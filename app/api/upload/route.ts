@@ -58,9 +58,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, urls })
   } catch (error) {
-    console.error('Upload error:', error)
+    // Log the REAL error to docker logs (check with: docker compose logs app)
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[Upload API] REAL ERROR:', msg)
     return NextResponse.json(
-      { error: 'Upload failed. Please try again.' },
+      { error: `Upload failed: ${msg}` },
       { status: 500 }
     )
   }

@@ -29,8 +29,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
+# Install curl for healthcheck + su-exec for privilege dropping in entrypoint
+RUN apk add --no-cache curl su-exec
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -39,8 +39,8 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 
-# Ensure uploads directory exists and is writable (for local file upload fallback)
-RUN mkdir -p ./uploads && chown -R nextjs:nodejs ./uploads
+# Ensure uploads directory exists (permissions fixed at runtime by entrypoint)
+RUN mkdir -p ./uploads
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # Copy Prisma files for migrations/seed
@@ -63,10 +63,14 @@ COPY --from=builder /app/node_modules/postgres-date ./node_modules/postgres-date
 COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-interval
 COPY --from=builder /app/node_modules/split2 ./node_modules/split2
 
-USER nextjs
+# Copy entrypoint that fixes volume permissions then drops to nextjs user
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
+# Keep as root — entrypoint will chown /app/uploads then exec as nextjs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "server.js"]

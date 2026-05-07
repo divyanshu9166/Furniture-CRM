@@ -206,6 +206,9 @@ model Product {
 
   @@index([categoryId])
   @@index([sku])
+  @@index([name])                    // product search by name
+  @@index([stock])                   // low-stock queries (stock < reorderLevel)
+  @@index([categoryId, stock])       // category-filtered stock queries
 }
 
 // ─── ORDERS ──────────────────────────────────────────
@@ -255,6 +258,8 @@ model Order {
   @@index([source])
   @@index([date])
   @@index([contactId])
+  @@index([status, date])            // dashboard: orders by status filtered by date range
+  @@index([contactId, status])       // CRM: customer order history by status
 }
 
 // ─── QUOTATIONS ───────────────────────────────────────
@@ -301,6 +306,8 @@ model Quotation {
   @@index([date])
   @@index([status])
   @@index([contactId])
+  @@index([contactId, status])       // customer quotation history by status
+  @@index([status, date])            // billing: filter by status + date range
 }
 
 model QuotationItem {
@@ -390,6 +397,9 @@ model Invoice {
   @@index([paymentStatus])
   @@index([invoiceStatus])
   @@index([contactId])
+  @@index([paymentStatus, date])     // billing dashboard: unpaid invoices by date
+  @@index([invoiceStatus, date])     // billing: active invoices in date range
+  @@index([contactId, paymentStatus]) // CRM: customer outstanding invoices
 }
 
 model InvoiceItem {
@@ -599,6 +609,8 @@ model Attendance {
 
   @@unique([staffId, date])
   @@index([date])
+  @@index([staffId])                 // all attendance for a staff member
+  @@index([staffId, date])           // payroll: attendance in date range per staff
 }
 
 model StaffActivity {
@@ -838,6 +850,7 @@ model Notification {
 
   @@index([read])
   @@index([type])
+  @@index([read, createdAt])         // fetch unread notifications sorted newest-first
 }
 
 // ─── STORE CAMPAIGNS (QR Codes) ──────────────────────
@@ -1255,6 +1268,9 @@ model StockLedger {
   @@index([productId])
   @@index([godownId])
   @@index([createdAt])
+  @@index([productId, createdAt])    // ledger timeline: all entries for a product sorted by time
+  @@index([godownId, createdAt])     // godown audit trail sorted by time
+  @@index([entryType])               // filter by entry type (PRODUCTION, SALE, etc.)
 }
 
 // ─── MODULE 3: DEEP INVENTORY ────────────────────────

@@ -50,10 +50,23 @@ async function uploadFileLocal(
 ): Promise<string> {
   const ext = fileName.split('.').pop() || 'bin'
   const uniqueName = `${randomUUID()}.${ext}`
-  const dir = join(getUploadsRoot(), folder)
-  await mkdir(dir, { recursive: true })
+  const root = getUploadsRoot()
+  const dir = join(root, folder)
   const filePath = join(dir, uniqueName)
-  await writeFile(filePath, file)
+
+  console.log(`[Upload Local] UPLOAD_DIR env: ${process.env.UPLOAD_DIR}`)
+  console.log(`[Upload Local] process.cwd(): ${process.cwd()}`)
+  console.log(`[Upload Local] Writing to: ${filePath}`)
+
+  try {
+    await mkdir(dir, { recursive: true })
+    await writeFile(filePath, file)
+    console.log(`[Upload Local] SUCCESS: ${filePath}`)
+  } catch (err) {
+    console.error(`[Upload Local] FAILED to write ${filePath}:`, err)
+    throw err  // re-throw so API catch block gets the real error
+  }
+
   return `/api/uploads/${folder}/${uniqueName}`
 }
 
