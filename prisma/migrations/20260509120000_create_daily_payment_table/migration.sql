@@ -49,6 +49,9 @@ BEGIN
   END IF;
 END $$;
 
+-- Create unique index on displayId BEFORE insert (required for ON CONFLICT)
+CREATE UNIQUE INDEX IF NOT EXISTS "DailyPayment_displayId_key" ON "DailyPayment" ("displayId");
+
 INSERT INTO "DailyPayment" (
   "displayId",
   "amount",
@@ -97,8 +100,6 @@ SELECT
   p."date"
 FROM "Payment" p
 ON CONFLICT ("displayId") DO NOTHING;
-
-CREATE UNIQUE INDEX IF NOT EXISTS "DailyPayment_displayId_key" ON "DailyPayment" ("displayId");
 
 CREATE INDEX IF NOT EXISTS "DailyPayment_date_idx" ON "DailyPayment" ("date");
 
