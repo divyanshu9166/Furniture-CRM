@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
+    "dev:clean": "if exist .next rmdir /s /q .next && next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
