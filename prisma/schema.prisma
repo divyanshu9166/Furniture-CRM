@@ -92,6 +92,7 @@ model Contact {
   callLogs      CallLog[]
   conversations Conversation[]
   reviews       Review[]
+  dailyPayments DailyPayment[]
 
   @@index([email])
   @@index([emailSubscribed])
@@ -254,6 +255,8 @@ model Order {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
+  dailyPayments DailyPayment[]
+
   @@index([status])
   @@index([source])
   @@index([date])
@@ -392,6 +395,7 @@ model Invoice {
   payments    Payment[]
   creditNotes CreditNote[]
   eWayBills   EWayBill[]
+  dailyPayments DailyPayment[]
 
   @@index([date])
   @@index([paymentStatus])
@@ -490,6 +494,7 @@ model CustomOrder {
   fieldVisits      FieldVisit[]
   productionOrders ProductionOrder[]
   inventoryItems   CustomOrderInventory[]
+  dailyPayments    DailyPayment[]
 
   @@index([status])
   @@index([assignedStaffId])
@@ -584,6 +589,7 @@ model Staff {
   loans            StaffLoan[]
   expenses         Expense[]         @relation("StaffExpenses")
   productionOrders ProductionOrder[] @relation("ProductionOrderAssignedStaff")
+  receivedPayments DailyPayment[]
 
   @@index([email])
 }
@@ -1721,6 +1727,69 @@ model DailyCashRegister {
   updatedAt   DateTime @updatedAt
 
   @@index([date])
+}
+
+model DailyPayment {
+  id              Int              @id @default(autoincrement())
+  displayId       String           @unique
+  amount          Int
+  gstAmount       Int              @default(0)         // GST on payment (for B2B)
+  type            String           @default("IN")      // IN = received, OUT = given (refunds/change)
+  method          String           // Cash, UPI, Card, Bank Transfer, Cheque
+  reference       String?          // transaction ID (bank ref, UPI ref, cheque number)
+  referenceHash   String?          // Hash to detect duplicate references (method + reference)
+  date            DateTime         @default(now())
+  status          String           @default("Pending") // Pending, Reconciled, Reversed, Bounced
+  
+  // Staff tracking (proper foreign key instead of string)
+  receivedByStaffId Int?
+  receivedByStaff Staff?           @relation(fields: [receivedByStaffId], references: [id])
+  
+  // Cheque-specific fields
+  chequeNumber    String?          // For Cheque method
+  chequeDate      DateTime?        // Cheque dated as
+  chequeBounced   Boolean          @default(false)
+  bounceReason    String?
+  
+  customerName    String?          // Manual entry for dealer/customer name
+  
+  // Document linking
+  contactId       Int?
+  contact         Contact?         @relation(fields: [contactId], references: [id])
+  orderId         Int?
+  order           Order?           @relation(fields: [orderId], references: [id])
+  invoiceId       Int?
+  invoice         Invoice?         @relation(fields: [invoiceId], references: [id])
+  customOrderId   Int?
+  customOrder     CustomOrder?     @relation(fields: [customOrderId], references: [id])
+  
+  // Reconciliation
+  reconciled      Boolean          @default(false)
+  reconciledDate  DateTime?
+  reconciledBy    String?          // User who reconciled
+  bankRefNumber   String?          // Bank statement reference number
+  
+  // Reversal tracking
+  reversalId      Int?             // If this is a reversal, points to original payment
+  isReversal      Boolean          @default(false)
+  reversalReason  String?
+  
+  // General
+  notes           String?
+  attachment      String?          // For receipt uploads
+  
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([method, reference])    // Ensure unique reference per method (except Cash)
+  @@index([date])
+  @@index([method])
+  @@index([contactId])
+  @@index([type])
+  @@index([status])
+  @@index([reconciled])
+  @@index([chequeBounced])
+  @@index([referenceHash])
 }
 
 // ─── MODULE 7: FINANCIAL STATEMENTS ─────────────────

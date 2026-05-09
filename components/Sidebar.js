@@ -32,6 +32,7 @@ import {
   BarChart3,
   Calculator,
   Building2,
+  Banknote,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useSession } from '@/components/AuthProvider';
@@ -63,6 +64,7 @@ const navItems = [
   { href: '/calls', label: 'Call Center', icon: Headphones },
   { href: '/gst', label: 'GST Compliance', icon: FileSpreadsheet, roles: ['ADMIN', 'MANAGER'] },
   { href: '/expenses', label: 'Expenses', icon: Calculator, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
+  { href: '/payments', label: 'Daily Payments', icon: Banknote, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
   { href: '/payroll', label: 'Payroll', icon: Wallet, roles: ['ADMIN'] },
   { href: '/financials', label: 'Financials', icon: BarChart3, roles: ['ADMIN'] },
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['ADMIN'] },

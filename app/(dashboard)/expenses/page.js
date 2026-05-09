@@ -355,7 +355,6 @@ export default function ExpensesPage() {
     { key: 'analytics', label: 'Analytics', icon: PieChart },
     { key: 'budget', label: 'Budget vs Actual', icon: BarChart3 },
     { key: 'recurring', label: 'Recurring', icon: Repeat },
-    { key: 'cash', label: 'Cash Register', icon: Banknote },
     { key: 'categories', label: 'Categories', icon: Settings2 },
   ];
 
@@ -955,7 +954,7 @@ export default function ExpensesPage() {
                       {rec.isActive ? 'Active' : 'Paused'}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
                     <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); }}
                       className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-accent/30 text-muted hover:text-foreground transition-all text-center">
                       {rec.isActive ? 'Pause' : 'Resume'}
@@ -972,96 +971,7 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* ═══════ CASH REGISTER TAB ═══════ */}
-      {tab === 'cash' && !cashReg && (
-        <div className="glass-card py-16 text-center text-muted">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent mx-auto mb-3" />
-          <p className="text-sm">Loading cash register...</p>
-        </div>
-      )}
-      {tab === 'cash' && cashReg && (
-        <div className="space-y-4">
-          <div className="glass-card p-6">
-            <h3 className="text-base font-semibold text-foreground mb-5 flex items-center gap-2">
-              <Banknote className="w-5 h-5 text-accent" /> Daily Cash Register — {todayStr}
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              <div className="bg-surface rounded-xl p-4 border border-border">
-                <p className="text-xs text-muted mb-1">Opening Cash</p>
-                <div className="relative">
-                  <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-                  <input type="number" min="0" value={cashReg.openingCash}
-                    onChange={e => setCashReg(r => ({ ...r, openingCash: parseInt(e.target.value) || 0 }))}
-                    className="w-full pl-7 pr-2 py-2 bg-background border border-border rounded-lg text-sm font-bold focus:outline-none focus:border-accent/50" />
-                </div>
-              </div>
-              <div className="bg-surface rounded-xl p-4 border border-border">
-                <p className="text-xs text-muted mb-1">Cash In (Sales)</p>
-                <div className="relative">
-                  <IndianRupee className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-green-600" />
-                  <input type="number" min="0" value={cashReg.cashIn}
-                    onChange={e => setCashReg(r => ({ ...r, cashIn: parseInt(e.target.value) || 0 }))}
-                    className="w-full pl-7 pr-2 py-2 bg-background border border-border rounded-lg text-sm font-bold text-green-600 focus:outline-none focus:border-accent/50" />
-                </div>
-              </div>
-              <div className="bg-surface rounded-xl p-4 border border-border">
-                <p className="text-xs text-muted mb-1">Cash Out (Expenses)</p>
-                <p className="text-lg font-bold text-red-600 py-1">{formatCurrency(cashReg.cashOut || 0)}</p>
-                <p className="text-[10px] text-muted">Auto-calculated from cash expenses</p>
-              </div>
-              <div className="bg-surface rounded-xl p-4 border border-accent/30">
-                <p className="text-xs text-muted mb-1">Expected Closing</p>
-                <p className="text-lg font-bold text-accent py-1">
-                  {formatCurrency((cashReg.openingCash || 0) + (cashReg.cashIn || 0) - (cashReg.cashOut || 0))}
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-xs font-medium text-muted mb-1.5">Actual Closing Cash (physical count)</label>
-                <div className="relative">
-                  <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-                  <input type="number" min="0" placeholder="Enter actual cash counted"
-                    value={cashReg.closingCash ?? ''}
-                    onChange={e => setCashReg(r => ({ ...r, closingCash: e.target.value ? parseInt(e.target.value) : null }))}
-                    className="w-full pl-9 pr-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
-                <input type="text" placeholder="e.g. ₹500 taken for petty cash"
-                  value={cashReg.notes || ''}
-                  onChange={e => setCashReg(r => ({ ...r, notes: e.target.value }))}
-                  className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
-              </div>
-            </div>
-            {/* Difference alert */}
-            {cashReg.closingCash != null && (() => {
-              const expected = (cashReg.openingCash || 0) + (cashReg.cashIn || 0) - (cashReg.cashOut || 0);
-              const diff = cashReg.closingCash - expected;
-              if (diff === 0) return null;
-              return (
-                <div className={`p-3 rounded-xl text-sm flex items-center gap-2 mb-4 ${diff > 0 ? 'bg-green-500/10 text-green-600 border border-green-500/20' : 'bg-red-500/10 text-red-600 border border-red-500/20'}`}>
-                  <AlertTriangle className="w-4 h-4" />
-                  Cash {diff > 0 ? 'surplus' : 'shortage'} of {formatCurrency(Math.abs(diff))} detected!
-                </div>
-              );
-            })()}
-            <div className="flex items-center gap-3">
-              <button onClick={handleSaveCashRegister} disabled={cashSaving}
-                className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 disabled:opacity-60">
-                {cashSaving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                {cashSaving ? 'Saving...' : 'Save Register'}
-              </button>
-              {cashSaved && (
-                <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
-                  <CheckCircle2 className="w-4 h-4" /> Saved successfully!
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* ═══════ CATEGORIES TAB ═══════ */}
       {tab === 'categories' && (
