@@ -1781,7 +1781,6 @@ model DailyPayment {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  @@unique([method, reference])    // Ensure unique reference per method (except Cash)
   @@index([date])
   @@index([method])
   @@index([contactId])

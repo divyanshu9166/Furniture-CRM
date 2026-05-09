@@ -1,4 +1,4 @@
--- Add payment register enhancements safely for environments that already have legacy Payment data.
+-- Add DailyPayment table and migrate legacy Payment data.
 
 CREATE TABLE IF NOT EXISTS "DailyPayment" (
   "id" SERIAL NOT NULL,
@@ -52,6 +52,7 @@ END $$;
 -- Create unique index on displayId BEFORE insert (required for ON CONFLICT)
 CREATE UNIQUE INDEX IF NOT EXISTS "DailyPayment_displayId_key" ON "DailyPayment" ("displayId");
 
+-- Migrate legacy Payment data safely (no unique constraint on method+reference to block this)
 INSERT INTO "DailyPayment" (
   "displayId",
   "amount",
