@@ -44,7 +44,7 @@ const startOfMonth = () => new Date().toISOString().slice(0, 7) + '-01';
 
 export default function PaymentsPage() {
   const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
-  
+
   // Tab State
   const [tab, setTab] = useState('today');
   const [loading, setLoading] = useState(true);
@@ -72,7 +72,7 @@ export default function PaymentsPage() {
   const [showReverseModal, setShowReverseModal] = useState(false);
   const [showBounceModal, setShowBounceModal] = useState(false);
   const [selectedPaymentForAction, setSelectedPaymentForAction] = useState(null);
-  
+
   // Cash Register Edit
   const [editingCash, setEditingCash] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState('');
@@ -282,7 +282,7 @@ export default function PaymentsPage() {
     return (
       <div className="space-y-6 animate-pulse p-4">
         <div className="h-8 w-64 bg-surface rounded-lg" />
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">{[1,2,3,4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
         <div className="h-96 bg-surface rounded-2xl" />
       </div>
     );
@@ -322,22 +322,22 @@ export default function PaymentsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="glass-card p-4 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute -right-4 -top-4 w-16 h-16 bg-green-500/10 rounded-full blur-xl pointer-events-none" />
-          <p className="text-xs text-muted flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-green-500"/> Total In</p>
+          <p className="text-xs text-muted flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-green-500" /> Total In</p>
           <p className="text-xl font-bold text-green-500">{formatCurrency(totalIn)}</p>
         </div>
         <div className="glass-card p-4 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute -right-4 -top-4 w-16 h-16 bg-red-500/10 rounded-full blur-xl pointer-events-none" />
-          <p className="text-xs text-muted flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-red-500"/> Total Out</p>
+          <p className="text-xs text-muted flex items-center gap-1.5"><TrendingDown className="w-3.5 h-3.5 text-red-500" /> Total Out</p>
           <p className="text-xl font-bold text-red-500">{formatCurrency(totalOut)}</p>
         </div>
         <div className="glass-card p-4 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute -right-4 -top-4 w-16 h-16 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
-          <p className="text-xs text-muted flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-blue-500"/> UPI Total</p>
+          <p className="text-xs text-muted flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-blue-500" /> UPI Total</p>
           <p className="text-xl font-bold text-foreground">{formatCurrency(filtered.filter(p => p.method === 'UPI' && p.type === 'IN').reduce((s, p) => s + p.amount, 0))}</p>
         </div>
         <div className="glass-card p-4 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute -right-4 -top-4 w-16 h-16 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
-          <p className="text-xs text-muted flex items-center gap-1.5"><Banknote className="w-3.5 h-3.5 text-amber-500"/> Cash in Hand (Today)</p>
+          <p className="text-xs text-muted flex items-center gap-1.5"><Banknote className="w-3.5 h-3.5 text-amber-500" /> Cash in Hand (Today)</p>
           <p className="text-xl font-bold text-amber-500">{formatCurrency((cashReg?.openingCash || 0) + (cashReg?.cashIn || 0) - (cashReg?.cashOut || 0))}</p>
         </div>
       </div>
@@ -773,10 +773,10 @@ export default function PaymentsPage() {
                 <p className="text-xs text-muted mb-1">Opening Cash</p>
                 {editingCash ? (
                   <div className="flex items-center gap-2 mt-2">
-                    <input 
-                      type="number" 
-                      value={openingCashInput} 
-                      onChange={e => setOpeningCashInput(e.target.value)} 
+                    <input
+                      type="number"
+                      value={openingCashInput}
+                      onChange={e => setOpeningCashInput(e.target.value)}
                       className="w-full px-2 py-1 text-sm bg-background border border-border rounded outline-none"
                       placeholder={cashReg?.openingCash || 0}
                     />
@@ -815,11 +815,11 @@ export default function PaymentsPage() {
                 </p>
               </div>
             </div>
-            
+
             <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20 text-sm text-blue-600 flex items-start gap-2 mb-4">
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <p>
-                The <strong>Cash Register</strong> automatically tracks your daily cash flow. 
+                The <strong>Cash Register</strong> automatically tracks your daily cash flow.
                 <br />
                 <span className="opacity-80">Cash In comes from Daily Payments marked as &quot;Cash&quot; (Money In). Cash Out comes from Cash Payments (Money Out) + Cash Expenses from the Daily Expense Calculator. Just set your Opening Cash!</span>
               </p>
@@ -840,8 +840,8 @@ export default function PaymentsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted mb-2">Reason for Reversal</label>
-                <textarea rows={3} placeholder="e.g., Incorrect entry, duplicate payment, customer request..." 
-                  onChange={(e) => setSelectedPaymentForAction({...selectedPaymentForAction, reversalReason: e.target.value})}
+                <textarea rows={3} placeholder="e.g., Incorrect entry, duplicate payment, customer request..."
+                  onChange={(e) => setSelectedPaymentForAction({ ...selectedPaymentForAction, reversalReason: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded-xl text-sm focus:border-accent/50 outline-none resize-none" />
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-border">
@@ -869,7 +869,7 @@ export default function PaymentsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted mb-2">Bounce Reason</label>
-                <select onChange={(e) => setSelectedPaymentForAction({...selectedPaymentForAction, bounceReason: e.target.value})}
+                <select onChange={(e) => setSelectedPaymentForAction({ ...selectedPaymentForAction, bounceReason: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded-xl text-sm focus:border-accent/50 outline-none">
                   <option value="">Select reason...</option>
                   <option value="Insufficient Funds">Insufficient Funds</option>
@@ -882,8 +882,8 @@ export default function PaymentsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted mb-2">Additional Notes</label>
-                <input type="text" placeholder="Any other information..." 
-                  onChange={(e) => setSelectedPaymentForAction({...selectedPaymentForAction, bounceNotes: e.target.value})}
+                <input type="text" placeholder="Any other information..."
+                  onChange={(e) => setSelectedPaymentForAction({ ...selectedPaymentForAction, bounceNotes: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded-xl text-sm focus:border-accent/50 outline-none" />
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-border">

@@ -22,7 +22,7 @@ export async function getDailyPayments(filters = {}) {
       start.setHours(0, 0, 0, 0);
       const end = new Date(endDate);
       end.setHours(23, 59, 59, 999);
-      
+
       where.date = {
         gte: start,
         lte: end,
@@ -35,7 +35,7 @@ export async function getDailyPayments(filters = {}) {
 
     if (method && method !== 'All') where.method = method;
     if (type && type !== 'All') where.type = type;
-    
+
     if (status && status !== 'All') where.status = status;
     if (reconciled !== undefined) where.reconciled = reconciled === true;
     if (filters.includeReversals !== true) where.isReversal = false;
@@ -72,7 +72,7 @@ export async function createDailyPayment(data) {
     // Validation: Amount must be positive integer
     const amount = parseInt(data.amount);
     if (!amount || amount <= 0) return { success: false, error: 'Invalid amount. Must be greater than 0.' };
-    
+
     // Validation: Payment method is required
     if (!data.method) return { success: false, error: 'Payment method is required.' };
 
@@ -274,7 +274,7 @@ export async function reconcilePayments(paymentIds, bankRefNumbers = {}) {
     }
 
     const updates = await Promise.all(
-      paymentIds.map(id => 
+      paymentIds.map(id =>
         prisma.dailyPayment.update({
           where: { id: parseInt(id) },
           data: {
@@ -341,8 +341,8 @@ export async function getReconciliationSummary(filters = {}) {
     };
   } catch (error) {
     console.error('Error getting reconciliation summary:', error);
-    return { 
-      success: true, 
+    return {
+      success: true,
       data: {
         unreconciledCount: 0,
         unreconciledAmount: 0,
@@ -379,19 +379,19 @@ export async function getDailyCashRegister(date) {
 
     // Recalculate cashIn / cashOut from DailyPayment and Expenses
     const payments = await prisma.dailyPayment.findMany({
-      where: { 
-        date: { gte: startOfDay, lte: endOfDay }, 
+      where: {
+        date: { gte: startOfDay, lte: endOfDay },
         method: 'Cash',
         isReversal: false,
         chequeBounced: false
       },
     });
     const cashIn = payments.filter(p => p.type === 'IN').reduce((sum, p) => sum + p.amount, 0);
-    
+
     // For cashOut we also include Cash expenses from Expense model
     const cashPaymentsOut = payments.filter(p => p.type === 'OUT').reduce((sum, p) => sum + p.amount, 0);
     let totalCashOut = cashPaymentsOut;
-    
+
     try {
       const cashExpenses = await prisma.expense.findMany({
         where: { date: { gte: startOfDay, lte: endOfDay }, paymentMode: 'Cash', status: 'Approved' },
@@ -403,8 +403,8 @@ export async function getDailyCashRegister(date) {
 
     register = await prisma.dailyCashRegister.update({
       where: { id: register.id },
-      data: { 
-        cashIn, 
+      data: {
+        cashIn,
         cashOut: totalCashOut
       },
     });

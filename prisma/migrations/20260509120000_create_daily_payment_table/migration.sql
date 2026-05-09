@@ -1,4 +1,4 @@
--- Add payment register enhancements safely for environments that already have legacy Payment data.
+-- Recovery migration for production databases that only have the legacy Payment table.
 
 CREATE TABLE IF NOT EXISTS "DailyPayment" (
   "id" SERIAL NOT NULL,
