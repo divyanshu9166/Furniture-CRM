@@ -1291,22 +1291,24 @@ export default function StaffPortalPage() {
             </button>
           </div>
           <div className="glass-card overflow-hidden">
-            <table className="crm-table">
-              <thead>
-                <tr><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
-              </thead>
-              <tbody>
-                {me.stockUpdates.map((u, i) => (
-                  <tr key={i}>
-                    <td className="font-medium text-foreground">{u.product}</td>
-                    <td className="text-muted text-xs">{u.warehouse}</td>
-                    <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${stockActionColors[u.action]}`}>{u.action}</span></td>
-                    <td className="font-semibold">{u.qty}</td>
-                    <td className="text-xs text-muted">{u.date} · {u.time}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
+                <thead>
+                  <tr><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
+                </thead>
+                <tbody>
+                  {me.stockUpdates.map((u, i) => (
+                    <tr key={i}>
+                      <td className="font-medium text-foreground">{u.product}</td>
+                      <td className="text-muted text-xs">{u.warehouse}</td>
+                      <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${stockActionColors[u.action]}`}>{u.action}</span></td>
+                      <td className="font-semibold">{u.qty}</td>
+                      <td className="text-xs text-muted">{u.date} · {u.time}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {me.stockUpdates.length === 0 && <p className="text-sm text-muted text-center py-8">No stock updates yet</p>}
           </div>
         </div>
@@ -1848,21 +1850,23 @@ export default function StaffPortalPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-sm font-semibold text-foreground">Recent Sales</h3>
             </div>
-            <table className="crm-table">
-              <thead>
-                <tr><th>Product</th><th>Customer</th><th>Date</th><th>Amount</th></tr>
-              </thead>
-              <tbody>
-                {recentSales.map((sale, i) => (
-                  <tr key={i}>
-                    <td className="font-medium text-foreground">{sale.product}</td>
-                    <td className="text-muted">{sale.customer}</td>
-                    <td className="text-muted text-xs">{sale.date}</td>
-                    <td className="font-semibold text-success">₹{sale.amount.toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
+                <thead>
+                  <tr><th>Product</th><th>Customer</th><th>Date</th><th>Amount</th></tr>
+                </thead>
+                <tbody>
+                  {recentSales.map((sale, i) => (
+                    <tr key={i}>
+                      <td className="font-medium text-foreground">{sale.product}</td>
+                      <td className="text-muted">{sale.customer}</td>
+                      <td className="text-muted text-xs">{sale.date}</td>
+                      <td className="font-semibold text-success">₹{sale.amount.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {recentSales.length === 0 && <p className="text-sm text-muted text-center py-8">No sales recorded</p>}
           </div>
         </div>

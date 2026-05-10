@@ -310,7 +310,8 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Sales Leaderboard — All Time</h3>
             </div>
-            <table className="crm-table">
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
               <thead>
                 <tr>
                   <th>Rank</th><th>Staff</th><th>Role</th><th>Leads</th><th>Conversions</th><th>Rate</th><th>Revenue</th><th>Rating</th><th>Today</th>
@@ -339,6 +340,7 @@ export default function StaffPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -517,7 +519,8 @@ export default function StaffPage() {
               <h3 className="text-base font-semibold text-foreground">Today&apos;s Attendance Report</h3>
               <p className="text-xs text-muted mt-0.5">GPS-verified attendance with location tracking</p>
             </div>
-            <table className="crm-table">
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
               <thead>
                 <tr>
                   <th>Staff</th>
@@ -561,6 +564,7 @@ export default function StaffPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* Weekly Attendance Table */}
@@ -568,7 +572,8 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Weekly Overview — Last 7 Days</h3>
             </div>
-            <table className="crm-table">
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
               <thead>
                 <tr>
                   <th>Staff</th>
@@ -610,6 +615,7 @@ export default function StaffPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -757,7 +763,8 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Stock Updates by Staff</h3>
             </div>
-            <table className="crm-table">
+            <div className="overflow-x-auto">
+              <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
               <thead>
                 <tr><th>Staff</th><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
               </thead>
@@ -774,6 +781,7 @@ export default function StaffPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}

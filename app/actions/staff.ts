@@ -7,6 +7,29 @@ import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import bcrypt from 'bcryptjs'
 import type { Prisma, UserRole } from '@prisma/client'
 
+// ─── IST helpers ─────────────────────────────────────────────────────────────
+// All attendance dates/times must be in IST (Asia/Kolkata, UTC+5:30)
+// regardless of the server's system timezone.
+function getISTDate(): { today: Date; time: string } {
+  const now = new Date()
+  // Current IST offset in ms (+5:30 = 19800 s)
+  const istOffsetMs = 5.5 * 60 * 60 * 1000
+  const istNow = new Date(now.getTime() + istOffsetMs)
+
+  // midnight of today in IST, stored as UTC equivalent
+  const today = new Date(
+    Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate())
+  )
+
+  // HH:mm in IST (24-hour)
+  const hh = String(istNow.getUTCHours()).padStart(2, '0')
+  const mm = String(istNow.getUTCMinutes()).padStart(2, '0')
+  const time = `${hh}:${mm}`
+
+  return { today, time }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const staffPortalInclude: Prisma.StaffInclude = {
   attendance: { orderBy: { date: 'desc' }, take: 7 },
   activities: { orderBy: { date: 'desc' }, take: 10 },
@@ -37,6 +60,9 @@ const mapStaffForPortal = (s: any) => ({
     clockOut: a.clockOut,
     hours: a.hours,
     status: a.status,
+    isLate: a.isLate,
+    method: a.method,
+    clockInDist: a.clockInDist,
   })),
   activities: s.activities.map((a: any) => ({
     type: a.type,
@@ -330,15 +356,21 @@ function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 export async function clockIn(staffId: number, gps?: { lat: number; lng: number }) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const now = new Date()
-  const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const { today, time } = getISTDate()
+
+  // 1. Check if already clocked in
+  const existing = await prisma.attendance.findUnique({
+    where: { staffId_date: { staffId, date: today } }
+  })
+
+  if (existing?.clockIn) {
+    return { success: false, error: 'Already clocked in for today' }
+  }
 
   // Fetch settings once for both geofence and shift-time checks
   const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
 
-  // Check geofence if GPS provided
+  // 2. Check geofence if GPS provided
   let distance: number | null = null
   let method = 'manual'
   if (gps) {
@@ -346,16 +378,19 @@ export async function clockIn(staffId: number, gps?: { lat: number; lng: number 
     if (settings?.storeLat && settings?.storeLng) {
       distance = Math.round(getDistance(gps.lat, gps.lng, settings.storeLat, settings.storeLng))
       if (distance > (settings.geofenceRadius ?? 100)) {
-        return { success: false, error: `You are ${distance}m away from the store. Must be within ${settings.geofenceRadius}m to clock in.` }
+        return { success: false, error: `You are ${distance}m away from the store. Must be within ${settings.geofenceRadius ?? 100}m to clock in.` }
       }
     }
   }
 
-  // Check if late
+  // 3. Check if late (compare IST clock time vs configured shift start)
+  // Standard ERP feature: Add a 15-minute grace period
   const shiftStart = settings?.shiftStartTime || '09:30'
   const [shiftH, shiftM] = shiftStart.split(':').map(Number)
   const [nowH, nowM] = time.split(':').map(Number)
-  const isLate = (nowH * 60 + nowM) > (shiftH * 60 + shiftM)
+  
+  const graceMinutes = 15
+  const isLate = (nowH * 60 + nowM) > (shiftH * 60 + shiftM + graceMinutes)
 
   const attendance = await prisma.attendance.upsert({
     where: { staffId_date: { staffId, date: today } },
@@ -375,10 +410,7 @@ export async function clockIn(staffId: number, gps?: { lat: number; lng: number 
 }
 
 export async function clockOut(staffId: number, gps?: { lat: number; lng: number }) {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const now = new Date()
-  const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })
+  const { today, time } = getISTDate()
 
   const existing = await prisma.attendance.findUnique({
     where: { staffId_date: { staffId, date: today } },
@@ -387,24 +419,46 @@ export async function clockOut(staffId: number, gps?: { lat: number; lng: number
   if (!existing || !existing.clockIn) {
     return { success: false, error: 'Must clock in first' }
   }
+  
+  if (existing.clockOut) {
+    return { success: false, error: 'Already clocked out for today' }
+  }
 
-  // Check geofence if GPS provided
+  // Check geofence if GPS provided (informational only on clock-out)
   let distance: number | null = null
+  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
   if (gps) {
-    const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
     if (settings?.storeLat && settings?.storeLng) {
       distance = Math.round(getDistance(gps.lat, gps.lng, settings.storeLat, settings.storeLng))
     }
   }
 
-  // Calculate hours
+  // Calculate hours worked (guard against midnight crossover giving negative)
   const [inH, inM] = existing.clockIn.split(':').map(Number)
   const [outH, outM] = time.split(':').map(Number)
-  const hours = Math.round(((outH * 60 + outM) - (inH * 60 + inM)) / 60 * 100) / 100
+  let totalMins = (outH * 60 + outM) - (inH * 60 + inM)
+  if (totalMins < 0) totalMins += 24 * 60 // midnight crossover
+  const hours = Math.round(totalMins / 60 * 100) / 100
+  
+  // Standard ERP feature: Check for Half Day based on shift duration
+  const shiftStart = settings?.shiftStartTime || '09:30'
+  const shiftEnd = settings?.shiftEndTime || '20:00'
+  const [startH, startM] = shiftStart.split(':').map(Number)
+  const [endH, endM] = shiftEnd.split(':').map(Number)
+  
+  let shiftTotalMins = (endH * 60 + endM) - (startH * 60 + startM)
+  if (shiftTotalMins <= 0) shiftTotalMins = 9 * 60 // fallback to 9 hours if configured incorrectly
+  const halfDayThresholdHours = (shiftTotalMins / 2) / 60
+  
+  let newStatus = existing.status
+  // If they worked less than half the shift, automatically mark as Half Day
+  if (hours > 0 && hours < halfDayThresholdHours) {
+    newStatus = 'Half Day'
+  }
 
   const attendance = await prisma.attendance.update({
     where: { staffId_date: { staffId, date: today } },
-    data: { clockOut: time, hours, clockOutLat: gps?.lat, clockOutLng: gps?.lng, clockOutDist: distance },
+    data: { clockOut: time, hours, status: newStatus, clockOutLat: gps?.lat, clockOutLng: gps?.lng, clockOutDist: distance },
   })
 
   revalidatePath('/staff')
@@ -450,8 +504,7 @@ export async function getAttendance(staffId: number, days: number = 30) {
 }
 
 export async function getDailyAttendanceReport() {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const { today } = getISTDate()
 
   const allStaff = await prisma.staff.findMany({
     where: { status: 'Active' },
