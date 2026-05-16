@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User } from 'lucide-react';
+import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings';
 import { getStaff, createStaff, assignStaffLogin, updateStaffMember } from '@/app/actions/staff';
@@ -437,6 +437,15 @@ export default function SettingsPage() {
         whatsappNumber: form.whatsappNumber.value,
         email: form.email.value,
         address: form.address.value,
+        paymentQr: form.paymentQr.value,
+        invoicePrefix: form.invoicePrefix.value,
+        invoicePadding: form.invoicePadding.value ? parseInt(form.invoicePadding.value) : undefined,
+        invoiceTerms: form.invoiceTerms.value,
+        bankName: form.bankName.value,
+        bankAccountName: form.bankAccountName.value,
+        bankAccountNumber: form.bankAccountNumber.value,
+        bankIfsc: form.bankIfsc.value,
+        bankUpiId: form.bankUpiId.value,
         gstNumber: form.gstNumber.value,
         storeLat: form.storeLat.value ? parseFloat(form.storeLat.value) : undefined,
         storeLng: form.storeLng.value ? parseFloat(form.storeLng.value) : undefined,
@@ -625,6 +634,35 @@ export default function SettingsPage() {
                   <div><label className="block text-xs font-medium text-muted mb-1.5">GST Number</label><input type="text" name="gstNumber" defaultValue={storeSettings?.gstNumber || ''} className="w-full" /></div>
                   <div><label className="block text-xs font-medium text-muted mb-1.5">Shift Start Time</label><input type="time" name="shiftStartTime" defaultValue={storeSettings?.shiftStartTime || '09:00'} className="w-full" /></div>
                   <div><label className="block text-xs font-medium text-muted mb-1.5">Shift End Time</label><input type="time" name="shiftEndTime" defaultValue={storeSettings?.shiftEndTime || '20:00'} className="w-full" /></div>
+                </div>
+                <div className="border-t border-border pt-4 mt-2">
+                  <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2"><FileText className="w-4 h-4 text-accent" /> Invoice & Payment Settings</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Invoice Prefix</label>
+                      <input type="text" name="invoicePrefix" defaultValue={storeSettings?.invoicePrefix || 'INV-'} className="w-full" placeholder="e.g. INV-" />
+                      <p className="text-[10px] text-muted mt-1">Used for new invoice numbers. Example: INV-0001</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Number Padding</label>
+                      <input type="number" name="invoicePadding" min="2" max="8" defaultValue={storeSettings?.invoicePadding || 4} className="w-full" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-muted mb-1.5">Payment QR URL (optional)</label>
+                      <input type="text" name="paymentQr" defaultValue={storeSettings?.paymentQr || ''} className="w-full" placeholder="https://..." />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+                    <div><label className="block text-xs font-medium text-muted mb-1.5">Bank Name</label><input type="text" name="bankName" defaultValue={storeSettings?.bankName || ''} className="w-full" /></div>
+                    <div><label className="block text-xs font-medium text-muted mb-1.5">Account Holder Name</label><input type="text" name="bankAccountName" defaultValue={storeSettings?.bankAccountName || ''} className="w-full" /></div>
+                    <div><label className="block text-xs font-medium text-muted mb-1.5">Account Number</label><input type="text" name="bankAccountNumber" defaultValue={storeSettings?.bankAccountNumber || ''} className="w-full" /></div>
+                    <div><label className="block text-xs font-medium text-muted mb-1.5">IFSC Code</label><input type="text" name="bankIfsc" defaultValue={storeSettings?.bankIfsc || ''} className="w-full" /></div>
+                    <div><label className="block text-xs font-medium text-muted mb-1.5">UPI ID</label><input type="text" name="bankUpiId" defaultValue={storeSettings?.bankUpiId || ''} className="w-full" placeholder="name@bank" /></div>
+                  </div>
+                  <div className="mt-3">
+                    <label className="block text-xs font-medium text-muted mb-1.5">Invoice Terms</label>
+                    <textarea rows={2} name="invoiceTerms" defaultValue={storeSettings?.invoiceTerms || ''} className="w-full" placeholder="e.g. Goods once sold will not be taken back." />
+                  </div>
                 </div>
                 {/* GPS Attendance Settings */}
                 <div className="border-t border-border pt-4 mt-2">
@@ -1541,7 +1579,7 @@ export default function SettingsPage() {
                   <select className="w-full"><option>Friendly & Professional</option><option>Formal</option><option>Casual</option></select>
                 </div>
                 <div><label className="block text-xs font-medium text-muted mb-1.5">Welcome Message</label>
-                  <textarea rows={3} defaultValue="Hello! 👋 Welcome to our furniture store. How can I help you today?" className="w-full" />
+                  <textarea rows={3} defaultValue="Welcome to Kosmic Furniture. We provide modular office, school, and hospital furniture solutions across India. How may we help you today?" className="w-full" />
                 </div>
                 <div><label className="block text-xs font-medium text-muted mb-1.5">Auto Follow-up Schedule</label>
                   <div className="space-y-2">

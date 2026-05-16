@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
         status: (['COMPLETED', 'MISSED', 'NO_ANSWER', 'BUSY'].includes(status) ? status : 'COMPLETED') as CallStatus,
         duration: durationStr,
         durationSec: totalSec,
-        agent: agent || 'AI Agent - Aria',
+        agent: agent || 'AI Agent - Anushka',
         date: now,
         time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
         purpose: purpose || 'AI Call',

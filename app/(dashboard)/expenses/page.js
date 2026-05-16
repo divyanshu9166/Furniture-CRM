@@ -13,8 +13,9 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
+import { useSession } from '@/components/AuthProvider';
 import {
-  getExpenses, createExpense,
+  getExpenses, createExpense, updateExpense,
   getExpenseCategories, createExpenseCategory, updateCategoryBudget, deleteExpenseCategory,
   seedExpenseCategories,
   getRecurringExpenses, createRecurringExpense, toggleRecurringExpense, deleteRecurringExpense,
@@ -39,6 +40,7 @@ const monthStr = () => new Date().toISOString().slice(0, 7); // YYYY-MM
 const startOfMonth = () => monthStr() + '-01';
 
 export default function ExpensesPage() {
+  const { session } = useSession();
   const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
   // ─── TAB & CORE STATE ──────────────────────────
   const [tab, setTab] = useState('today');
@@ -66,6 +68,7 @@ export default function ExpensesPage() {
 
   // Modals
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddRecurring, setShowAddRecurring] = useState(false);
   const [showBudgetEdit, setShowBudgetEdit] = useState(null); // categoryId
@@ -185,16 +188,25 @@ export default function ExpensesPage() {
     setReceiptError('');
   };
 
-  const handleAddExpense = async () => {
+  const handleSaveExpense = async () => {
     if (!expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading) return;
     setSubmitting(true);
-    const res = await createExpense({
+    const payload = {
       ...expForm,
       categoryId: parseInt(expForm.categoryId),
       amount: parseInt(expForm.amount),
-    });
+    };
+    
+    let res;
+    if (editingExpenseId) {
+      res = await updateExpense(editingExpenseId, payload);
+    } else {
+      res = await createExpense(payload);
+    }
+    
     if (res.success) {
       setShowAddExpense(false);
+      setEditingExpenseId(null);
       setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '', receipt: '' });
       setReceiptError('');
       await loadData(dateRange.from, dateRange.to);
@@ -217,6 +229,24 @@ export default function ExpensesPage() {
   const handleDeleteExpense = (expense) => {
     if (!expense) return;
     setExpenseToDraft(expense);
+  };
+
+  const handleEditExpense = (expense) => {
+    if (!expense) return;
+    setEditingExpenseId(expense.id);
+    setExpForm({
+      date: expense.date,
+      categoryId: String(expense.categoryId),
+      amount: String(expense.amount),
+      description: expense.description,
+      paymentMode: expense.paymentMode,
+      reference: expense.reference || '',
+      vendor: expense.vendor || '',
+      notes: expense.notes || '',
+      receipt: expense.receipt || '',
+    });
+    setReceiptError('');
+    setShowAddExpense(true);
   };
 
   const confirmMoveExpenseToDraft = async () => {
@@ -478,9 +508,9 @@ export default function ExpensesPage() {
                   </div>
                 )}
               </div>
-              <button onClick={handleAddExpense} disabled={!expForm.categoryId || !expForm.amount || !expForm.description || submitting || receiptUploading}
+              <button onClick={handleSaveExpense} disabled={!expForm.categoryId || !expForm.amount || !expForm.description || submitting || receiptUploading}
                 className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 flex items-center justify-center gap-1.5 w-full sm:col-span-2 sm:w-auto">
-                <Plus className="w-3.5 h-3.5" /> Add
+                {editingExpenseId ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />} {editingExpenseId ? 'Save Changes' : 'Add'}
               </button>
             </div>
             {receiptError && (
@@ -533,6 +563,11 @@ export default function ExpensesPage() {
                             className="p-1 text-muted hover:text-accent transition-colors" title="View receipt">
                             <Eye className="w-3.5 h-3.5" />
                           </a>
+                        )}
+                        {session?.user?.role === 'ADMIN' && (
+                          <button onClick={() => handleEditExpense(exp)} className="p-1 text-muted hover:text-accent transition-colors" title="Edit expense">
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                         <button onClick={() => handleDeleteExpense(exp)} className="p-1 text-muted hover:text-red-600 transition-colors">
                           <Trash2 className="w-3.5 h-3.5" />
@@ -666,6 +701,11 @@ export default function ExpensesPage() {
                                 className="p-1 text-muted hover:text-accent transition-colors" title="View receipt">
                                 <Eye className="w-3.5 h-3.5" />
                               </a>
+                            )}
+                            {session?.user?.role === 'ADMIN' && (
+                              <button onClick={() => handleEditExpense(exp)} className="p-1 text-muted hover:text-accent transition-colors" title="Edit expense">
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
                             )}
                             <button onClick={() => handleDeleteExpense(exp)} className="p-1 text-muted hover:text-red-600 transition-colors">
                               <Trash2 className="w-3.5 h-3.5" />
@@ -1026,7 +1066,7 @@ export default function ExpensesPage() {
         </div>
       )}
 
-      {/* ═══════ ADD EXPENSE MODAL ═══════ */}
+      {/* ═══════ ADD / EDIT EXPENSE MODAL ═══════ */}
       <Modal isOpen={!!expenseToDraft} onClose={cancelMoveExpenseToDraft} title="Move Expense to Draft" size="sm">
         {expenseToDraft && (
           <div className="space-y-4">
@@ -1043,7 +1083,7 @@ export default function ExpensesPage() {
         )}
       </Modal>
 
-      <Modal isOpen={showAddExpense} onClose={() => setShowAddExpense(false)} title="Add Expense">
+      <Modal isOpen={showAddExpense} onClose={() => { setShowAddExpense(false); setEditingExpenseId(null); setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '', receipt: '' }); }} title={editingExpenseId ? "Edit Expense" : "Add Expense"}>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1142,9 +1182,9 @@ export default function ExpensesPage() {
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button onClick={() => setShowAddExpense(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
-            <button onClick={handleAddExpense} disabled={submitting || !expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading}
+            <button onClick={handleSaveExpense} disabled={submitting || !expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40">
-              {submitting ? 'Adding...' : 'Add Expense'}
+              {submitting ? 'Saving...' : (editingExpenseId ? 'Save Changes' : 'Add Expense')}
             </button>
           </div>
         </div>

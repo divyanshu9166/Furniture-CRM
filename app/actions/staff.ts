@@ -10,7 +10,7 @@ import type { Prisma, UserRole } from '@prisma/client'
 // ─── IST helpers ─────────────────────────────────────────────────────────────
 // All attendance dates/times must be in IST (Asia/Kolkata, UTC+5:30)
 // regardless of the server's system timezone.
-function getISTDate(): { today: Date; time: string } {
+function getISTDate(): { today: Date; time: string } { 
   const now = new Date()
   // Current IST offset in ms (+5:30 = 19800 s)
   const istOffsetMs = 5.5 * 60 * 60 * 1000

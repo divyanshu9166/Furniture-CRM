@@ -1,9 +1,12 @@
 'use server'
 
 import { prisma } from '@/lib/db'
+import { requireRole } from '@/lib/auth-helpers'
 import { revalidatePath } from 'next/cache'
-import { createInvoiceSchema, recordPaymentSchema, createCreditNoteSchema } from '@/lib/validations/invoice'
+import { createInvoiceSchema, updateInvoiceSchema, recordPaymentSchema, createCreditNoteSchema } from '@/lib/validations/invoice'
 import type { PaymentStatus, InvoiceStatus } from '@prisma/client'
+
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // ─── GET ALL INVOICES ──────────────────────────────────
 
@@ -149,23 +152,54 @@ export async function createInvoice(data: unknown) {
     }
   }
 
-  // Get GST rate from store settings (not hardcoded)
+  // Get GST rate and invoice prefix from store settings (not hardcoded)
   const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
   const gstRate = settings?.gstRate ?? 18
+  const invoicePrefix = (settings?.invoicePrefix || 'INV-').trim() || 'INV-'
+  const invoicePadding = settings?.invoicePadding ?? 4
 
-  // Calculate totals
+  // Calculate totals with per-item GST
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
   let discountAmount = 0
   if (discountType === 'flat') discountAmount = Math.min(discount, subtotal)
   else if (discountType === 'percent') discountAmount = Math.round(subtotal * discount / 100)
 
-  const taxable = subtotal - discountAmount
-  const totalGst = Math.round(taxable * gstRate / 100)
+  let remainingDiscount = discountAmount
+  const discountSplits = items.map((item, index) => {
+    if (discountAmount <= 0 || subtotal <= 0) return 0
+    if (index === items.length - 1) return remainingDiscount
+    const share = Math.round((item.price * item.quantity / subtotal) * discountAmount)
+    remainingDiscount -= share
+    return share
+  })
   const resolvedSupplyType = supplyType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE'
-  const igst = resolvedSupplyType === 'INTERSTATE' ? totalGst : 0
-  const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(totalGst / 2)
-  const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : totalGst - cgst // avoid rounding issues
-  const total = taxable + totalGst + (transportCost || 0)
+  const itemRows = items.map((item, index) => {
+    const lineTotal = item.price * item.quantity
+    const discountShare = discountSplits[index] || 0
+    const taxableAmount = Math.max(0, lineTotal - discountShare)
+    const rate = typeof item.gstRate === 'number' ? item.gstRate : gstRate
+    const itemGst = Math.round(taxableAmount * rate / 100)
+    const igst = resolvedSupplyType === 'INTERSTATE' ? itemGst : 0
+    const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2)
+    const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst
+    return {
+      ...item,
+      taxableAmount,
+      gstRate: rate,
+      igst,
+      cgst,
+      sgst,
+      cess: 0,
+      gstAmount: itemGst,
+    }
+  })
+
+  const totalTaxable = itemRows.reduce((sum, item) => sum + item.taxableAmount, 0)
+  const totalGst = itemRows.reduce((sum, item) => sum + item.gstAmount, 0)
+  const igst = itemRows.reduce((sum, item) => sum + item.igst, 0)
+  const cgst = itemRows.reduce((sum, item) => sum + item.cgst, 0)
+  const sgst = itemRows.reduce((sum, item) => sum + item.sgst, 0)
+  const total = totalTaxable + totalGst + (transportCost || 0)
 
   // Calculate total payment
   const totalPayment = payments.reduce((sum, p) => sum + p.amount, 0)
@@ -179,15 +213,16 @@ export async function createInvoice(data: unknown) {
 
   // Generate display ID using MAX + 1 (avoids race condition with count())
   const lastInvoice = await prisma.invoice.findFirst({
+    where: { displayId: { startsWith: invoicePrefix } },
     orderBy: { id: 'desc' },
     select: { displayId: true },
   })
   let nextNum = 1
   if (lastInvoice?.displayId) {
-    const match = lastInvoice.displayId.match(/INV-(\d+)/)
+    const match = lastInvoice.displayId.match(new RegExp(`^${escapeRegExp(invoicePrefix)}(\\d+)$`))
     if (match) nextNum = parseInt(match[1]) + 1
   }
-  const displayId = `INV-${String(nextNum).padStart(4, '0')}`
+  const displayId = `${invoicePrefix}${String(nextNum).padStart(invoicePadding, '0')}`
 
   const now = new Date()
 
@@ -218,13 +253,19 @@ export async function createInvoice(data: unknown) {
       notes,
       heldAt: isHeld ? now : null,
       items: {
-        create: items.map(item => ({
+        create: itemRows.map(item => ({
           productId: item.productId,
           name: item.name,
           sku: item.sku,
           quantity: item.quantity,
           price: item.price,
           hsnCode: item.hsnCode,
+          gstRate: item.gstRate,
+          cgst: item.cgst,
+          sgst: item.sgst,
+          igst: item.igst,
+          cess: item.cess,
+          taxableAmount: item.taxableAmount,
         })),
       },
       payments: {
@@ -242,6 +283,176 @@ export async function createInvoice(data: unknown) {
 
   revalidatePath('/billing')
   return { success: true, data: invoice }
+}
+
+// ─── UPDATE INVOICE (ADMIN ONLY) ──────────────────────
+
+export async function updateInvoice(invoiceId: number, data: unknown) {
+  try {
+    await requireRole('ADMIN')
+  } catch {
+    return { success: false, error: 'Admin access required to edit invoices' }
+  }
+
+  const parsed = updateInvoiceSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  const {
+    customer,
+    phone,
+    address,
+    gstNumber,
+    items,
+    discount,
+    discountType,
+    payments,
+    salespersonId,
+    notes,
+    dueDate,
+    transportCost,
+    supplyType,
+    placeOfSupply,
+  } = parsed.data
+
+  const invoice = await prisma.invoice.findUnique({
+    where: { id: invoiceId },
+    include: { payments: true },
+  })
+  if (!invoice) return { success: false, error: 'Invoice not found' }
+  if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Only active invoices can be edited' }
+
+  const gstNumberValue = typeof gstNumber === 'string'
+    ? gstNumber.trim().toUpperCase()
+    : undefined
+
+  let contact = await prisma.contact.findFirst({ where: { phone } })
+  if (!contact) {
+    contact = await prisma.contact.create({
+      data: {
+        name: customer,
+        phone,
+        address,
+        ...(gstNumberValue ? { gstNumber: gstNumberValue } : {}),
+      },
+    })
+  } else {
+    const updateData: { name?: string; address?: string; gstNumber?: string | null } = {}
+    if (contact.name !== customer) updateData.name = customer
+    if (address && contact.address !== address) updateData.address = address
+    if (gstNumberValue !== undefined && gstNumberValue !== contact.gstNumber) {
+      updateData.gstNumber = gstNumberValue || null
+    }
+    if (Object.keys(updateData).length > 0) {
+      await prisma.contact.update({
+        where: { id: contact.id },
+        data: updateData,
+      })
+    }
+  }
+
+  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
+  const gstRate = settings?.gstRate ?? 18
+
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  let discountAmount = 0
+  if (discountType === 'flat') discountAmount = Math.min(discount, subtotal)
+  else if (discountType === 'percent') discountAmount = Math.round(subtotal * discount / 100)
+
+  let remainingDiscount = discountAmount
+  const discountSplits = items.map((item, index) => {
+    if (discountAmount <= 0 || subtotal <= 0) return 0
+    if (index === items.length - 1) return remainingDiscount
+    const share = Math.round((item.price * item.quantity / subtotal) * discountAmount)
+    remainingDiscount -= share
+    return share
+  })
+
+  const resolvedSupplyType = supplyType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE'
+  const itemRows = items.map((item, index) => {
+    const lineTotal = item.price * item.quantity
+    const discountShare = discountSplits[index] || 0
+    const taxableAmount = Math.max(0, lineTotal - discountShare)
+    const rate = typeof item.gstRate === 'number' ? item.gstRate : gstRate
+    const itemGst = Math.round(taxableAmount * rate / 100)
+    const igst = resolvedSupplyType === 'INTERSTATE' ? itemGst : 0
+    const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2)
+    const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst
+    return {
+      ...item,
+      taxableAmount,
+      gstRate: rate,
+      igst,
+      cgst,
+      sgst,
+      cess: 0,
+      gstAmount: itemGst,
+    }
+  })
+
+  const totalTaxable = itemRows.reduce((sum, item) => sum + item.taxableAmount, 0)
+  const totalGst = itemRows.reduce((sum, item) => sum + item.gstAmount, 0)
+  const igst = itemRows.reduce((sum, item) => sum + item.igst, 0)
+  const cgst = itemRows.reduce((sum, item) => sum + item.cgst, 0)
+  const sgst = itemRows.reduce((sum, item) => sum + item.sgst, 0)
+  const total = totalTaxable + totalGst + (transportCost || 0)
+
+  const paidSoFar = invoice.payments.reduce((sum, p) => sum + p.amount, 0)
+  const amountPaid = Math.min(paidSoFar, total)
+  const balanceDue = total - amountPaid
+
+  let paymentStatus: PaymentStatus = 'PENDING'
+  if (amountPaid >= total) paymentStatus = 'PAID'
+  else if (amountPaid > 0) paymentStatus = 'PARTIAL'
+
+  const paymentMethod = invoice.payments.length > 0
+    ? invoice.paymentMethod
+    : (payments?.[0]?.method || invoice.paymentMethod || 'Cash')
+
+  const updated = await prisma.invoice.update({
+    where: { id: invoiceId },
+    data: {
+      contactId: contact.id,
+      subtotal,
+      discount: discountAmount,
+      discountType,
+      gst: totalGst,
+      cgst,
+      sgst,
+      igst,
+      transportCost: transportCost || 0,
+      total,
+      amountPaid,
+      balanceDue,
+      paymentMethod,
+      paymentStatus,
+      supplyType: resolvedSupplyType,
+      placeOfSupply: placeOfSupply?.trim() || null,
+      dueDate: dueDate ? new Date(dueDate) : null,
+      salespersonId: salespersonId ?? null,
+      notes: notes || null,
+      items: {
+        deleteMany: {},
+        create: itemRows.map(item => ({
+          productId: item.productId,
+          name: item.name,
+          sku: item.sku,
+          quantity: item.quantity,
+          price: item.price,
+          hsnCode: item.hsnCode,
+          gstRate: item.gstRate,
+          cgst: item.cgst,
+          sgst: item.sgst,
+          igst: item.igst,
+          cess: item.cess,
+          taxableAmount: item.taxableAmount,
+        })),
+      },
+    },
+    include: { items: true },
+  })
+
+  revalidatePath('/billing')
+  return { success: true, data: updated }
 }
 
 // ─── RECORD ADDITIONAL PAYMENT ─────────────────────────

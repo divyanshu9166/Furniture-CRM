@@ -312,34 +312,34 @@ export default function StaffPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
-              <thead>
-                <tr>
-                  <th>Rank</th><th>Staff</th><th>Role</th><th>Leads</th><th>Conversions</th><th>Rate</th><th>Revenue</th><th>Rating</th><th>Today</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...salesStaff].sort((a, b) => b.stats.revenue - a.stats.revenue).map((member, idx) => (
-                  <tr key={member.id} className="cursor-pointer" onClick={() => { setSelectedStaff(member); setStaffDetailTab('overview'); }}>
-                    <td>
-                      <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-amber-500/20 text-amber-700' : idx === 1 ? 'bg-zinc-500/20 text-zinc-500' : idx === 2 ? 'bg-orange-700/20 text-orange-700' : 'bg-surface text-muted'}`}>{idx + 1}</span>
-                    </td>
-                    <td><div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{member.avatar}</div><span className="font-medium text-foreground">{member.name}</span></div></td>
-                    <td className="text-muted text-xs">{member.role}</td>
-                    <td>{member.stats.leadsAssigned}</td>
-                    <td className="text-success font-medium">{member.stats.conversions}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden"><div className="h-full bg-accent/50 rounded-full" style={{ width: `${member.stats.conversionRate}%` }} /></div>
-                        <span className="text-xs text-foreground">{member.stats.conversionRate}%</span>
-                      </div>
-                    </td>
-                    <td className="font-semibold text-success">₹{(member.stats.revenue / 100000).toFixed(1)}L</td>
-                    <td><span className="flex items-center gap-1 text-sm"><Star className="w-3.5 h-3.5 text-amber-700" /> {member.stats.rating}</span></td>
-                    <td className="font-medium text-foreground">₹{member.stats.todayRevenue.toLocaleString()}</td>
+                <thead>
+                  <tr>
+                    <th>Rank</th><th>Staff</th><th>Role</th><th>Leads</th><th>Conversions</th><th>Rate</th><th>Revenue</th><th>Rating</th><th>Today</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {[...salesStaff].sort((a, b) => b.stats.revenue - a.stats.revenue).map((member, idx) => (
+                    <tr key={member.id} className="cursor-pointer" onClick={() => { setSelectedStaff(member); setStaffDetailTab('overview'); }}>
+                      <td>
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? 'bg-amber-500/20 text-amber-700' : idx === 1 ? 'bg-zinc-500/20 text-zinc-500' : idx === 2 ? 'bg-orange-700/20 text-orange-700' : 'bg-surface text-muted'}`}>{idx + 1}</span>
+                      </td>
+                      <td><div className="flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{member.avatar}</div><span className="font-medium text-foreground">{member.name}</span></div></td>
+                      <td className="text-muted text-xs">{member.role}</td>
+                      <td>{member.stats.leadsAssigned}</td>
+                      <td className="text-success font-medium">{member.stats.conversions}</td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 bg-surface rounded-full overflow-hidden"><div className="h-full bg-accent/50 rounded-full" style={{ width: `${member.stats.conversionRate}%` }} /></div>
+                          <span className="text-xs text-foreground">{member.stats.conversionRate}%</span>
+                        </div>
+                      </td>
+                      <td className="font-semibold text-success">₹{(member.stats.revenue / 100000).toFixed(1)}L</td>
+                      <td><span className="flex items-center gap-1 text-sm"><Star className="w-3.5 h-3.5 text-amber-700" /> {member.stats.rating}</span></td>
+                      <td className="font-medium text-foreground">₹{member.stats.todayRevenue.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -521,49 +521,49 @@ export default function StaffPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  <th>Status</th>
-                  <th>Clock In</th>
-                  <th>Clock Out</th>
-                  <th>Hours</th>
-                  <th>Method</th>
-                  <th>Distance</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(attendanceReport?.report || []).map(r => (
-                  <tr key={r.staffId}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{r.avatar}</div>
-                        <div>
-                          <p className="font-medium text-foreground text-sm">{r.name}</p>
-                          <p className="text-[10px] text-muted">{r.role}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${r.status === 'Present' ? 'bg-emerald-500/10 text-emerald-700' : r.status === 'Late' ? 'bg-amber-500/10 text-amber-700' : 'bg-red-500/10 text-red-700'}`}>
-                        {r.status}{r.isLate && r.status !== 'Late' ? ' (Late)' : ''}
-                      </span>
-                    </td>
-                    <td>{r.clockIn ? <span className="text-emerald-700 flex items-center gap-1 text-xs"><LogIn className="w-3 h-3" /> {r.clockIn}</span> : <span className="text-muted text-xs">—</span>}</td>
-                    <td>{r.clockOut ? <span className="text-red-700 flex items-center gap-1 text-xs"><LogOut className="w-3 h-3" /> {r.clockOut}</span> : r.clockIn ? <span className="text-xs text-blue-600">Working</span> : <span className="text-muted text-xs">—</span>}</td>
-                    <td className="text-sm font-medium">{r.hours ? `${r.hours}h` : '—'}</td>
-                    <td>
-                      {r.method === 'gps' ? (
-                        <span className="flex items-center gap-1 text-xs text-emerald-700"><MapPin className="w-3 h-3" /> GPS</span>
-                      ) : r.method === 'manual' ? (
-                        <span className="text-xs text-muted">Manual</span>
-                      ) : <span className="text-xs text-muted">—</span>}
-                    </td>
-                    <td className="text-xs text-muted">{r.distance != null ? `${r.distance}m` : '—'}</td>
+                <thead>
+                  <tr>
+                    <th>Staff</th>
+                    <th>Status</th>
+                    <th>Clock In</th>
+                    <th>Clock Out</th>
+                    <th>Hours</th>
+                    <th>Method</th>
+                    <th>Distance</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(attendanceReport?.report || []).map(r => (
+                    <tr key={r.staffId}>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{r.avatar}</div>
+                          <div>
+                            <p className="font-medium text-foreground text-sm">{r.name}</p>
+                            <p className="text-[10px] text-muted">{r.role}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${r.status === 'Present' ? 'bg-emerald-500/10 text-emerald-700' : r.status === 'Late' ? 'bg-amber-500/10 text-amber-700' : 'bg-red-500/10 text-red-700'}`}>
+                          {r.status}{r.isLate && r.status !== 'Late' ? ' (Late)' : ''}
+                        </span>
+                      </td>
+                      <td>{r.clockIn ? <span className="text-emerald-700 flex items-center gap-1 text-xs"><LogIn className="w-3 h-3" /> {r.clockIn}</span> : <span className="text-muted text-xs">—</span>}</td>
+                      <td>{r.clockOut ? <span className="text-red-700 flex items-center gap-1 text-xs"><LogOut className="w-3 h-3" /> {r.clockOut}</span> : r.clockIn ? <span className="text-xs text-blue-600">Working</span> : <span className="text-muted text-xs">—</span>}</td>
+                      <td className="text-sm font-medium">{r.hours ? `${r.hours}h` : '—'}</td>
+                      <td>
+                        {r.method === 'gps' ? (
+                          <span className="flex items-center gap-1 text-xs text-emerald-700"><MapPin className="w-3 h-3" /> GPS</span>
+                        ) : r.method === 'manual' ? (
+                          <span className="text-xs text-muted">Manual</span>
+                        ) : <span className="text-xs text-muted">—</span>}
+                      </td>
+                      <td className="text-xs text-muted">{r.distance != null ? `${r.distance}m` : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -574,47 +574,47 @@ export default function StaffPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  {staff[0]?.attendance.map(a => (
-                    <th key={a.date} className="text-center">{new Date(a.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</th>
-                  ))}
-                  <th className="text-center">Avg Hours</th>
-                </tr>
-              </thead>
-              <tbody>
-                {staff.map(member => {
-                  const totalHours = member.attendance.reduce((s, a) => s + (a.hours || 0), 0);
-                  const workDays = member.attendance.filter(a => a.hours > 0).length;
-                  const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : '0';
-                  return (
-                    <tr key={member.id}>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{member.avatar}</div>
-                          <div>
-                            <p className="font-medium text-foreground text-sm">{member.name}</p>
-                            <p className="text-[10px] text-muted">{member.role}</p>
-                          </div>
-                        </div>
-                      </td>
-                      {member.attendance.map(a => (
-                        <td key={a.date} className="text-center">
-                          <div className="flex flex-col items-center gap-0.5">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${attendanceColors[a.status] || 'bg-zinc-100 text-zinc-500'}`}>
-                              {a.status === 'Present' || a.status === 'Late' ? (a.clockOut ? `${a.hours}h` : 'In') : a.status === 'Half Day' ? `${a.hours}h` : a.status.charAt(0)}
-                            </span>
-                            {a.clockIn && <span className="text-[9px] text-muted">{a.clockIn}</span>}
+                <thead>
+                  <tr>
+                    <th>Staff</th>
+                    {staff[0]?.attendance.map(a => (
+                      <th key={a.date} className="text-center">{new Date(a.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</th>
+                    ))}
+                    <th className="text-center">Avg Hours</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {staff.map(member => {
+                    const totalHours = member.attendance.reduce((s, a) => s + (a.hours || 0), 0);
+                    const workDays = member.attendance.filter(a => a.hours > 0).length;
+                    const avgHours = workDays > 0 ? (totalHours / workDays).toFixed(1) : '0';
+                    return (
+                      <tr key={member.id}>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-bold text-accent">{member.avatar}</div>
+                            <div>
+                              <p className="font-medium text-foreground text-sm">{member.name}</p>
+                              <p className="text-[10px] text-muted">{member.role}</p>
+                            </div>
                           </div>
                         </td>
-                      ))}
-                      <td className="text-center font-semibold text-foreground">{avgHours}h</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {member.attendance.map(a => (
+                          <td key={a.date} className="text-center">
+                            <div className="flex flex-col items-center gap-0.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${attendanceColors[a.status] || 'bg-zinc-100 text-zinc-500'}`}>
+                                {a.status === 'Present' || a.status === 'Late' ? (a.clockOut ? `${a.hours}h` : 'In') : a.status === 'Half Day' ? `${a.hours}h` : a.status.charAt(0)}
+                              </span>
+                              {a.clockIn && <span className="text-[9px] text-muted">{a.clockIn}</span>}
+                            </div>
+                          </td>
+                        ))}
+                        <td className="text-center font-semibold text-foreground">{avgHours}h</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -765,22 +765,22 @@ export default function StaffPage() {
             </div>
             <div className="overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
-              <thead>
-                <tr><th>Staff</th><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
-              </thead>
-              <tbody>
-                {staff.flatMap(s => s.stockUpdates.map(u => ({ ...u, staffName: s.name, staffAvatar: s.avatar }))).sort((a, b) => new Date(`${b.date} ${b.time}`) - new Date(`${a.date} ${a.time}`)).map((u, i) => (
-                  <tr key={i}>
-                    <td><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-accent/10 flex items-center justify-center text-[10px] font-bold text-accent">{u.staffAvatar}</div><span className="text-sm">{u.staffName}</span></div></td>
-                    <td className="font-medium text-foreground">{u.product}</td>
-                    <td className="text-muted text-xs">{u.warehouse}</td>
-                    <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${stockActionColors[u.action]}`}>{u.action}</span></td>
-                    <td className="font-semibold">{u.qty}</td>
-                    <td className="text-xs text-muted">{u.date} · {u.time}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                <thead>
+                  <tr><th>Staff</th><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
+                </thead>
+                <tbody>
+                  {staff.flatMap(s => s.stockUpdates.map(u => ({ ...u, staffName: s.name, staffAvatar: s.avatar }))).sort((a, b) => new Date(`${b.date} ${b.time}`) - new Date(`${a.date} ${a.time}`)).map((u, i) => (
+                    <tr key={i}>
+                      <td><div className="flex items-center gap-2"><div className="w-7 h-7 rounded-full bg-accent/10 flex items-center justify-center text-[10px] font-bold text-accent">{u.staffAvatar}</div><span className="text-sm">{u.staffName}</span></div></td>
+                      <td className="font-medium text-foreground">{u.product}</td>
+                      <td className="text-muted text-xs">{u.warehouse}</td>
+                      <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${stockActionColors[u.action]}`}>{u.action}</span></td>
+                      <td className="font-semibold">{u.qty}</td>
+                      <td className="text-xs text-muted">{u.date} · {u.time}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

@@ -2,10 +2,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Users, Calendar, ShoppingCart, DollarSign, AlertTriangle, TrendingUp, ArrowRight, Clock, MessageSquare, Instagram, Globe, Facebook, Bot, MapPin, CheckCircle2, Ruler, Loader, Target, Percent } from 'lucide-react';
+import { Users, Calendar, ShoppingCart, DollarSign, AlertTriangle, TrendingUp, ArrowRight, Clock, MessageSquare, Instagram, Globe, Facebook, Bot, MapPin, CheckCircle2, Ruler, Loader, Target, Percent, PieChart, MoreHorizontal, TreePine, Truck, Package, Coffee, Fuel, Home, Zap, Wrench, FileText, Megaphone, Factory, Store, HardHat, Landmark } from 'lucide-react';
 import StatCard from '@/components/StatCard';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { getDashboardStats } from '@/app/actions/dashboard';
+import { getExpenseSummary } from '@/app/actions/expenses';
 
 const sourceIconMap = {
   WhatsApp: MessageSquare,
@@ -31,11 +32,17 @@ const statusDisplayMap = {
 };
 
 const formatCompactINR = (value) => `₹${Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 }).format(value || 0)}`;
+const formatCurrency = (value) => `₹${(value || 0).toLocaleString('en-IN')}`;
 
 const formatPctChange = (value) => {
   if (value > 0) return `+${value}%`;
   if (value < 0) return `${value}%`;
   return '0%';
+};
+
+const EXPENSE_ICON_MAP = {
+  TreePine, Truck, Package, Coffee, Fuel, Home, Zap, Wrench,
+  FileText, Megaphone, Factory, Store, HardHat, Landmark, MoreHorizontal,
 };
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -53,13 +60,44 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [expenseSummary, setExpenseSummary] = useState(null);
+  const [expenseLoading, setExpenseLoading] = useState(true);
+  const [expenseRange] = useState(() => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const formatLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    return {
+      from: start.toISOString().split('T')[0],
+      to: now.toISOString().split('T')[0],
+      label: `${formatLabel(start)} - ${formatLabel(now)}`,
+    };
+  });
 
   useEffect(() => {
-    getDashboardStats().then(res => {
-      if (res.success) setStats(res.data);
-      setLoading(false);
-    });
-  }, []);
+    let isActive = true;
+
+    getDashboardStats()
+      .then(res => {
+        if (!isActive) return;
+        if (res.success) setStats(res.data);
+      })
+      .finally(() => {
+        if (isActive) setLoading(false);
+      });
+
+    getExpenseSummary(expenseRange.from, expenseRange.to)
+      .then(res => {
+        if (!isActive) return;
+        if (res.success) setExpenseSummary(res.data);
+      })
+      .finally(() => {
+        if (isActive) setExpenseLoading(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [expenseRange.from, expenseRange.to]);
 
   if (loading) {
     return (
@@ -77,6 +115,11 @@ export default function Dashboard() {
   }
 
   if (!stats) return null;
+
+  const CatIcon = ({ name, className = 'w-4 h-4' }) => {
+    const Icon = EXPENSE_ICON_MAP[name] || MoreHorizontal;
+    return <Icon className={className} />;
+  };
 
   const todayStr = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   const dayStr = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -131,6 +174,145 @@ export default function Dashboard() {
           icon={AlertTriangle}
           color="teal"
         />
+      </div>
+
+      {/* Expense Analytics */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">Expense Analytics</h2>
+            <p className="text-xs text-muted mt-0.5">Month-to-date: {expenseRange.label}</p>
+          </div>
+          <PieChart className="w-5 h-5 text-red-600" />
+        </div>
+
+        {expenseLoading && (
+          <div className="glass-card py-16 text-center text-muted">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500 mx-auto mb-3" />
+            <p className="text-sm">Loading expense analytics...</p>
+          </div>
+        )}
+
+        {!expenseLoading && !expenseSummary && (
+          <div className="glass-card py-16 text-center text-muted">
+            <PieChart className="w-12 h-12 mx-auto mb-3 opacity-20" />
+            <p className="font-medium">No expense data for this period</p>
+            <p className="text-sm mt-1">Add expenses in Daily Expense Calculator to see trends here.</p>
+          </div>
+        )}
+
+        {!expenseLoading && expenseSummary && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
+              <StatCard
+                title="Total Spent"
+                value={formatCurrency(expenseSummary.grandTotal)}
+                icon={PieChart}
+                color="pink"
+              />
+              <StatCard
+                title="Daily Average"
+                value={formatCurrency(expenseSummary.dailyAverage)}
+                icon={TrendingUp}
+                color="info"
+              />
+              <StatCard
+                title="Budget Allocated"
+                value={formatCurrency(expenseSummary.totalBudget)}
+                icon={Target}
+                color="accent"
+              />
+              <StatCard
+                title="Top Category"
+                value={expenseSummary.categoryBreakdown[0]?.categoryName || '-'}
+                change={`${formatCurrency(expenseSummary.categoryBreakdown[0]?.total || 0)} spent`}
+                changeType="up"
+                trendText=""
+                icon={DollarSign}
+                color="purple"
+              />
+            </div>
+
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-4">Expense by Category</h3>
+              <div className="space-y-3">
+                {expenseSummary.categoryBreakdown.map(cat => (
+                  <div key={cat.categoryId}>
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${cat.categoryColor}20` }}>
+                          <CatIcon name={cat.categoryIcon} className="w-3 h-3" />
+                        </div>
+                        <span className="text-xs font-medium text-foreground">{cat.categoryName}</span>
+                        <span className="text-[10px] text-muted">({cat.count} entries)</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {cat.budget > 0 && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded ${cat.total > cat.budget ? 'bg-red-500/10 text-red-600' : 'bg-green-500/10 text-green-600'}`}>
+                            {cat.total > cat.budget ? 'Over' : 'Under'} budget
+                          </span>
+                        )}
+                        <span className="text-sm font-bold text-foreground">{formatCurrency(cat.total)}</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-border rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full transition-all"
+                        style={{
+                          backgroundColor: cat.categoryColor,
+                          width: `${Math.min(100, expenseSummary.grandTotal > 0 ? (cat.total / expenseSummary.grandTotal) * 100 : 0)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="glass-card p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-4">Top Vendors</h3>
+              {expenseSummary.topVendors.length === 0 ? (
+                <p className="text-sm text-muted text-center py-6">No vendor data</p>
+              ) : (
+                <div className="space-y-2">
+                  {expenseSummary.topVendors.slice(0, 8).map((v, i) => (
+                    <div key={v.vendor} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted w-5">{i + 1}.</span>
+                        <span className="text-sm text-foreground">{v.vendor}</span>
+                        <span className="text-[10px] text-muted">({v.count} bills)</span>
+                      </div>
+                      <span className="text-sm font-bold text-foreground">{formatCurrency(v.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {expenseSummary.dailyTotals.length > 0 && (
+              <div className="glass-card p-5">
+                <h3 className="text-sm font-semibold text-foreground mb-4">Daily Spend Trend</h3>
+                <div className="flex items-end gap-1 h-40 overflow-x-auto pb-6 relative">
+                  {(() => {
+                    const maxDay = Math.max(...expenseSummary.dailyTotals.map(d => d.total), 1);
+                    return expenseSummary.dailyTotals.map(d => (
+                      <div key={d.date} className="flex flex-col items-center min-w-[28px] flex-1 relative group">
+                        <div className="absolute -top-6 bg-foreground text-background px-1.5 py-0.5 rounded text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                          {formatCurrency(d.total)}
+                        </div>
+                        <div
+                          className="w-full rounded-t-md bg-red-500/80 hover:bg-red-500 transition-all cursor-default"
+                          style={{ height: `${Math.max(4, (d.total / maxDay) * 140)}px` }}
+                        />
+                        <span className="text-[8px] text-muted mt-1 absolute -bottom-5 whitespace-nowrap">{d.date.slice(5)}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Charts Row */}

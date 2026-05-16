@@ -821,6 +821,14 @@ model StoreSettings {
   email          String?
   address        String?
   paymentQr      String?
+  invoicePrefix  String   @default("INV-")
+  invoicePadding Int      @default(4)
+  invoiceTerms   String?
+  bankName       String?
+  bankAccountName String?
+  bankAccountNumber String?
+  bankIfsc       String?
+  bankUpiId      String?
   gstNumber      String?
   gstRate        Float    @default(18.0)
   currency       String   @default("INR")

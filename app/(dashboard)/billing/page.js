@@ -12,16 +12,18 @@ import {
   RotateCcw, PauseCircle, PlayCircle, ChevronDown,
   ChevronsUpDown, Filter, MoreHorizontal,
   Wallet, BadgeIndianRupee, CircleDollarSign,
-  SplitSquareHorizontal, Eye, XCircle, Truck,
+  SplitSquareHorizontal, Eye, Edit3, XCircle, Truck,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
+import { useSession } from '@/components/AuthProvider';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 import {
-  getInvoices, createInvoice, recordPayment,
+  getInvoices, getInvoice, createInvoice, updateInvoice, recordPayment,
   cancelInvoice, createCreditNote, finalizeHeldInvoice,
   searchContacts, getInvoiceStats, getCustomerProfile,
 } from '@/app/actions/invoices';
+import { getHsnCodes } from '@/app/actions/gst';
 import { moveInvoiceToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
 import { getStaff } from '@/app/actions/staff';
@@ -53,6 +55,45 @@ const paymentMethodIcons = {
 };
 
 const quickAmounts = [500, 1000, 2000, 5000, 10000, 20000];
+
+const indiaStates = [
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chhattisgarh',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+  'Andaman and Nicobar Islands',
+  'Chandigarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Jammu and Kashmir',
+  'Ladakh',
+  'Lakshadweep',
+  'Puducherry',
+];
 
 // ─── HELPERS ───────────────────────────────────────────
 
@@ -106,6 +147,34 @@ const buildInvoiceShareMessage = (invoice, storeSettings) => {
   ].filter(Boolean).join('\n');
 };
 
+const normalizeHsnCode = (value) => String(value || '').replace(/\s+/g, '').toUpperCase();
+
+const buildInvoiceFooterHtml = (store) => {
+  const bankLines = [];
+  if (store?.bankName) bankLines.push(`Bank: ${store.bankName}`);
+  if (store?.bankAccountName) bankLines.push(`A/C Name: ${store.bankAccountName}`);
+  if (store?.bankAccountNumber) bankLines.push(`A/C No: ${store.bankAccountNumber}`);
+  if (store?.bankIfsc) bankLines.push(`IFSC: ${store.bankIfsc}`);
+  if (store?.bankUpiId) bankLines.push(`UPI: ${store.bankUpiId}`);
+
+  const bankBlock = bankLines.length > 0
+    ? `<div class="footer-box"><h4>Bank Details</h4>${bankLines.map(line => `<div class="muted">${line}</div>`).join('')}</div>`
+    : '';
+
+  const termsText = store?.invoiceTerms ? store.invoiceTerms.replace(/\n/g, '<br/>') : '';
+  const termsBlock = termsText
+    ? `<div class="footer-box"><h4>Terms</h4><div class="muted">${termsText}</div></div>`
+    : '';
+
+  const qrBlock = store?.paymentQr
+    ? `<div class="footer-box qr-box"><h4>Pay via QR</h4><img class="qr-img" src="${store.paymentQr}" alt="Payment QR" /></div>`
+    : '';
+
+  if (!bankBlock && !termsBlock && !qrBlock) return '';
+
+  return `<div class="footer-grid">${bankBlock}${termsBlock}${qrBlock}</div>`;
+};
+
 // ─── MAIN COMPONENT ───────────────────────────────────
 
 export default function BillingPage() {
@@ -116,6 +185,7 @@ export default function BillingPage() {
   const [storeSettings, setStoreSettings] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [hsnCodes, setHsnCodes] = useState([]);
 
   // Tab & filters
   const [tab, setTab] = useState('invoices');
@@ -131,9 +201,11 @@ export default function BillingPage() {
   const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const { session } = useSession();
   const { notify } = useAlertToast();
   const [invoiceToDraft, setInvoiceToDraft] = useState(null);
   const [movingInvoiceToDraft, setMovingInvoiceToDraft] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
 
   // POS state
   const [posItems, setPosItems] = useState([]);
@@ -147,6 +219,7 @@ export default function BillingPage() {
   const [posDueDate, setPosDueDate] = useState('');
   const [posSupplyType, setPosSupplyType] = useState('INTRASTATE');
   const [posPlaceOfSupply, setPosPlaceOfSupply] = useState('');
+  const [posPlaceOfSupplyCustom, setPosPlaceOfSupplyCustom] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
@@ -164,8 +237,8 @@ export default function BillingPage() {
   // ─── DATA LOADING ──────────────────────────────────────
 
   const loadData = useCallback(async () => {
-    const [invRes, prodRes, staffRes, settingsRes, statsRes] = await Promise.all([
-      getInvoices(), getProducts(), getStaff(), getStoreSettings(), getInvoiceStats(),
+    const [invRes, prodRes, staffRes, settingsRes, statsRes, hsnRes] = await Promise.all([
+      getInvoices(), getProducts(), getStaff(), getStoreSettings(), getInvoiceStats(), getHsnCodes(),
     ]);
     if (invRes.success) {
       setInvoices(invRes.data);
@@ -175,6 +248,7 @@ export default function BillingPage() {
     if (staffRes.success) setStaffList(staffRes.data.filter(s => s.status === 'Active'));
     if (settingsRes.success) setStoreSettings(settingsRes.data);
     if (statsRes.success) setStats(statsRes.data);
+    if (hsnRes.success) setHsnCodes(hsnRes.data);
     setLoading(false);
   }, []);
 
@@ -263,12 +337,38 @@ export default function BillingPage() {
   // POS calculations
   const posSubtotal = posItems.reduce((s, item) => s + item.price * item.qty, 0);
   const posDiscountAmount = posDiscountType === 'percent' ? Math.round(posSubtotal * posDiscount / 100) : Math.min(posDiscount, posSubtotal);
-  const posAfterDiscount = Math.max(0, posSubtotal - posDiscountAmount);
-  const posTotalGst = Math.round(posAfterDiscount * gstRate / 100);
-  const posIgst = posSupplyType === 'INTERSTATE' ? posTotalGst : 0;
-  const posCgst = posSupplyType === 'INTERSTATE' ? 0 : Math.round(posTotalGst / 2);
-  const posSgst = posSupplyType === 'INTERSTATE' ? 0 : posTotalGst - posCgst;
-  const posTotal = posAfterDiscount + posTotalGst + (posTransportCost || 0);
+  let remainingPosDiscount = posDiscountAmount;
+  const posDiscountSplits = posItems.map((item, index) => {
+    if (posDiscountAmount <= 0 || posSubtotal <= 0) return 0;
+    if (index === posItems.length - 1) return remainingPosDiscount;
+    const share = Math.round((item.price * item.qty / posSubtotal) * posDiscountAmount);
+    remainingPosDiscount -= share;
+    return share;
+  });
+
+  const posTaxSummary = posItems.reduce((acc, item, index) => {
+    const lineTotal = item.price * item.qty;
+    const discountShare = posDiscountSplits[index] || 0;
+    const taxableAmount = Math.max(0, lineTotal - discountShare);
+    const rate = Number.isFinite(item.gstRate) ? item.gstRate : gstRate;
+    const itemGst = Math.round(taxableAmount * rate / 100);
+    const igst = posSupplyType === 'INTERSTATE' ? itemGst : 0;
+    const cgst = posSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2);
+    const sgst = posSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst;
+
+    acc.taxable += taxableAmount;
+    acc.totalGst += itemGst;
+    acc.igst += igst;
+    acc.cgst += cgst;
+    acc.sgst += sgst;
+    return acc;
+  }, { taxable: 0, totalGst: 0, igst: 0, cgst: 0, sgst: 0 });
+
+  const posTotalGst = posTaxSummary.totalGst;
+  const posIgst = posTaxSummary.igst;
+  const posCgst = posTaxSummary.cgst;
+  const posSgst = posTaxSummary.sgst;
+  const posTotal = posTaxSummary.taxable + posTotalGst + (posTransportCost || 0);
   const posTotalPayments = posPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
@@ -281,6 +381,12 @@ export default function BillingPage() {
 
   // ─── POS ACTIONS ───────────────────────────────────────
 
+  const resolveHsnRate = (hsnCode) => {
+    const normalized = normalizeHsnCode(hsnCode);
+    const match = hsnCodes.find(h => h.code === normalized);
+    return match ? match.gstRate : undefined;
+  };
+
   const addToPOS = (product) => {
     const existing = posItems.find(i => i.id === product.id);
     if (existing) {
@@ -288,9 +394,13 @@ export default function BillingPage() {
         setPosItems(posItems.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i));
       }
     } else {
+      const normalizedHsn = normalizeHsnCode(product.hsnCode || '');
+      const hsnRate = resolveHsnRate(normalizedHsn);
       setPosItems([...posItems, {
         id: product.id, name: product.name, sku: product.sku,
         price: product.price, qty: 1, stock: product.stock, category: product.category,
+        hsnCode: normalizedHsn,
+        gstRate: Number.isFinite(hsnRate) ? hsnRate : gstRate,
       }]);
     }
     setProductSearch('');
@@ -309,6 +419,24 @@ export default function BillingPage() {
     setPosItems(posItems.map(i => i.id === id ? { ...i, price: Math.max(0, newPrice) } : i));
   };
 
+  const updateItemHsn = (id, hsnCode) => {
+    const normalized = normalizeHsnCode(hsnCode);
+    const hsnRate = resolveHsnRate(normalized);
+    setPosItems(posItems.map(i => i.id === id ? {
+      ...i,
+      hsnCode: normalized,
+      gstRate: Number.isFinite(hsnRate) ? hsnRate : i.gstRate,
+    } : i));
+  };
+
+  const updateItemGstRate = (id, value) => {
+    const rate = value === '' ? NaN : Number(value);
+    setPosItems(posItems.map(i => i.id === id ? {
+      ...i,
+      gstRate: Number.isFinite(rate) ? rate : gstRate,
+    } : i));
+  };
+
   const clearPOS = () => {
     setPosItems([]);
     setPosCustomer({ name: '', phone: '', address: '', gstNumber: '' });
@@ -321,6 +449,7 @@ export default function BillingPage() {
     setPosDueDate('');
     setPosSupplyType('INTRASTATE');
     setPosPlaceOfSupply('');
+    setPosPlaceOfSupplyCustom('');
   };
 
   // Split payment management
@@ -349,9 +478,13 @@ export default function BillingPage() {
 
   const handleGenerateInvoice = async (isHeld = false) => {
     if (posItems.length === 0 || !posCustomer.name || !posCustomer.phone) return;
-    if (!isHeld && posTotalPayments === 0) return;
+    const isEditing = !!editingInvoiceId;
+    if (!isHeld && !isEditing && posTotalPayments === 0) return;
     setSubmitting(true);
     try {
+      const placeOfSupplyValue = posPlaceOfSupply === 'OTHER'
+        ? posPlaceOfSupplyCustom.trim()
+        : posPlaceOfSupply;
       const paymentsData = isHeld
         ? [{ amount: 0, method: 'Cash' }]
         : posPayments.filter(p => p.amount > 0).map(p => ({
@@ -360,38 +493,119 @@ export default function BillingPage() {
             reference: p.reference || undefined,
           }));
 
-      if (!isHeld && paymentsData.length === 0) {
+      if (!isHeld && !isEditing && paymentsData.length === 0) {
         alert('Please enter at least one payment amount');
         setSubmitting(false);
         return;
       }
 
-      const res = await createInvoice({
+      const payload = {
         customer: posCustomer.name,
         phone: posCustomer.phone,
         address: posCustomer.address || undefined,
         gstNumber: posCustomer.gstNumber || undefined,
-        items: posItems.map(i => ({ productId: i.id, name: i.name, sku: i.sku || '', quantity: i.qty, price: i.price })),
+        items: posItems.map(i => ({
+          productId: i.id,
+          name: i.name,
+          sku: i.sku || '',
+          quantity: i.qty,
+          price: i.price,
+          hsnCode: i.hsnCode || undefined,
+          gstRate: i.gstRate,
+        })),
         discount: posDiscount,
         discountType: posDiscountType === 'flat' ? 'flat' : 'percent',
         transportCost: posTransportCost || 0,
-        payments: paymentsData,
         salespersonId: posSalesperson ? parseInt(posSalesperson) : undefined,
         notes: posNotes || undefined,
         dueDate: posDueDate || undefined,
         supplyType: posSupplyType,
-        placeOfSupply: posPlaceOfSupply || undefined,
+        placeOfSupply: placeOfSupplyValue || undefined,
         isHeld,
-      });
+      };
+
+      const res = isEditing
+        ? await updateInvoice(editingInvoiceId, { ...payload, payments: paymentsData.length ? paymentsData : undefined })
+        : await createInvoice({ ...payload, payments: paymentsData });
       if (res.success) {
         clearPOS();
-        if (!isHeld) setTab('invoices');
+        if (isEditing) paymentAutoFillRef.current = true;
+        setEditingInvoiceId(null);
+        if (!isHeld || isEditing) setTab('invoices');
         await loadData();
       } else {
-        alert(res.error || 'Failed to create invoice');
+        alert(res.error || `Failed to ${isEditing ? 'update' : 'create'} invoice`);
       }
     } catch {
       alert('Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleEditInvoice = async (inv) => {
+    if (!inv) return;
+    if (session?.user?.role !== 'ADMIN') {
+      notify('Admin access required to edit invoices', { variant: 'danger' });
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const res = await getInvoice(inv.dbId);
+      if (!res.success) {
+        notify(res.error || 'Failed to load invoice', { variant: 'danger' });
+        return;
+      }
+
+      const invoice = res.data;
+      const contact = invoice.contact || {};
+      const placeValue = (invoice.placeOfSupply || '').trim();
+      const dueDateValue = invoice.dueDate
+        ? new Date(invoice.dueDate).toISOString().split('T')[0]
+        : '';
+
+      setPosCustomer({
+        name: contact.name || inv.customer || '',
+        phone: contact.phone || inv.phone || '',
+        address: contact.address || inv.address || '',
+        gstNumber: contact.gstNumber || inv.gstNumber || '',
+      });
+      setPosItems(invoice.items.map(item => {
+        const stock = Math.max(item.product?.stock ?? 0, item.quantity);
+        return {
+          id: item.productId,
+          name: item.name,
+          sku: item.sku || '',
+          price: item.price,
+          qty: item.quantity,
+          stock,
+          category: item.product?.category || '',
+          hsnCode: normalizeHsnCode(item.hsnCode || item.product?.hsnCode || ''),
+          gstRate: Number.isFinite(item.gstRate) ? item.gstRate : gstRate,
+        };
+      }));
+      setPosDiscount(invoice.discount || 0);
+      setPosDiscountType(invoice.discountType === 'percent' ? 'percent' : 'flat');
+      setPosTransportCost(invoice.transportCost || 0);
+      paymentAutoFillRef.current = false;
+      setPosPayments([{ amount: invoice.amountPaid || 0, method: invoice.paymentMethod || 'Cash', reference: '' }]);
+      setPosSalesperson(invoice.salespersonId ? String(invoice.salespersonId) : '');
+      setPosNotes(invoice.notes || '');
+      setPosDueDate(dueDateValue);
+      setPosSupplyType(invoice.supplyType || 'INTRASTATE');
+      if (placeValue && !indiaStates.includes(placeValue)) {
+        setPosPlaceOfSupply('OTHER');
+        setPosPlaceOfSupplyCustom(placeValue);
+      } else {
+        setPosPlaceOfSupply(placeValue);
+        setPosPlaceOfSupplyCustom('');
+      }
+      setSelectedInvoice(null);
+      setEditingInvoiceId(invoice.id);
+      setTab('pos');
+    } catch (err) {
+      notify(err?.message || 'Failed to load invoice', { variant: 'danger' });
     } finally {
       setSubmitting(false);
     }
@@ -563,19 +777,22 @@ export default function BillingPage() {
 
     const store = storeSettings || {};
     const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
+    const invoiceFooter = buildInvoiceFooterHtml(store);
     const printContent = `
       <html><head><title>Invoice ${inv.id}</title>
       <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
         @page { size: A4; margin: 12mm; }
+        .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
         .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
         .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
         .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
         .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
         th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
         .totals { margin-left: auto; width: 300px; }
         .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
         .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
@@ -584,9 +801,16 @@ export default function BillingPage() {
         .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
         .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
         .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+        .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
+        .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
+        .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
+        .footer-box .muted { color: #555; margin-top: 2px; }
+        .qr-box { text-align: center; }
+        .qr-img { width: 110px; height: 110px; object-fit: contain; }
         .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
         @media print { body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
       </style></head><body>
+      <div class="invoice-container">
       <div class="header">
         <div><div class="store-name">${store.storeName || 'Furniture Store'}</div>
         <div style="font-size:12px;color:#888;margin-top:4px">${store.address || ''}</div>
@@ -609,9 +833,9 @@ export default function BillingPage() {
         <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
         ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
         ${isInterstate
-          ? `<div class="row"><span>IGST (${gstRate}%)</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-          : `<div class="row"><span>CGST (${gstRate / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-             <div class="row"><span>SGST (${gstRate / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
+          ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+          : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+             <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
         ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
         <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
         <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
@@ -619,7 +843,9 @@ export default function BillingPage() {
       </div>
       ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
       ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
+      ${invoiceFooter}
       <div class="footer">Thank you for your purchase!</div>
+      </div>
       </body></html>`;
     const printFrame = document.createElement('iframe');
     printFrame.style.position = 'fixed';
@@ -645,19 +871,22 @@ export default function BillingPage() {
   const handleDownloadInvoice = (inv) => {
     const store = storeSettings || {};
     const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
+    const invoiceFooter = buildInvoiceFooterHtml(store);
     const printContent = `
       <html><head><title>Invoice ${inv.id}</title>
       <style>
-        body { font-family: 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
         @page { size: A4; margin: 12mm; }
+        .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
         .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
         .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
         .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
         .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
         th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
         .totals { margin-left: auto; width: 300px; }
         .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
         .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
@@ -666,6 +895,12 @@ export default function BillingPage() {
         .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
         .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
         .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+        .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
+        .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
+        .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
+        .footer-box .muted { color: #555; margin-top: 2px; }
+        .qr-box { text-align: center; }
+        .qr-img { width: 110px; height: 110px; object-fit: contain; }
         .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
       </style></head><body>
       <div class="invoice-container">
@@ -691,9 +926,9 @@ export default function BillingPage() {
           <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
           ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
           ${isInterstate
-            ? `<div class="row"><span>IGST (${gstRate}%)</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-            : `<div class="row"><span>CGST (${gstRate / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-               <div class="row"><span>SGST (${gstRate / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
+            ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+            : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+               <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
           ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
           <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
           <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
@@ -701,6 +936,7 @@ export default function BillingPage() {
         </div>
         ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
         ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
+        ${invoiceFooter}
         <div class="footer">Thank you for your purchase!</div>
       </div>
       </body></html>`;
@@ -708,7 +944,7 @@ export default function BillingPage() {
     // Use div in main document (not iframe) — works on iOS Safari & Android Chrome
     loadHtml2Pdf().then(html2pdf => {
       const container = document.createElement('div');
-      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:900px;background:#fff;z-index:-1;';
+      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;z-index:-1;';
       container.innerHTML = printContent;
       document.body.appendChild(container);
 
@@ -740,23 +976,27 @@ export default function BillingPage() {
     }
 
     const message = buildInvoiceShareMessage(inv, storeSettings) + '\n\n*(Invoice PDF is attached)*';
+    const invoiceFooter = buildInvoiceFooterHtml(storeSettings || {});
 
     if (navigator.share && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
       notify('Preparing PDF for sharing...', { variant: 'info' });
       const element = document.createElement('div');
+      element.style.cssText = 'width:794px;background:#fff;';
       element.innerHTML = `
         <html><head><title>Invoice ${inv.id}</title>
         <style>
-          body { font-family: 'Segoe UI', sans-serif; padding: 40px; color: #1a1a1a; max-width: 800px; margin: 0 auto; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
           @page { size: A4; margin: 12mm; }
+          .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
           .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
           .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
           .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
           .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
           .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
           th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-          td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+          td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
           .totals { margin-left: auto; width: 300px; }
           .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
           .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
@@ -765,6 +1005,12 @@ export default function BillingPage() {
           .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
           .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
           .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+          .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
+          .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
+          .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
+          .footer-box .muted { color: #555; margin-top: 2px; }
+          .qr-box { text-align: center; }
+          .qr-img { width: 110px; height: 110px; object-fit: contain; }
           .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
         </style></head><body>
         <div class="invoice-container">
@@ -790,9 +1036,9 @@ export default function BillingPage() {
             <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
             ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
             ${(inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0))
-              ? `<div class="row"><span>IGST (${storeSettings?.gstRate || 18}%)</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-              : `<div class="row"><span>CGST (${(storeSettings?.gstRate || 18) / 2}%)</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-                 <div class="row"><span>SGST (${(storeSettings?.gstRate || 18) / 2}%)</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
+              ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+              : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+                 <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
             ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
             <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
             <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
@@ -800,6 +1046,7 @@ export default function BillingPage() {
           </div>
           ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
           ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
+          ${invoiceFooter}
           <div class="footer">Thank you for your purchase!</div>
         </div>
         </body></html>
@@ -1074,6 +1321,12 @@ export default function BillingPage() {
                               className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors" title="Download PDF">
                               <Download className="w-4 h-4" />
                             </button>
+                            {session?.user?.role === 'ADMIN' && !isCancelled && (
+                              <button onClick={() => handleEditInvoice(inv)}
+                                className="p-1.5 rounded-lg hover:bg-amber-500/10 text-muted hover:text-amber-700 transition-colors" title="Edit Invoice">
+                                <Edit3 className="w-4 h-4" />
+                              </button>
+                            )}
                             {inv.balanceDue > 0 && inv.invoiceStatus === 'ACTIVE' && (
                               <button onClick={() => { setSelectedInvoice(inv); setPaymentModalData({ ...paymentModalData, amount: inv.balanceDue }); setShowPaymentModal(true); }}
                                 className="p-1.5 rounded-lg hover:bg-success/10 text-muted hover:text-success transition-colors" title="Record Payment">
@@ -1278,17 +1531,42 @@ export default function BillingPage() {
               ) : (
                 <div className="space-y-2.5">
                   <div className="grid grid-cols-12 gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-muted font-semibold border-b border-border">
-                    <div className="col-span-5">Product</div>
+                    <div className="col-span-5">Product / HSN</div>
                     <div className="col-span-2 text-center">Rate</div>
                     <div className="col-span-2 text-center">Qty</div>
                     <div className="col-span-2 text-right">Amount</div>
                     <div className="col-span-1"></div>
                   </div>
-                  {posItems.map(item => (
+                  {posItems.map(item => {
+                    const hsnMatch = hsnCodes.find(h => h.code === item.hsnCode);
+                    return (
                     <div key={item.id} className="grid grid-cols-12 gap-3 items-center bg-surface rounded-xl p-3">
                       <div className="col-span-5 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
                         <p className="text-[10px] text-muted font-mono mt-0.5">{item.sku} · {item.category}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="text-[9px] uppercase tracking-wider text-muted">HSN</span>
+                          <input
+                            type="text"
+                            placeholder="HSN code"
+                            value={item.hsnCode || ''}
+                            onChange={e => updateItemHsn(item.id, e.target.value)}
+                            list="hsn-codes"
+                            className="w-28 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
+                          />
+                          <span className="text-[9px] uppercase tracking-wider text-muted">GST %</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            value={Number.isFinite(item.gstRate) ? item.gstRate : gstRate}
+                            onChange={e => updateItemGstRate(item.id, e.target.value)}
+                            className="w-16 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
+                          />
+                          {hsnMatch?.description && (
+                            <span className="text-[10px] text-muted truncate max-w-[220px]">{hsnMatch.description}</span>
+                          )}
+                        </div>
                       </div>
                       <div className="col-span-2">
                         <input type="number" value={item.price} min="0"
@@ -1315,7 +1593,15 @@ export default function BillingPage() {
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
+                  {hsnCodes.length > 0 && (
+                    <datalist id="hsn-codes">
+                      {hsnCodes.map(code => (
+                        <option key={code.id} value={code.code}>{code.description}</option>
+                      ))}
+                    </datalist>
+                  )}
                   {/* Cart subtotal bar */}
                   <div className="flex items-center justify-between px-3 pt-3 border-t border-border">
                     <span className="text-xs text-muted font-medium">{posItems.reduce((s, i) => s + i.qty, 0)} units</span>
@@ -1377,13 +1663,30 @@ export default function BillingPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-muted mb-1.5">Place of Supply</label>
-                    <input
-                      type="text"
+                    <select
                       value={posPlaceOfSupply}
-                      onChange={e => setPosPlaceOfSupply(e.target.value)}
-                      placeholder="e.g. Bihar"
-                      className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50"
-                    />
+                      onChange={e => {
+                        const value = e.target.value;
+                        setPosPlaceOfSupply(value);
+                        if (value !== 'OTHER') setPosPlaceOfSupplyCustom('');
+                      }}
+                      className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50"
+                    >
+                      <option value="">Select state (optional)</option>
+                      {indiaStates.map(state => (
+                        <option key={state} value={state}>{state}</option>
+                      ))}
+                      <option value="OTHER">Other</option>
+                    </select>
+                    {posPlaceOfSupply === 'OTHER' && (
+                      <input
+                        type="text"
+                        value={posPlaceOfSupplyCustom}
+                        onChange={e => setPosPlaceOfSupplyCustom(e.target.value)}
+                        placeholder="Enter state"
+                        className="w-full mt-2 px-4 py-3 bg-surface border border-border rounded-xl text-sm placeholder:text-muted focus:outline-none focus:border-accent/50"
+                      />
+                    )}
                   </div>
                 </div>
                 {/* Customer suggestions dropdown */}
@@ -1600,17 +1903,17 @@ export default function BillingPage() {
                 )}
                 {posSupplyType === 'INTERSTATE' ? (
                   <div className="flex justify-between text-xs">
-                    <span className="text-muted">IGST ({gstRate}%)</span>
+                    <span className="text-muted">IGST</span>
                     <span className="text-foreground">{formatFullCurrency(posIgst)}</span>
                   </div>
                 ) : (
                   <>
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted">CGST ({gstRate / 2}%)</span>
+                      <span className="text-muted">CGST</span>
                       <span className="text-foreground">{formatFullCurrency(posCgst)}</span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted">SGST ({gstRate / 2}%)</span>
+                      <span className="text-muted">SGST</span>
                       <span className="text-foreground">{formatFullCurrency(posSgst)}</span>
                     </div>
                   </>
@@ -1630,24 +1933,49 @@ export default function BillingPage() {
 
             {/* Action Buttons */}
             <div className="space-y-3">
-              <button
-                disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting || posTotalPayments === 0}
-                onClick={() => handleGenerateInvoice(false)}
-                className="w-full py-3.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {submitting ? (
-                  <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Generating...</>
-                ) : (
-                  <><Receipt className="w-4 h-4" /> Generate Invoice</>
-                )}
-              </button>
-              <button
-                disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting}
-                onClick={() => handleGenerateInvoice(true)}
-                className="w-full py-3 bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                <PauseCircle className="w-4 h-4" /> Hold Bill
-              </button>
+              {editingInvoiceId ? (
+                <>
+                  <button
+                    disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting}
+                    onClick={() => handleGenerateInvoice(false)}
+                    className="w-full py-3.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {submitting ? (
+                      <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Saving...</>
+                    ) : (
+                      <><Receipt className="w-4 h-4" /> Update Invoice</>
+                    )}
+                  </button>
+                  <button
+                    disabled={submitting}
+                    onClick={() => { clearPOS(); paymentAutoFillRef.current = true; setEditingInvoiceId(null); }}
+                    className="w-full py-3 bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <X className="w-4 h-4" /> Cancel Edit
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting || posTotalPayments === 0}
+                    onClick={() => handleGenerateInvoice(false)}
+                    className="w-full py-3.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {submitting ? (
+                      <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Generating...</>
+                    ) : (
+                      <><Receipt className="w-4 h-4" /> Generate Invoice</>
+                    )}
+                  </button>
+                  <button
+                    disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting}
+                    onClick={() => handleGenerateInvoice(true)}
+                    className="w-full py-3 bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30 rounded-xl text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <PauseCircle className="w-4 h-4" /> Hold Bill
+                  </button>
+                </>
+              )}
               {(!posCustomer.name || !posCustomer.phone) && posItems.length > 0 && (
                 <p className="text-xs text-amber-600 flex items-center gap-1 justify-center">
                   <AlertCircle className="w-3 h-3" /> Customer name and phone required
@@ -1720,6 +2048,7 @@ export default function BillingPage() {
                     <th className="text-left py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">#</th>
                     <th className="text-left py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">Item</th>
                     <th className="text-center py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">SKU</th>
+                    <th className="text-center py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">HSN</th>
                     <th className="text-center py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">Qty</th>
                     <th className="text-right py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">Rate</th>
                     <th className="text-right py-2 text-[10px] uppercase tracking-wider text-muted font-semibold">Amount</th>
@@ -1731,6 +2060,7 @@ export default function BillingPage() {
                       <td className="py-2.5 text-muted">{idx + 1}</td>
                       <td className="py-2.5 text-foreground font-medium">{item.name}</td>
                       <td className="py-2.5 text-center text-muted font-mono text-xs">{item.sku || '—'}</td>
+                      <td className="py-2.5 text-center text-muted text-xs">{item.hsnCode || '-'}</td>
                       <td className="py-2.5 text-center text-foreground">{item.qty}</td>
                       <td className="py-2.5 text-right text-foreground">{formatFullCurrency(item.price)}</td>
                       <td className="py-2.5 text-right font-semibold text-foreground">{formatFullCurrency(item.price * item.qty)}</td>
@@ -1750,11 +2080,11 @@ export default function BillingPage() {
                     <div className="flex justify-between"><span className="text-muted">Transport Cost</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.transportCost)}</span></div>
                   )}
                   {(selectedInvoice.supplyType === 'INTERSTATE' || selectedInvoice.igst > 0) ? (
-                    <div className="flex justify-between text-xs"><span className="text-muted">IGST ({gstRate}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.igst || 0)}</span></div>
+                    <div className="flex justify-between text-xs"><span className="text-muted">IGST</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.igst || 0)}</span></div>
                   ) : (
                     <>
-                      <div className="flex justify-between text-xs"><span className="text-muted">CGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.cgst)}</span></div>
-                      <div className="flex justify-between text-xs"><span className="text-muted">SGST ({gstRate / 2}%)</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.sgst)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-muted">CGST</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.cgst)}</span></div>
+                      <div className="flex justify-between text-xs"><span className="text-muted">SGST</span><span className="text-foreground">{formatFullCurrency(selectedInvoice.sgst)}</span></div>
                     </>
                   )}
                   <div className="flex justify-between text-base font-bold pt-2 border-t border-border">

@@ -9,6 +9,7 @@ import crypto from 'crypto'
 const LIVEKIT_URL = () => process.env.LIVEKIT_URL || ''
 const LIVEKIT_API_KEY = () => process.env.LIVEKIT_API_KEY || ''
 const LIVEKIT_API_SECRET = () => process.env.LIVEKIT_API_SECRET || ''
+const AI_AGENT_NAME = () => process.env.AI_AGENT_NAME || 'anushka'
 
 /**
  * Get the HTTP URL for LiveKit API from the WebSocket URL.
@@ -107,7 +108,7 @@ export async function dispatchAgent(
     },
     body: JSON.stringify({
       room: roomName,
-      agent_name: 'furniture-crm-agent',
+      agent_name: AI_AGENT_NAME(),
       metadata: JSON.stringify(metadata),
     }),
   })

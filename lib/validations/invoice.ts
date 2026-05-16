@@ -7,6 +7,7 @@ export const invoiceItemSchema = z.object({
   quantity: z.number().min(1),
   price: z.number().min(0),
   hsnCode: z.string().optional(),
+  gstRate: z.number().min(0).max(100).optional(),
 })
 
 export const paymentEntrySchema = z.object({
@@ -34,6 +35,10 @@ export const createInvoiceSchema = z.object({
   placeOfSupply: z.string().optional(),
 })
 
+export const updateInvoiceSchema = createInvoiceSchema.omit({ payments: true }).extend({
+  payments: z.array(paymentEntrySchema).optional(),
+})
+
 export const recordPaymentSchema = z.object({
   invoiceId: z.number(),
   amount: z.number().min(1),
@@ -49,6 +54,7 @@ export const createCreditNoteSchema = z.object({
 })
 
 export type CreateInvoiceInput = z.infer<typeof createInvoiceSchema>
+export type UpdateInvoiceInput = z.infer<typeof updateInvoiceSchema>
 export type RecordPaymentInput = z.infer<typeof recordPaymentSchema>
 export type CreateCreditNoteInput = z.infer<typeof createCreditNoteSchema>
 export type PaymentEntry = z.infer<typeof paymentEntrySchema>

@@ -1,6 +1,6 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
 
-export default function StatCard({ title, value, change, changeType, icon: Icon, color = 'accent' }) {
+export default function StatCard({ title, value, change, changeType, icon: Icon, color = 'accent', trendText = 'vs last week' }) {
   const colorMap = {
     accent:  { bg: 'bg-accent-light',   text: 'text-accent',   border: 'border-accent/20' },
     teal:    { bg: 'bg-teal-light',     text: 'text-teal',     border: 'border-teal/20' },
@@ -32,7 +32,7 @@ export default function StatCard({ title, value, change, changeType, icon: Icon,
               ? <TrendingUp className="w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0" />
               : <TrendingDown className="w-3 h-3 md:w-3.5 md:h-3.5 flex-shrink-0" />}
             <span>{change}</span>
-            <span className="text-muted ml-0.5 hidden sm:inline">vs last week</span>
+            {trendText && <span className="text-muted ml-0.5 hidden sm:inline">{trendText}</span>}
           </div>
         )}
       </div>

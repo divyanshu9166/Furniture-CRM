@@ -2,6 +2,7 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
+import { requireRole } from '@/lib/auth-helpers'
 import {
   createExpenseSchema,
   createCategorySchema,
@@ -167,6 +168,58 @@ export async function createExpense(data: unknown) {
     await prisma.dailyCashRegister.upsert({
       where: { date: dateOnly },
       create: { date: dateOnly, cashOut: amount },
+      update: { cashOut: { increment: amount } },
+    })
+  }
+
+  revalidatePath('/expenses')
+  return { success: true, data: expense }
+}
+
+export async function updateExpense(id: number, data: unknown) {
+  try {
+    await requireRole('ADMIN')
+  } catch {
+    return { success: false, error: 'Admin access required to edit expenses' }
+  }
+
+  const parsed = createExpenseSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  const { date, categoryId, amount, description, paymentMode, reference, receipt, vendor, staffId, notes } = parsed.data
+
+  const existing = await prisma.expense.findUnique({ where: { id } })
+  if (!existing) return { success: false, error: 'Expense not found' }
+
+  if (existing.paymentMode === 'Cash') {
+    const defaultDate = new Date(existing.date.toISOString().split('T')[0] + 'T00:00:00')
+    await prisma.dailyCashRegister.updateMany({
+      where: { date: defaultDate },
+      data: { cashOut: { decrement: existing.amount } },
+    })
+  }
+
+  const expense = await prisma.expense.update({
+    where: { id },
+    data: {
+      date: new Date(date),
+      categoryId,
+      amount,
+      description,
+      paymentMode,
+      reference,
+      receipt,
+      vendor,
+      staffId,
+      notes,
+    },
+  })
+
+  if (paymentMode === 'Cash') {
+    const newDateOnly = new Date(date + 'T00:00:00')
+    await prisma.dailyCashRegister.upsert({
+      where: { date: newDateOnly },
+      create: { date: newDateOnly, cashOut: amount },
       update: { cashOut: { increment: amount } },
     })
   }

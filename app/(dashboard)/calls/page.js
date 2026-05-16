@@ -898,7 +898,7 @@ export default function CallsPage() {
             icon={Bot}
             label="AI Agent"
             value={agentStatus?.configured ? 'Online' : 'Not Configured'}
-            trend={agentStatus?.configured ? 'LiveKit connected' : 'Setup required'}
+            trend={agentStatus?.configured ? 'LiveKit + Sarvam + Gemini ready' : 'Setup required'}
             positive={agentStatus?.configured}
           />
           <StatCard icon={PhoneOutgoing} label="AI Outbound" value={aiCalls.filter(c => c.direction === 'Outbound').length} trend="Total AI calls" positive />
@@ -914,7 +914,7 @@ export default function CallsPage() {
               AI Outbound Call
             </h3>
             <p className="text-xs text-muted mb-4">
-              Aria (AI Agent) will call the customer and handle the conversation automatically.
+              Anushka (AI Agent) will call the customer and handle the conversation automatically.
             </p>
             <div className="space-y-3">
               <div>
@@ -1033,7 +1033,7 @@ export default function CallsPage() {
               </p>
               <p className="text-xs text-muted mb-6">
                 {browserCallState === 'connected'
-                  ? 'AI Agent Aria is listening'
+                  ? 'AI Agent Anushka is listening'
                   : 'Click below to start a voice conversation'}
               </p>
 
@@ -1064,10 +1064,10 @@ export default function CallsPage() {
                 <p className="text-xs text-muted mb-2 uppercase tracking-wider">Service Status</p>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { label: 'LiveKit', ok: agentStatus.configured },
-                    { label: 'Deepgram STT/TTS', ok: agentStatus.hasDeepgram },
-                    { label: 'Groq LLM', ok: agentStatus.hasGroq },
-                    { label: 'Twilio SIP', ok: agentStatus.hasTwilio },
+                    { label: 'LiveKit', ok: agentStatus.hasLiveKit },
+                    { label: 'Sarvam STT/TTS', ok: agentStatus.hasSarvam },
+                    { label: 'Gemini LLM', ok: agentStatus.hasGemini },
+                    { label: 'Vobiz SIP', ok: agentStatus.hasVobiz },
                     { label: 'SIP Trunk', ok: agentStatus.hasSipTrunk },
                   ].map(({ label, ok }) => (
                     <div key={label} className="flex items-center gap-2 text-xs">
@@ -1321,7 +1321,7 @@ export default function CallsPage() {
                       }`}>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
-                            {msg.from === 'agent' ? 'Aria (AI)' : 'Customer'}
+                            {msg.from === 'agent' ? 'Anushka (AI)' : 'Customer'}
                           </span>
                           <span className="text-[10px] text-muted">{msg.time}</span>
                         </div>

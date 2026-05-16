@@ -1826,7 +1826,7 @@ export default function ManufacturingPage() {
                       }}
                       className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
                   </th>
-                  {['SKU Code', 'Material Name', 'Size', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Image', 'Status', 'Actions'].map(h => (
+                  {['Material Name', 'Image', 'Size', 'SKU Code', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Status', 'Actions'].map(h => (
                     <th key={h} className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -1844,7 +1844,6 @@ export default function ManufacturingPage() {
                     {editingRmId === rm.id ? (
                       <>
                         <td className="px-4 py-3"></td>
-                        <td className="px-4 py-3 text-muted font-mono text-xs">{rm.sku}</td>
                         <td className="px-4 py-3">
                           <div className="space-y-1">
                             <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
@@ -1854,9 +1853,24 @@ export default function ManufacturingPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) setRmEditImages([file])
+                              e.target.value = ''
+                            }}
+                            className="w-36 text-[10px] text-muted" />
+                          {rmEditImages.length > 0 && (
+                            <p className="text-[10px] text-muted mt-1">{rmEditImages[0].name}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
                           <input value={rmEditForm.description || ''} onChange={e => setRmEditForm(f => ({ ...f, description: e.target.value }))}
                             className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="e.g. 1 inch (square)" />
                         </td>
+                        <td className="px-4 py-3 text-muted font-mono text-xs">{rm.sku}</td>
                         <td className="px-4 py-3 text-muted text-xs">₹{rm.costPrice}</td>
                         <td className="px-4 py-3">
                           {(() => {
@@ -1906,20 +1920,6 @@ export default function ManufacturingPage() {
                           <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
                             className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
                         </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => {
-                              const file = e.target.files?.[0]
-                              if (file) setRmEditImages([file])
-                              e.target.value = ''
-                            }}
-                            className="w-36 text-[10px] text-muted" />
-                          {rmEditImages.length > 0 && (
-                            <p className="text-[10px] text-muted mt-1">{rmEditImages[0].name}</p>
-                          )}
-                        </td>
                         <td className="px-4 py-3"></td>
                         <td className="px-4 py-3">
                           <div className="flex gap-1.5">
@@ -1959,14 +1959,21 @@ export default function ManufacturingPage() {
                           const stockMeasureLabel = Number.isInteger(Number(rm.stock) || 0) ? String(Number(rm.stock) || 0) : Number(rm.stock || 0).toFixed(2)
                           return (
                             <>
-                        <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
                         <td className="px-4 py-3 text-foreground font-medium">
                           <div>{rm.name}</div>
                           {rm.brand && <p className="text-[10px] text-muted mt-0.5">Brand: {rm.brand}</p>}
                         </td>
+                        <td className="px-4 py-3">
+                          {rm.image ? (
+                            <img src={rm.image} alt={rm.name} className="w-8 h-8 rounded object-cover border border-border" />
+                          ) : (
+                            <span className="text-muted text-xs">None</span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-muted text-xs">
                           {rm.description || '—'}
                         </td>
+                        <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
                         <td className="px-4 py-3 text-foreground">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</td>
                         <td className="px-4 py-3">
                           <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
@@ -1977,13 +1984,6 @@ export default function ManufacturingPage() {
                         <td className="px-4 py-3 text-muted">{rm.unitOfMeasure}</td>
                         <td className="px-4 py-3 text-muted">{rm.reorderLevel}</td>
                         <td className="px-4 py-3 text-muted text-xs">{unitSize}</td>
-                        <td className="px-4 py-3">
-                          {rm.image ? (
-                            <img src={rm.image} alt={rm.name} className="w-8 h-8 rounded object-cover border border-border" />
-                          ) : (
-                            <span className="text-muted text-xs">None</span>
-                          )}
-                        </td>
                         <td className="px-4 py-3">
                           <span className={`text-[10px] px-2 py-0.5 rounded-full ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
                             {isLow ? '⚠ Low Stock' : '✓ In Stock'}
