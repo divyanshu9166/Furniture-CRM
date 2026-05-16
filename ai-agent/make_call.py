@@ -1,66 +1,76 @@
-"""
-CLI tool to trigger outbound AI calls from the Furzentic.
-Usage: python make_call.py --to +91XXXXXXXXXX --reason "Follow up on sofa inquiry" --name "Rahul Sharma"
-"""
+import os
+import certifi
+
+# Fix for macOS SSL Certificate errors - MUST be before other imports
+os.environ['SSL_CERT_FILE'] = certifi.where()
 
 import argparse
 import asyncio
-import os
-import uuid
-
+import random
+import json
+import logging
 from dotenv import load_dotenv
 from livekit import api
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+# Load environment variables
+load_dotenv("../.env")
 
-
-async def make_outbound_call(phone_number: str, reason: str, customer_name: str = ""):
-    """Dispatch an outbound call via LiveKit agent."""
-    lk_api = api.LiveKitAPI(
-        url=os.getenv("LIVEKIT_URL"),
-        api_key=os.getenv("LIVEKIT_API_KEY"),
-        api_secret=os.getenv("LIVEKIT_API_SECRET"),
-    )
-
-    room_name = f"outbound-{uuid.uuid4().hex[:8]}"
-
-    # Create the room
-    await lk_api.room.create_room(
-        api.CreateRoomRequest(name=room_name)
-    )
-
-    # Dispatch the agent with call metadata
-    import json
-    metadata = json.dumps({
-        "call_type": "outbound",
-        "phone_number": phone_number,
-        "reason": reason,
-        "customer_name": customer_name,
-    })
-
-    await lk_api.agent_dispatch.create_dispatch(
-        api.CreateAgentDispatchRequest(
-            room=room_name,
-            agent_name="furniture-crm-agent",
-            metadata=metadata,
-        )
-    )
-
-    print(f"Outbound call dispatched!")
-    print(f"  Room: {room_name}")
-    print(f"  To: {phone_number}")
-    print(f"  Reason: {reason}")
-    if customer_name:
-        print(f"  Customer: {customer_name}")
-
-    await lk_api.aclose()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Make an outbound AI call")
-    parser.add_argument("--to", required=True, help="Phone number with country code (e.g., +91XXXXXXXXXX)")
-    parser.add_argument("--reason", required=True, help="Reason for the call")
-    parser.add_argument("--name", default="", help="Customer name (optional)")
+async def main():
+    parser = argparse.ArgumentParser(description="Make an outbound call via LiveKit Agent.")
+    parser.add_argument("--to", required=True, help="The phone number to call (e.g., +91...)")
     args = parser.parse_args()
 
-    asyncio.run(make_outbound_call(args.to, args.reason, args.name))
+    # 1. Validation
+    phone_number = args.to.strip()
+    if not phone_number.startswith("+"):
+        print("Error: Phone number must start with '+' and country code.")
+        return
+
+    if len(phone_number) < 8:
+        print(f"Error: Phone number '{phone_number}' looks too short.")
+        return
+
+    url = os.getenv("LIVEKIT_URL")
+    api_key = os.getenv("LIVEKIT_API_KEY")
+    api_secret = os.getenv("LIVEKIT_API_SECRET")
+
+    if not (url and api_key and api_secret):
+        print("Error: LiveKit credentials missing in .env.local")
+        return
+
+    # 2. Setup API Client
+    lk_api = api.LiveKitAPI(url=url, api_key=api_key, api_secret=api_secret)
+
+    # 3. Create a unique room for this call
+    # We use a random suffix to ensure room names are unique
+    room_name = f"call-{phone_number.replace('+', '')}-{random.randint(1000, 9999)}"
+
+    print(f"Initating call to {phone_number}...")
+    print(f"Session Room: {room_name}")
+
+    try:
+        # 4. Dispatch the Agent
+        # We explicitly tell LiveKit to send the local agent to this room.
+        # We pass the phone number in the 'metadata' field so the agent knows who to dial.
+        dispatch_request = api.CreateAgentDispatchRequest(
+            agent_name="outbound-caller-local", # Must match agent.py
+            room=room_name,
+            metadata=json.dumps({"phone_number": phone_number})
+        )
+        
+        dispatch = await lk_api.agent_dispatch.create_dispatch(dispatch_request)
+
+        print("\nCall Dispatched Successfully!")
+        print(f"Dispatch ID: {dispatch.id}")
+        print("-" * 40)
+        print("The agent is now joining the room and will dial the number.")
+        print("Check your agent terminal for logs.")
+        
+    except Exception as e:
+        print(f"\nError dispatching call: {e}")
+    
+    finally:
+        await lk_api.aclose()
+
+if __name__ == "__main__":
+    asyncio.run(main())

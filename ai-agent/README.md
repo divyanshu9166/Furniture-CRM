@@ -1,185 +1,110 @@
-Furzentic - AI Calling Agent
+# LiveKit Vobiz Outbound Agent 📞
 
-AI-powered voice agent for inbound and outbound customer calls using **LiveKit**, **Deepgram**, **Groq**, and **Twilio SIP**.
+A production-ready voice agent capable of making outbound calls using **LiveKit**, **Deepgram**, and **Groq (Llama 3.3)**.  
+Designed for reliability, speed, and ease of deployment.
 
-## Architecture
+## 🚀 Features
+- **Ultra-Fast LLM**: Uses **Groq** running `llama-3.3-70b-versatile` for near-instant responses.
+- **High-Quality Audio**: Uses **Deepgram** for both Speech-to-Text (STT) and Text-to-Speech (TTS).
+- **SIP Trunking**: Integrated with **Vobiz** for PSTN connectivity.
+- **Robust Configuration**: Centralized `config.py` for easy customization of prompts, models, and voices.
 
-```
-                         ┌─────────────────┐
-  Customer Phone ──SIP──>│   Twilio SIP    │
-                         │   Trunk         │
-                         └────────┬────────┘
-                                  │
-                         ┌────────▼────────┐
-                         │   LiveKit Cloud  │
-                         │   (Audio Room)   │
-                         └────────┬────────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │              │
-              ┌─────▼─────┐ ┌────▼────┐  ┌─────▼─────┐
-              │ Deepgram   │ │  Groq   │  │ Deepgram  │
-              │ STT        │ │  LLM    │  │ TTS       │
-              │ (nova-2)   │ │(llama3) │  │(aura)     │
-              └────────────┘ └─────────┘  └───────────┘
-                                  │
-                         ┌────────▼────────┐
-                         │  Furniture CRM  │
-                         │  (Next.js API)  │
-                         │  PostgreSQL DB  │
-                         └─────────────────┘
-```
+---
 
-## Prerequisites
+## 🛠️ Setup & Installation
 
-1. **Python 3.10+** installed
-2. **LiveKit Cloud** account — https://cloud.livekit.io
-3. **Deepgram** API key — https://console.deepgram.com
-4. **Groq** API key — https://console.groq.com
-5. **Twilio** account with SIP trunk — https://console.twilio.com
+### 1. Prerequisites
+- Python 3.10+ (Recommended: 3.10.13)
+- A [LiveKit Cloud](https://cloud.livekit.io/) account
+- A [Deepgram](https://deepgram.com/) API Key
+- A [Groq](https://groq.com/) API Key
+- A SIP Provider (e.g., Vobiz)
 
-## Setup
-
-### 1. Install Python dependencies
-
+### 2. Clone & Install
 ```bash
-cd ai-agent
+# Clone the repository
+git clone <your-repo-url>
+cd LiveKit-Vobiz-Outbound-main
+
+# Create a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment variables
-
-Edit the `.env` file in the project root (Furniture CRM directory):
-
-```env
-# LiveKit Cloud
-LIVEKIT_URL=wss://your-project.livekit.cloud
-LIVEKIT_API_KEY=your_api_key
-LIVEKIT_API_SECRET=your_api_secret
-
-# Deepgram (STT + TTS)
-DEEPGRAM_API_KEY=your_deepgram_key
-
-# Groq (LLM - uses llama-3.3-70b)
-GROQ_API_KEY=your_groq_key
-
-# Twilio SIP (for actual phone calls)
-TWILIO_AUTH_TOKEN=your_twilio_auth_token
-OUTBOUND_SIP_TRUNK_ID=your_sip_trunk_id
-TWILIO_SIP_DOMAIN=your-domain.pstn.twilio.com
-DEFAULT_TRANSFER_NUMBER=+91XXXXXXXXXX
-
-# CRM API communication
-CRM_API_SECRET=your-secret-key-change-this
-CRM_API_URL=http://localhost:3000
-```
-
-### 3. Set up LiveKit SIP Trunk
-
-1. Go to LiveKit Cloud dashboard
-2. Create a new SIP Trunk
-3. Configure it with your Twilio SIP credentials
-4. Note the trunk ID and set it as `OUTBOUND_SIP_TRUNK_ID`
-
-### 4. Set up Twilio
-
-1. Create a Twilio account and get a phone number
-2. Set up an Elastic SIP Trunk pointing to LiveKit
-3. Configure the SIP trunk to route inbound calls to LiveKit
-
-### 5. Update the database
-
+### 3. Configure Environment
+Copy the example environment file and fill in your credentials:
 ```bash
-# From the project root
-npm run db:generate
-npm run db:push
+cp .env.example .env
+nano .env  # Or open in your editor
 ```
+**Required Variables:**
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_SECRET`
+- `DEEPGRAM_API_KEY`
+- `GROQ_API_KEY`
+- `VOBIZ_SIP_*` variables (for outbound calls)
 
-## Running
+---
 
-### Start the CRM (Next.js)
+## 🏃‍♂️ Usage
 
+### 1. Start the Agent
+This runs the agent process which listens for room connections.
 ```bash
-# From project root
-npm run dev
+python agent.py start
 ```
 
-### Start the AI Agent
-
+### 2. Make an Outbound Call
+In a **new terminal window** (ensure `venv` is active), run:
 ```bash
-# From ai-agent directory
-cd ai-agent
-python agent.py dev
+python make_call.py --to +91XXXXXXXXXX
 ```
+*Note: The number must include the country code (e.g., +1 or +91).*
 
-The agent registers with LiveKit as `furniture-crm-agent` and waits for calls.
+---
 
-### Make an outbound call (CLI)
+## 🔧 Troubleshooting Guide
 
-```bash
-python make_call.py --to "+91XXXXXXXXXX" --reason "Follow up on sofa inquiry" --name "Rahul Sharma"
-```
+### ❌ Error: `model_decommissioned` (Groq/Llama)
+**Cause:** The configured LLM model is no longer supported by Groq.  
+**Fix:**
+1. Open `config.py`.
+2. Update `GROQ_MODEL` to a supported model (e.g., `llama-3.3-70b-versatile` or `llama-3.1-8b-instant`).
+3. **Restart `agent.py`** to apply changes.
 
-### Make an outbound call (CRM UI)
+### ❌ Error: `404 Not Found` (SIP Trunk)
+**Cause:** The `SIP_TRUNK_ID` in `.env` is incorrect or doesn't exist in your LiveKit project.  
+**Fix:**
+1. Run `python list_trunks.py` to see available trunks.
+2. If none exist, run `python create_trunk.py` to create one.
+3. Update `.env` with the correct ID.
 
-1. Go to **Call Center** > **AI Caller** tab
-2. Enter the phone number, customer name, and reason
-3. Click **Start AI Call**
+### ❌ Error: `Address already in use` (Port 8081)
+**Cause:** Another instance of `agent.py` is already running.  
+**Fix:**
+1. Find the process: `lsof -i :8081`
+2. Kill it: `kill -9 <PID>` or `pkill -f "python agent.py"`
 
-### Browser voice test
+### ❌ Error: `No module named 'certifi'` or other imports
+**Cause:** Dependencies are missing.  
+**Fix:**
+1. Ensure your virtual environment is active (`source venv/bin/activate`).
+2. Run `pip install -r requirements.txt`.
 
-1. Go to **Call Center** > **AI Caller** tab
-2. Click **Start Browser Call**
-3. Speak into your microphone
+### ❌ Call Connects but No Audio
+**Cause:** TTS (Text-to-Speech) failure or WebSocket issues.  
+**Fix:**
+1. Check terminal logs for `APIStatusError`.
+2. If using OpenAI TTS, ensure you have OpenAI credits.
+3. Recommended: Switch to Deepgram TTS (set `TTS_PROVIDER=deepgram` in `.env`).
 
-Or use the standalone test page:
-```bash
-cd ai-agent
-python token_server.py
-# Open http://localhost:8099
-```
+---
 
-## How It Works
-
-### Outbound Calls
-1. CRM UI triggers `/api/calls/outbound`
-2. API creates a LiveKit room and dispatches the agent
-3. Agent dials the customer via Twilio SIP trunk
-4. Deepgram converts speech-to-text
-5. Groq LLM generates responses
-6. Deepgram converts text-to-speech
-7. When call ends, agent logs to CRM via `/api/calls/log`
-
-### Inbound Calls
-1. Customer calls your Twilio number
-2. Twilio routes to LiveKit via SIP trunk
-3. LiveKit dispatches the AI agent
-4. Same STT → LLM → TTS pipeline
-5. Agent can transfer to human via `transfer_call` tool
-6. Call logged to CRM database on completion
-
-### Browser Calls
-1. CRM requests a LiveKit token via `/api/calls/token`
-2. Browser connects to LiveKit room with microphone
-3. Agent dispatched and handles the conversation
-4. Call logged to CRM on disconnect
-
-## Agent Persona
-
-The AI agent is named **Aria** and handles:
-- Product inquiries and pricing
-- Appointment scheduling
-- Delivery updates
-- Complaint handling
-- Feedback collection
-- Order follow-ups
-
-You can customize the persona by editing the system prompts in `agent.py`.
-
-## Troubleshooting
-
-- **"LiveKit not configured"**: Check that `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are set
-- **Agent not answering**: Make sure `python agent.py dev` is running
-- **No phone calls**: Verify Twilio SIP trunk configuration and `OUTBOUND_SIP_TRUNK_ID`
-- **Browser call fails**: Check browser microphone permissions
-- **Calls not logged**: Verify `CRM_API_SECRET` matches in both `.env` and the API route
+## 📂 Project Structure
+- `agent.py`: Main application logic.
+- `config.py`: Central configuration for prompts, models, and constants.
+- `make_call.py`: Script to initiate outbound calls.
+- `create_trunk.py` / `setup_trunk.py`: Utilities for SIP trunk management.
+# LIvekitAIVoice
