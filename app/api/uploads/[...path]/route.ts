@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { readFile, stat } from 'fs/promises'
-import { join, extname } from 'path'
+import { readFile, stat } from 'node:fs/promises'
+import { getUploadFilePath } from '@/lib/r2'
+
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 const MIME_TYPES: Record<string, string> = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-  '.gif': 'image/gif',
-  '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  pdf: 'application/pdf',
 }
 
 // In standalone Next.js builds, process.cwd() ≠ /app — use UPLOAD_DIR env var
-const UPLOADS_ROOT = process.env.UPLOAD_DIR || join(process.cwd(), 'uploads')
-
 // Serves files from the uploads directory
 export async function GET(
   _req: NextRequest,
@@ -28,7 +29,7 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
   }
 
-  const filePath = join(UPLOADS_ROOT, relativePath)
+  const filePath = getUploadFilePath(relativePath)
 
   try {
     const fileStat = await stat(filePath)
@@ -37,7 +38,7 @@ export async function GET(
     }
 
     const buffer = await readFile(filePath)
-    const ext = extname(filePath).toLowerCase()
+    const ext = (filePath.split('.').pop() || '').toLowerCase()
     const contentType = MIME_TYPES[ext] || 'application/octet-stream'
 
     return new NextResponse(buffer, {

@@ -49,7 +49,7 @@ const moreCategories = [
       { href: '/conversations', label: 'Conversations', icon: MessageSquare },
       { href: '/calls', label: 'Call Center', icon: Headphones },
       { href: '/email-marketing', label: 'Email Marketing', icon: MailPlus, roles: ['ADMIN', 'MANAGER'] },
-      { href: '/marketing', label: 'Marketing', icon: Megaphone, roles: ['ADMIN', 'MANAGER'] },
+      { href: '/whatsapp-marketing', label: 'WhatsApp Marketing', icon: Megaphone, roles: ['ADMIN', 'MANAGER'] },
     ],
   },
   {

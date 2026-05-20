@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { decrypt } from '@/lib/session'
 
-const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/api/walkin', '/api/email-track', '/api/calls/log', '/api/calls/schedule-callback', '/api/appointments/create']
+const publicPaths = ['/login', '/api/auth', '/api/webhooks', '/walkin-form', '/api/walkin', '/api/email-track', '/api/calls/log', '/api/calls/schedule-callback', '/api/appointments/create', '/api/whatsapp/webhook']
 
 // Role-based route restrictions
 const routePermissions: Record<string, string[]> = {
@@ -12,7 +12,7 @@ const routePermissions: Record<string, string[]> = {
   '/payroll': ['ADMIN', 'MANAGER'],
   '/billing': ['ADMIN', 'MANAGER'],
   '/drafts': ['ADMIN', 'MANAGER'],
-  '/marketing': ['ADMIN', 'MANAGER'],
+  '/whatsapp-marketing': ['ADMIN', 'MANAGER'],
   '/email-marketing': ['ADMIN', 'MANAGER'],
 }
 

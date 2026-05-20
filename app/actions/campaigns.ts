@@ -41,7 +41,7 @@ export async function createCampaign(data: unknown) {
     },
   })
 
-  revalidatePath('/marketing')
+  revalidatePath('/whatsapp-marketing')
   return { success: true, data: campaign }
 }
 
@@ -57,6 +57,6 @@ export async function updateCampaignStatus(id: number, status: string) {
     data: { status: dbStatus },
   })
 
-  revalidatePath('/marketing')
+  revalidatePath('/whatsapp-marketing')
   return { success: true, data: campaign }
 }
