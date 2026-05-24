@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -252,93 +251,102 @@ export function TemplateManager() {
   }
 
   return (
-    <div className="space-y-4 mt-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">Message Templates</h2>
-          <p className="text-sm text-muted">
-            Create and manage your WhatsApp message templates. Meta requires
-            every template to be approved in the WhatsApp Manager before it can
-            be sent — use &quot;Sync from Meta&quot; to pull your approved list.
+    <div className="space-y-4 mt-2">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base sm:text-lg font-semibold text-foreground">Message Templates</h2>
+          <p className="text-xs sm:text-sm text-muted mt-0.5">
+            Create and manage your WhatsApp message templates. Use &quot;Sync from
+            Meta&quot; to pull your approved list.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="outline"
             onClick={handleSyncFromMeta}
             disabled={syncing}
-            className="border-border bg-transparent text-foreground hover:bg-surface-light"
+            size="sm"
+            className="border-border bg-transparent text-foreground hover:bg-surface-light text-xs sm:text-sm"
             title="Pull approved templates from your Meta WhatsApp Business Account"
           >
             <RefreshCw
-              className={`size-4 ${syncing ? 'animate-spin' : ''}`}
+              className={`size-3.5 sm:size-4 ${syncing ? 'animate-spin' : ''}`}
             />
-            {syncing ? 'Syncing…' : 'Sync from Meta'}
+            <span className="hidden xs:inline">{syncing ? 'Syncing…' : 'Sync from Meta'}</span>
+            <span className="xs:hidden">{syncing ? '…' : 'Sync'}</span>
           </Button>
           <Button
             onClick={() => {
               setForm(emptyForm);
               setDialogOpen(true);
             }}
-            className="bg-accent hover:bg-accent text-foreground"
+            size="sm"
+            className="bg-accent hover:bg-accent-hover text-white text-xs sm:text-sm"
           >
-            <Plus className="size-4" />
-            New Template
+            <Plus className="size-3.5 sm:size-4" />
+            <span className="hidden sm:inline">New Template</span>
+            <span className="sm:hidden">New</span>
           </Button>
         </div>
       </div>
 
+      {/* Template List */}
       {templates.length === 0 ? (
-        <Card className="bg-surface border-border ring-0 ring-transparent">
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-muted text-sm">No templates yet.</p>
-            <p className="text-muted text-xs mt-1">Create your first message template to get started.</p>
-          </CardContent>
-        </Card>
+        <div className="glass-card flex flex-col items-center justify-center py-10 sm:py-12 text-center px-4">
+          <p className="text-muted text-sm">No templates yet.</p>
+          <p className="text-muted text-xs mt-1">
+            Create your first message template to get started.
+          </p>
+        </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-2.5">
           {templates.map((template) => (
-            <Card key={template.id} className="bg-surface border-border ring-0 ring-transparent">
-              <CardContent className="flex items-start justify-between pt-4">
-                <div className="space-y-2 min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-medium text-foreground">{template.name}</h3>
+            <div key={template.id} className="glass-card px-3.5 sm:px-4 py-3 sm:py-3.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  {/* Name + badges row */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                    <h3 className="font-medium text-foreground text-sm truncate max-w-[200px] sm:max-w-none">
+                      {template.name}
+                    </h3>
                     <Badge
-                      className={`text-xs border ${categoryColors[template.category] || ''}`}
+                      className={`text-[10px] sm:text-xs border px-1.5 py-0 sm:px-2 sm:py-0.5 ${categoryColors[template.category] || ''}`}
                     >
                       {template.category}
                     </Badge>
                     <Badge
-                      className={`text-xs border ${statusColors[template.status || 'Draft'] || ''}`}
+                      className={`text-[10px] sm:text-xs border px-1.5 py-0 sm:px-2 sm:py-0.5 ${statusColors[template.status || 'Draft'] || ''}`}
                     >
                       {template.status || 'Draft'}
                     </Badge>
                     {template.language && (
-                      <span className="text-xs text-muted uppercase">{template.language}</span>
+                      <span className="text-[10px] sm:text-xs text-muted uppercase">{template.language}</span>
                     )}
                   </div>
-                  <p className="text-sm text-muted line-clamp-2">{template.body_text}</p>
+                  {/* Body preview */}
+                  <p className="text-xs sm:text-sm text-muted line-clamp-2">{template.body_text}</p>
                   {template.footer_text && (
-                    <p className="text-xs text-muted italic">{template.footer_text}</p>
+                    <p className="text-[10px] sm:text-xs text-muted italic">{template.footer_text}</p>
                   )}
                 </div>
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={() => handleDelete(template.id)}
-                  className="text-muted hover:text-red-400 hover:bg-red-950/30 shrink-0 ml-2"
+                  className="text-muted hover:text-red-500 hover:bg-red-50 shrink-0 size-7 sm:size-8"
                 >
-                  <Trash2 className="size-4" />
+                  <Trash2 className="size-3.5 sm:size-4" />
                 </Button>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
       {/* New Template Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="bg-surface border-border sm:max-w-lg">
+        <DialogContent className="bg-surface border-border sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-foreground">New Message Template</DialogTitle>
             <DialogDescription className="text-muted">
@@ -346,32 +354,32 @@ export function TemplateManager() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label className="text-foreground">Template Name</Label>
+          <div className="space-y-3.5 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-foreground text-xs sm:text-sm">Template Name</Label>
               <Input
                 placeholder="e.g. order_confirmation"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="bg-surface-light border-border text-foreground placeholder:text-muted"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-foreground">Category</Label>
+            {/* Responsive: 2-col on sm+, 1-col on mobile */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              <div className="space-y-1.5">
+                <Label className="text-foreground text-xs sm:text-sm">Category</Label>
                 <Select
                   value={form.category}
                   onValueChange={(val) =>
                     setForm({ ...form, category: val as MessageTemplate['category'] })
                   }
                 >
-                  <SelectTrigger className="w-full bg-surface-light border-border text-foreground">
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-surface-light border-border">
+                  <SelectContent>
                     {CATEGORIES.map((cat) => (
-                      <SelectItem key={cat} value={cat} className="text-foreground focus:bg-surface-light focus:text-foreground">
+                      <SelectItem key={cat} value={cat}>
                         {cat}
                       </SelectItem>
                     ))}
@@ -379,43 +387,41 @@ export function TemplateManager() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-foreground">Language</Label>
+              <div className="space-y-1.5">
+                <Label className="text-foreground text-xs sm:text-sm">Language</Label>
                 <Input
                   list="template-language-codes"
                   placeholder="en_US"
                   value={form.language}
                   onChange={(e) => setForm({ ...form, language: e.target.value })}
-                  className="bg-surface-light border-border text-foreground placeholder:text-muted"
                 />
                 <datalist id="template-language-codes">
                   {COMMON_LANGUAGE_CODES.map((code) => (
                     <option key={code} value={code} />
                   ))}
                 </datalist>
-                <p className="text-[11px] text-muted">
-                  Must match the exact language code the template is approved
-                  under on Meta — e.g. <code>en_US</code> and <code>en</code>{' '}
+                <p className="text-[10px] sm:text-[11px] text-muted">
+                  Must match the exact language code on Meta — e.g. <code>en_US</code> and <code>en</code>{' '}
                   are distinct.
                 </p>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-foreground">Header Type</Label>
+            <div className="space-y-1.5">
+              <Label className="text-foreground text-xs sm:text-sm">Header Type</Label>
               <Select
                 value={form.header_type}
                 onValueChange={(val) => setForm({ ...form, header_type: val || '' })}
               >
-                <SelectTrigger className="w-full bg-surface-light border-border text-foreground">
+                <SelectTrigger className="w-full">
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
-                <SelectContent className="bg-surface-light border-border">
-                  <SelectItem value="none" className="text-foreground focus:bg-surface-light focus:text-foreground">
+                <SelectContent>
+                  <SelectItem value="none">
                     None
                   </SelectItem>
                   {HEADER_TYPES.map((type) => (
-                    <SelectItem key={type} value={type} className="text-foreground focus:bg-surface-light focus:text-foreground">
+                    <SelectItem key={type} value={type}>
                       {type.charAt(0).toUpperCase() + type.slice(1)}
                     </SelectItem>
                   ))}
@@ -423,29 +429,28 @@ export function TemplateManager() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-foreground">Body Text</Label>
+            <div className="space-y-1.5">
+              <Label className="text-foreground text-xs sm:text-sm">Body Text</Label>
               <Textarea
                 placeholder="Enter your template message body. Use {{1}}, {{2}} for variables."
                 value={form.body_text}
                 onChange={(e) => setForm({ ...form, body_text: e.target.value })}
                 rows={4}
-                className="bg-surface-light border-border text-foreground placeholder:text-muted resize-none"
+                className="resize-none"
               />
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-foreground">Footer Text</Label>
+            <div className="space-y-1.5">
+              <Label className="text-foreground text-xs sm:text-sm">Footer Text</Label>
               <Input
                 placeholder="Optional footer text"
                 value={form.footer_text}
                 onChange={(e) => setForm({ ...form, footer_text: e.target.value })}
-                className="bg-surface-light border-border text-foreground placeholder:text-muted"
               />
             </div>
           </div>
 
-          <DialogFooter className="bg-surface border-border">
+          <DialogFooter className="gap-2 sm:gap-0">
             <Button
               variant="outline"
               onClick={() => setDialogOpen(false)}
@@ -456,7 +461,7 @@ export function TemplateManager() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-accent hover:bg-accent text-foreground"
+              className="bg-accent hover:bg-accent-hover text-white"
             >
               {saving ? (
                 <>

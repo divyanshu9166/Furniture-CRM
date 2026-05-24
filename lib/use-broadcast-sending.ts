@@ -17,6 +17,7 @@ export interface AudienceConfig {
   tagIds?: string[];
   customField?: CustomFieldFilter;
   csvContacts?: { phone: string; name?: string }[];
+  /** IDs of manually-selected contacts (used when type === 'manual'). */
   selectedContactIds?: string[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
@@ -179,23 +180,25 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     } else if (audience.type === 'custom_field' && audience.customField) {
       contacts = await resolveCustomFieldAudience(supabase, audience.customField);
+    } else if (audience.type === 'csv' && audience.csvContacts) {
+      contacts = await upsertCsvContacts(supabase, audience.csvContacts);
     } else if (
       audience.type === 'manual' &&
       audience.selectedContactIds &&
       audience.selectedContactIds.length > 0
     ) {
-      const ids = audience.selectedContactIds;
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .in('id', ids);
-      if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-      const byId = new Map((data ?? []).map((c) => [c.id, c] as const));
-      contacts = ids
-        .map((id) => byId.get(id))
-        .filter((c): c is Contact => Boolean(c));
-    } else if (audience.type === 'csv' && audience.csvContacts) {
-      contacts = await upsertCsvContacts(supabase, audience.csvContacts);
+      // Manual selection: fetch contacts by their IDs.
+      // PostgREST caps .in() at ~1000, so page through if needed.
+      const PAGE = 500;
+      for (let i = 0; i < audience.selectedContactIds.length; i += PAGE) {
+        const slice = audience.selectedContactIds.slice(i, i + PAGE);
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .in('id', slice);
+        if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+        contacts.push(...(data ?? []));
+      }
     }
 
     // Apply exclude tags (works across all contact-derived audience
