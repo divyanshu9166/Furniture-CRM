@@ -16,10 +16,10 @@ interface Action {
 }
 
 const ACTIONS: Action[] = [
-  { label: 'New Contact', href: '/whatsapp-marketing?tab=contacts', icon: UserPlus, tint: 'text-violet-600' },
+  { label: 'New Contact', href: '/whatsapp-marketing?tab=contacts', icon: UserPlus, tint: 'text-accent' },
   { label: 'New Deal', href: '/whatsapp-marketing?tab=pipelines', icon: Briefcase, tint: 'text-blue-600' },
   { label: 'New Broadcast', href: '/broadcasts/new', icon: Radio, tint: 'text-amber-600' },
-  { label: 'New Automation', href: '/automations/new', icon: Zap, tint: 'text-violet-600' },
+  { label: 'New Automation', href: '/automations/new', icon: Zap, tint: 'text-accent' },
 ]
 
 export function QuickActions() {

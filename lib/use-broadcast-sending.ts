@@ -13,10 +13,11 @@ export interface CustomFieldFilter {
 }
 
 export interface AudienceConfig {
-  type: 'all' | 'tags' | 'custom_field' | 'csv';
+  type: 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
   tagIds?: string[];
   customField?: CustomFieldFilter;
   csvContacts?: { phone: string; name?: string }[];
+  selectedContactIds?: string[];
   /** Contacts carrying any of these tags are subtracted from the result. */
   excludeTagIds?: string[];
 }
@@ -178,6 +179,21 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       }
     } else if (audience.type === 'custom_field' && audience.customField) {
       contacts = await resolveCustomFieldAudience(supabase, audience.customField);
+    } else if (
+      audience.type === 'manual' &&
+      audience.selectedContactIds &&
+      audience.selectedContactIds.length > 0
+    ) {
+      const ids = audience.selectedContactIds;
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .in('id', ids);
+      if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+      const byId = new Map((data ?? []).map((c) => [c.id, c] as const));
+      contacts = ids
+        .map((id) => byId.get(id))
+        .filter((c): c is Contact => Boolean(c));
     } else if (audience.type === 'csv' && audience.csvContacts) {
       contacts = await upsertCsvContacts(supabase, audience.csvContacts);
     }
@@ -349,6 +365,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             type: payload.audience.type,
             tagIds: payload.audience.tagIds,
             customField: payload.audience.customField,
+            selectedContactIds: payload.audience.selectedContactIds,
             excludeTagIds: payload.audience.excludeTagIds,
           },
           status: 'sending',

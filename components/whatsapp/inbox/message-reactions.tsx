@@ -67,8 +67,8 @@ export function MessageReactions({
           className={cn(
             "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] leading-none transition-colors",
             group.byCurrentUser
-              ? "border-violet-500/60 bg-violet-500/15 text-violet-200 hover:bg-violet-500/25"
-              : "border-slate-700 bg-slate-800/80 text-slate-200 hover:bg-slate-700",
+              ? "border-accent bg-accent text-accent hover:bg-accent"
+              : "border-border bg-surface-light text-foreground hover:bg-surface-light",
           )}
         >
           <span className="text-sm leading-none">{group.emoji}</span>

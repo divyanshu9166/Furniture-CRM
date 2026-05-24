@@ -2,20 +2,23 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { CustomField, Tag } from '@/types';
+import { Contact, CustomField, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Users,
   Tags,
   Filter,
   Upload,
+  CheckSquare,
   Loader2,
   ArrowRight,
   ArrowLeft,
   X,
 } from 'lucide-react';
 
-type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv';
+type AudienceType = 'all' | 'tags' | 'custom_field' | 'manual' | 'csv';
 type CustomFieldOperator = 'is' | 'is_not' | 'contains';
 
 interface CustomFieldFilter {
@@ -29,6 +32,7 @@ interface AudienceConfig {
   tagIds?: string[];
   customField?: CustomFieldFilter;
   csvContacts?: { phone: string; name?: string }[];
+  selectedContactIds?: string[];
   excludeTagIds?: string[];
 }
 
@@ -64,6 +68,12 @@ const audienceOptions: {
     icon: Filter,
   },
   {
+    type: 'manual',
+    label: 'Select Contacts',
+    description: 'Pick specific contacts from your list',
+    icon: CheckSquare,
+  },
+  {
     type: 'csv',
     label: 'Upload CSV',
     description: 'Upload a list of phone numbers',
@@ -77,6 +87,8 @@ const OPERATOR_OPTIONS: { value: CustomFieldOperator; label: string }[] = [
   { value: 'contains', label: 'contains' },
 ];
 
+const MANUAL_PAGE_SIZE = 20;
+
 export function Step2SelectAudience({
   audience,
   onUpdate,
@@ -89,6 +101,11 @@ export function Step2SelectAudience({
   const [loadingFields, setLoadingFields] = useState(false);
   const [estimatedCount, setEstimatedCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [manualContacts, setManualContacts] = useState<Contact[]>([]);
+  const [manualSearch, setManualSearch] = useState('');
+  const [manualPage, setManualPage] = useState(0);
+  const [manualTotal, setManualTotal] = useState(0);
+  const [manualLoading, setManualLoading] = useState(false);
 
   // Tags are used both by the primary "Filter by Tags" audience type
   // AND by the exclude-list below — so always load once on mount.
@@ -125,6 +142,41 @@ export function Step2SelectAudience({
     fetchFields();
   }, [audience.type]);
 
+  const fetchManualContacts = useCallback(async () => {
+    if (audience.type !== 'manual') return;
+    setManualLoading(true);
+    try {
+      const supabase = createClient();
+      const from = manualPage * MANUAL_PAGE_SIZE;
+      const to = from + MANUAL_PAGE_SIZE - 1;
+
+      let query = supabase
+        .from('contacts')
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (manualSearch.trim()) {
+        const term = `%${manualSearch.trim()}%`;
+        query = query.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
+      }
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+      setManualContacts(data ?? []);
+      setManualTotal(count ?? 0);
+    } catch {
+      setManualContacts([]);
+      setManualTotal(0);
+    } finally {
+      setManualLoading(false);
+    }
+  }, [audience.type, manualPage, manualSearch]);
+
+  useEffect(() => {
+    fetchManualContacts();
+  }, [fetchManualContacts]);
+
   const fetchEstimatedCount = useCallback(async () => {
     setLoadingCount(true);
     try {
@@ -160,6 +212,12 @@ export function Step2SelectAudience({
         else q = q.ilike('value', `%${value}%`);
         const { data } = await q;
         baseIds = new Set((data ?? []).map((r) => r.contact_id));
+      } else if (
+        audience.type === 'manual' &&
+        audience.selectedContactIds &&
+        audience.selectedContactIds.length > 0
+      ) {
+        baseIds = new Set(audience.selectedContactIds);
       } else if (
         audience.type === 'csv' &&
         audience.csvContacts &&
@@ -204,6 +262,7 @@ export function Step2SelectAudience({
     audience.tagIds,
     audience.customField,
     audience.csvContacts,
+    audience.selectedContactIds,
     audience.excludeTagIds,
   ]);
 
@@ -237,12 +296,52 @@ export function Step2SelectAudience({
     onUpdate({ ...audience, customField: { ...prev, ...patch } });
   }
 
+  function toggleManualContact(contactId: string) {
+    const current = audience.selectedContactIds ?? [];
+    const updated = current.includes(contactId)
+      ? current.filter((id) => id !== contactId)
+      : [...current, contactId];
+    onUpdate({ ...audience, selectedContactIds: updated });
+  }
+
+  function clearManualSelection() {
+    onUpdate({ ...audience, selectedContactIds: [] });
+  }
+
+  function toggleManualPageSelection() {
+    const pageIds = manualContacts.map((contact) => contact.id);
+    if (pageIds.length === 0) return;
+    const current = new Set(audience.selectedContactIds ?? []);
+    const allSelected = pageIds.every((id) => current.has(id));
+    let updated: string[];
+    if (allSelected) {
+      updated = (audience.selectedContactIds ?? []).filter(
+        (id) => !pageIds.includes(id),
+      );
+    } else {
+      updated = [...new Set([...(audience.selectedContactIds ?? []), ...pageIds])];
+    }
+    onUpdate({ ...audience, selectedContactIds: updated });
+  }
+
+  const selectedContactIds = audience.selectedContactIds ?? [];
+  const selectedContactSet = new Set(selectedContactIds);
+  const manualTotalPages = Math.max(1, Math.ceil(manualTotal / MANUAL_PAGE_SIZE));
+  const manualFrom = manualTotal === 0 ? 0 : manualPage * MANUAL_PAGE_SIZE + 1;
+  const manualTo = Math.min((manualPage + 1) * MANUAL_PAGE_SIZE, manualTotal);
+  const manualHasPrev = manualPage > 0;
+  const manualHasNext = manualPage + 1 < manualTotalPages;
+  const manualPageSelected =
+    manualContacts.length > 0 &&
+    manualContacts.every((contact) => selectedContactSet.has(contact.id));
+
   const isValid =
     audience.type === 'all' ||
     (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) ||
     (audience.type === 'custom_field' &&
       !!audience.customField?.fieldId &&
       audience.customField.value.length > 0) ||
+    (audience.type === 'manual' && selectedContactIds.length > 0) ||
     (audience.type === 'csv' &&
       audience.csvContacts &&
       audience.csvContacts.length > 0);
@@ -250,8 +349,8 @@ export function Step2SelectAudience({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-white">Select Audience</h2>
-        <p className="mt-1 text-sm text-slate-400">
+        <h2 className="text-lg font-semibold text-foreground">Select Audience</h2>
+        <p className="mt-1 text-sm text-muted">
           Choose who will receive this broadcast.
         </p>
       </div>
@@ -276,26 +375,30 @@ export function Step2SelectAudience({
                       : undefined,
                   csvContacts:
                     option.type === 'csv' ? audience.csvContacts : undefined,
+                  selectedContactIds:
+                    option.type === 'manual'
+                      ? audience.selectedContactIds
+                      : undefined,
                 })
               }
               className={`flex items-start gap-3 rounded-xl border p-4 text-left transition-all ${
                 isSelected
-                  ? 'border-violet-500 bg-violet-500/5 ring-1 ring-violet-500/30'
-                  : 'border-slate-800 bg-slate-900/50 hover:border-slate-700'
+                  ? 'border-accent bg-accent ring-1 ring-accent'
+                  : 'border-border bg-surface hover:border-border'
               }`}
             >
               <div
                 className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                   isSelected
-                    ? 'bg-violet-500/10 text-violet-400'
-                    : 'bg-slate-800 text-slate-400'
+                    ? 'bg-accent text-accent'
+                    : 'bg-surface-light text-muted'
                 }`}
               >
                 <Icon className="h-4 w-4" />
               </div>
               <div>
-                <p className="text-sm font-medium text-white">{option.label}</p>
-                <p className="mt-0.5 text-xs text-slate-400">
+                <p className="text-sm font-medium text-foreground">{option.label}</p>
+                <p className="mt-0.5 text-xs text-muted">
                   {option.description}
                 </p>
               </div>
@@ -305,12 +408,12 @@ export function Step2SelectAudience({
       </div>
 
       {audience.type === 'tags' && (
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-          <p className="mb-3 text-sm font-medium text-white">Select Tags</p>
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <p className="mb-3 text-sm font-medium text-foreground">Select Tags</p>
           {loadingTags ? (
-            <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+            <Loader2 className="h-5 w-5 animate-spin text-accent" />
           ) : tags.length === 0 ? (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted">
               No tags found. Create tags in Settings.
             </p>
           ) : (
@@ -323,8 +426,8 @@ export function Step2SelectAudience({
                     onClick={() => toggleTag(tag.id)}
                     className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                       isSelected
-                        ? 'border-violet-500/30 bg-violet-500/10 text-violet-400'
-                        : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                        ? 'border-accent bg-accent text-accent'
+                        : 'border-border bg-surface-light text-foreground hover:border-border'
                     }`}
                   >
                     <span
@@ -341,12 +444,12 @@ export function Step2SelectAudience({
       )}
 
       {audience.type === 'custom_field' && (
-        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-          <p className="text-sm font-medium text-white">Custom Field Filter</p>
+        <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+          <p className="text-sm font-medium text-foreground">Custom Field Filter</p>
           {loadingFields ? (
-            <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+            <Loader2 className="h-5 w-5 animate-spin text-accent" />
           ) : customFields.length === 0 ? (
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted">
               No custom fields defined. Create one in Settings → Custom Fields.
             </p>
           ) : (
@@ -354,7 +457,7 @@ export function Step2SelectAudience({
               <select
                 value={audience.customField?.fieldId ?? ''}
                 onChange={(e) => updateCustomField({ fieldId: e.target.value })}
-                className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-sm text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                className="h-9 rounded-lg border border-border bg-surface-light px-2.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               >
                 <option value="">Select field…</option>
                 {customFields.map((f) => (
@@ -370,7 +473,7 @@ export function Step2SelectAudience({
                     operator: e.target.value as CustomFieldOperator,
                   })
                 }
-                className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-sm text-white outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                className="h-9 rounded-lg border border-border bg-surface-light px-2.5 text-sm text-foreground outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               >
                 {OPERATOR_OPTIONS.map((op) => (
                   <option key={op.value} value={op.value}>
@@ -383,24 +486,134 @@ export function Step2SelectAudience({
                 value={audience.customField?.value ?? ''}
                 onChange={(e) => updateCustomField({ value: e.target.value })}
                 placeholder="Value"
-                className="h-9 rounded-lg border border-slate-700 bg-slate-800 px-2.5 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                className="h-9 rounded-lg border border-border bg-surface-light px-2.5 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent focus:ring-1 focus:ring-accent"
               />
             </div>
           )}
         </div>
       )}
 
+      {audience.type === 'manual' && (
+        <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-foreground">Select Contacts</p>
+              <p className="mt-1 text-xs text-muted">
+                Choose specific contacts to receive this broadcast.
+              </p>
+            </div>
+            {selectedContactIds.length > 0 && (
+              <button
+                type="button"
+                onClick={clearManualSelection}
+                className="text-xs font-medium text-muted hover:text-foreground"
+              >
+                Clear selection
+              </button>
+            )}
+          </div>
+
+          <Input
+            value={manualSearch}
+            onChange={(e) => {
+              setManualSearch(e.target.value);
+              setManualPage(0);
+            }}
+            placeholder="Search by name, phone, or email..."
+            className="border-border bg-surface-light text-foreground placeholder:text-muted"
+          />
+
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>
+              {manualTotal > 0
+                ? `Showing ${manualFrom}-${manualTo} of ${manualTotal}`
+                : 'No contacts found.'}
+            </span>
+            <button
+              type="button"
+              onClick={toggleManualPageSelection}
+              className="text-xs font-medium text-muted hover:text-foreground"
+            >
+              {manualPageSelected ? 'Clear page' : 'Select page'}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-border bg-surface-light">
+            <ScrollArea className="h-56">
+              {manualLoading ? (
+                <div className="flex h-40 items-center justify-center">
+                  <Loader2 className="h-5 w-5 animate-spin text-accent" />
+                </div>
+              ) : manualContacts.length === 0 ? (
+                <div className="flex h-40 items-center justify-center text-xs text-muted">
+                  No contacts available.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {manualContacts.map((contact) => (
+                    <label
+                      key={contact.id}
+                      className="flex cursor-pointer items-center gap-3 px-4 py-2 text-sm text-foreground hover:bg-surface"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedContactSet.has(contact.id)}
+                        onChange={() => toggleManualContact(contact.id)}
+                        className="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+                      />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm text-foreground">
+                          {contact.name || 'Unnamed'}
+                        </p>
+                        <p className="truncate text-xs text-muted">
+                          {contact.phone}
+                          {contact.email ? ` | ${contact.email}` : ''}
+                        </p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setManualPage((p) => Math.max(0, p - 1))}
+              disabled={!manualHasPrev}
+              className="border-border text-foreground"
+            >
+              Previous
+            </Button>
+            <span className="text-xs text-muted">
+              Page {manualPage + 1} of {manualTotalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setManualPage((p) => (manualHasNext ? p + 1 : p))}
+              disabled={!manualHasNext}
+              className="border-border text-foreground"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Exclude list — applies regardless of audience type */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+      <div className="rounded-xl border border-border bg-surface p-4">
         <div className="mb-3 flex items-center gap-2">
           <X className="h-4 w-4 text-red-400" />
-          <p className="text-sm font-medium text-white">
+          <p className="text-sm font-medium text-foreground">
             Exclude contacts with these tags
           </p>
-          <span className="text-xs text-slate-500">(optional)</span>
+          <span className="text-xs text-muted">(optional)</span>
         </div>
         {tags.length === 0 ? (
-          <p className="text-xs text-slate-500">No tags available.</p>
+          <p className="text-xs text-muted">No tags available.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {tags.map((tag) => {
@@ -412,7 +625,7 @@ export function Step2SelectAudience({
                   className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-all ${
                     isExcluded
                       ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                      : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-600'
+                      : 'border-border bg-surface-light text-foreground hover:border-border'
                   }`}
                 >
                   <span
@@ -428,33 +641,33 @@ export function Step2SelectAudience({
       </div>
 
       {/* Audience Summary */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-        <p className="mb-2 text-sm font-medium text-white">Audience Summary</p>
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <p className="mb-2 text-sm font-medium text-foreground">Audience Summary</p>
         {loadingCount ? (
           <div className="flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
-            <span className="text-xs text-slate-400">Calculating…</span>
+            <Loader2 className="h-4 w-4 animate-spin text-accent" />
+            <span className="text-xs text-muted">Calculating…</span>
           </div>
         ) : estimatedCount !== null ? (
           <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-violet-400" />
-            <span className="text-sm text-white">
+            <Users className="h-4 w-4 text-accent" />
+            <span className="text-sm text-foreground">
               {estimatedCount.toLocaleString()}
             </span>
-            <span className="text-xs text-slate-400">estimated recipients</span>
+            <span className="text-xs text-muted">estimated recipients</span>
           </div>
         ) : (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted">
             Select an audience type to see the estimate.
           </p>
         )}
       </div>
 
-      <div className="flex items-center justify-between border-t border-slate-800 pt-4">
+      <div className="flex items-center justify-between border-t border-border pt-4">
         <Button
           variant="outline"
           onClick={onBack}
-          className="border-slate-700 text-slate-300"
+          className="border-border text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -462,7 +675,7 @@ export function Step2SelectAudience({
         <Button
           onClick={onNext}
           disabled={!isValid}
-          className="bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+          className="bg-accent text-foreground hover:bg-accent disabled:opacity-50"
         >
           Next
           <ArrowRight className="h-4 w-4" />

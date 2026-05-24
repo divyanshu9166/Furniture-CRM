@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   MessageSquare, Radio, Bot, Settings,
@@ -57,12 +57,27 @@ export function WhatsAppMarketingClient() {
     router.replace(`/whatsapp-marketing?${params.toString()}`, { scroll: false });
   };
 
-  useEffect(() => {
-    fetch('/api/whatsapp/config')
-      .then(r => r.json())
-      .then(data => { setWaConfig(data); setConfigLoading(false); })
+  const refreshConfig = useCallback(() => {
+    setConfigLoading(true);
+    fetch('/api/whatsapp/config', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        setWaConfig(data);
+        setConfigLoading(false);
+      })
       .catch(() => setConfigLoading(false));
   }, []);
+
+  useEffect(() => {
+    refreshConfig();
+  }, [refreshConfig]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handler = () => refreshConfig();
+    window.addEventListener('wa-config-updated', handler);
+    return () => window.removeEventListener('wa-config-updated', handler);
+  }, [refreshConfig]);
 
   useEffect(() => {
     document.body.classList.add('wa-light-active');
@@ -95,16 +110,15 @@ export function WhatsAppMarketingClient() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
-                active
-                  ? 'bg-white text-accent shadow-sm border border-border/50'
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${active
+                  ? 'bg-surface text-accent shadow-sm border border-border/50'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
-              }`}
+                }`}
             >
               <Icon className="w-4 h-4" />
               {tab.label}
               {badge && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-success text-white text-[10px] font-bold leading-none">
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-success text-surface text-[10px] font-bold leading-none">
                   {badge > 99 ? '99+' : badge}
                 </span>
               )}

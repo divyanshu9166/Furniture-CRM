@@ -9,6 +9,39 @@ export function sanitizePhoneForMeta(phone: string): string {
 }
 
 /**
+ * Normalize numbers for Meta WhatsApp API with India defaults.
+ * - Strips non-digits
+ * - Drops international prefix (00) or trunk 0 when present
+ * - Ensures +91 for 10-digit local numbers
+ * - Removes a trunk 0 after 91 (e.g. 910XXXXXXXXXX -> 91XXXXXXXXXX)
+ */
+export function normalizePhoneForMetaIndia(phone: string): string {
+  const sanitized = sanitizePhoneForMeta(phone)
+  if (!sanitized) return ''
+
+  let normalized = sanitized.replace(/^00+/, '')
+
+  if (normalized.startsWith('0')) {
+    const trimmed = normalized.replace(/^0+/, '')
+    if (trimmed.length === 10 || trimmed.startsWith('91')) {
+      normalized = trimmed
+    }
+  }
+
+  if (normalized.startsWith('91') && normalized.length >= 13) {
+    if (normalized[2] === '0') {
+      normalized = `91${normalized.slice(3)}`
+    }
+  }
+
+  if (normalized.length === 10) {
+    normalized = `91${normalized}`
+  }
+
+  return normalized
+}
+
+/**
  * Normalize phone number by removing all non-digit characters.
  * Used for comparing phone numbers in different formats.
  */
@@ -101,4 +134,51 @@ export function phoneVariants(sanitized: string): string[] {
  */
 export function isRecipientNotAllowedError(message: string): boolean {
   return /131030|not in allowed list|not in the allowed list/i.test(message)
+}
+
+/**
+ * Returns true when Meta reports the recipient does not have a
+ * WhatsApp account (error code 133010).
+ */
+export function isRecipientNotRegisteredError(message: string): boolean {
+  return /133010|account not registered|not registered/i.test(message)
+}
+
+/**
+ * Translate a raw Meta API error into a clear, actionable message.
+ * Falls back to the original string when no known pattern matches.
+ */
+export function humanReadableMetaError(rawError: string): string {
+  if (/133010|account not registered/i.test(rawError)) {
+    return (
+      'Your WhatsApp Business phone number is not registered with the Cloud API. ' +
+      'Go to WhatsApp Manager → Phone Numbers and check the status — it should say "Connected", not "Pending". ' +
+      'You may need to register the number via the API or contact Meta support.'
+    )
+  }
+  if (/131030|not in allowed list|not in the allowed list/i.test(rawError)) {
+    return (
+      'The recipient phone number is not in your sandbox allowed list. ' +
+      'Add the number in Meta App Dashboard → WhatsApp → API Setup → allowed numbers, or upgrade to a production account.'
+    )
+  }
+  if (/131047|re-engagement message|24.hour/i.test(rawError)) {
+    return (
+      'The 24-hour customer service window has closed. ' +
+      'You can only send a pre-approved template message outside the window.'
+    )
+  }
+  if (/132000|template.*not found|could not find template/i.test(rawError)) {
+    return (
+      'The message template was not found. Sync your templates in WhatsApp Marketing → Settings, ' +
+      'and make sure the template is approved in WhatsApp Manager.'
+    )
+  }
+  if (/190|access.token|OAuthException/i.test(rawError)) {
+    return (
+      'Your WhatsApp access token is invalid or expired. ' +
+      'Update it in WhatsApp Marketing → Settings.'
+    )
+  }
+  return rawError
 }

@@ -26,7 +26,7 @@ export default function NewBroadcastPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
   const [audience, setAudience] = useState<{
-    type: 'all' | 'tags' | 'custom_field' | 'csv';
+    type: 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
     tagIds?: string[];
     customField?: {
       fieldId: string;
@@ -34,6 +34,7 @@ export default function NewBroadcastPage() {
       value: string;
     };
     csvContacts?: { phone: string; name?: string }[];
+    selectedContactIds?: string[];
     excludeTagIds?: string[];
   }>({ type: 'all' });
   const [variables, setVariables] = useState<
@@ -53,6 +54,7 @@ export default function NewBroadcastPage() {
           tagIds: audience.tagIds,
           customField: audience.customField,
           csvContacts: audience.csvContacts,
+          selectedContactIds: audience.selectedContactIds,
           excludeTagIds: audience.excludeTagIds,
         },
         variables,
@@ -93,6 +95,9 @@ export default function NewBroadcastPage() {
       audience_filter: {
         type: audience.type,
         tagIds: audience.tagIds,
+        customField: audience.customField,
+        selectedContactIds: audience.selectedContactIds,
+        excludeTagIds: audience.excludeTagIds,
       },
       status: 'draft',
       total_recipients: 0,
@@ -112,11 +117,11 @@ export default function NewBroadcastPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
+    <div className="wa-light mx-auto max-w-3xl space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">New Broadcast</h1>
-        <p className="mt-1 text-sm text-slate-400">
+        <h1 className="text-2xl font-bold text-foreground">New Broadcast</h1>
+        <p className="mt-1 text-sm text-muted">
           Create and send a broadcast message to your contacts.
         </p>
       </div>
@@ -133,17 +138,17 @@ export default function NewBroadcastPage() {
                 <div
                   className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-all ${
                     isCompleted
-                      ? 'bg-violet-500 text-white'
+                      ? 'bg-accent text-white'
                       : isActive
-                        ? 'border-2 border-violet-500 bg-violet-500/10 text-violet-400'
-                        : 'border border-slate-700 bg-slate-800 text-slate-500'
+                        ? 'border-2 border-accent bg-accent-light text-accent'
+                        : 'border border-border bg-surface-light text-muted'
                   }`}
                 >
                   {isCompleted ? <Check className="h-4 w-4" /> : index + 1}
                 </div>
                 <span
                   className={`hidden text-sm font-medium sm:block ${
-                    isActive ? 'text-white' : isCompleted ? 'text-violet-400' : 'text-slate-500'
+                    isActive ? 'text-foreground' : isCompleted ? 'text-accent' : 'text-muted'
                   }`}
                 >
                   {step.label}
@@ -152,7 +157,7 @@ export default function NewBroadcastPage() {
               {index < steps.length - 1 && (
                 <div
                   className={`mx-3 h-px flex-1 ${
-                    index < currentStep ? 'bg-violet-500' : 'bg-slate-800'
+                    index < currentStep ? 'bg-accent' : 'bg-border'
                   }`}
                 />
               )}

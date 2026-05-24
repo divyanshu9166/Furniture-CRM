@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isRecipientNotAllowedError,
   isValidE164,
+  normalizePhoneForMetaIndia,
   normalizePhone,
   phoneVariants,
   phonesMatch,
@@ -33,6 +34,28 @@ describe("normalizePhone", () => {
     for (const s of samples) {
       expect(normalizePhone(s)).toBe(sanitizePhoneForMeta(s));
     }
+  });
+});
+
+describe("normalizePhoneForMetaIndia", () => {
+  it("normalizes local 10-digit numbers to 91-prefixed format", () => {
+    expect(normalizePhoneForMetaIndia("9166623128")).toBe("919166623128");
+  });
+
+  it("drops leading trunk 0 before prefixing 91", () => {
+    expect(normalizePhoneForMetaIndia("09166623128")).toBe("919166623128");
+  });
+
+  it("drops international prefix 00", () => {
+    expect(normalizePhoneForMetaIndia("0091 9166623128")).toBe("919166623128");
+  });
+
+  it("removes a trunk 0 after the 91 country code", () => {
+    expect(normalizePhoneForMetaIndia("9109166623128")).toBe("919166623128");
+  });
+
+  it("leaves non-India numbers intact", () => {
+    expect(normalizePhoneForMetaIndia("441234567890")).toBe("441234567890");
   });
 });
 

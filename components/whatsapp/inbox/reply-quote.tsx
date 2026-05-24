@@ -20,24 +20,24 @@ export function ReplyQuote({
   return (
     <div
       className={cn(
-        "flex items-start gap-2 border-l-2 border-violet-400 px-2 py-1",
+        "flex items-start gap-2 border-l-2 border-accent px-2 py-1",
         isChip
-          ? "rounded-md bg-slate-800/80"
-          : "mb-1.5 rounded-md bg-slate-800/70",
+          ? "rounded-md bg-surface-light"
+          : "mb-1.5 rounded-md bg-surface-light",
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[11px] font-medium text-violet-300">
+        <div className="truncate text-[11px] font-medium text-accent">
           {authorLabel}
         </div>
-        <div className="truncate text-xs text-slate-200/80">{preview}</div>
+        <div className="truncate text-xs text-muted">{preview}</div>
       </div>
       {onDismiss && (
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Cancel reply"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-700 hover:text-white"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted hover:bg-surface-light hover:text-foreground"
         >
           <X className="h-3.5 w-3.5" />
         </button>

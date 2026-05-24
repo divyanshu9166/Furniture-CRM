@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Disable Tailwind v4's automatic prefers-color-scheme dark mode.
+   The CRM is designed as a light-only app. Without this override,
+   users with OS dark mode enabled see inverted colors on every
+   component using design tokens (bg-surface, text-foreground, etc.). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   /* Light mode — warm, professional CRM palette */
   --color-background: #f5f5f4;
@@ -7,10 +13,23 @@
   --color-surface: #ffffff;
   --color-surface-hover: #fafaf9;
   --color-surface-light: #f5f5f4;
+  --color-card: #ffffff;
+  --color-card-foreground: #292524;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #292524;
+  --color-primary: #b45309;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f5f5f4;
+  --color-secondary-foreground: #292524;
+  --color-input: #e7e5e4;
+  --color-ring: rgba(180, 83, 9, 0.28);
+  --color-destructive: #b91c1c;
   --color-border: #e7e5e4;
   --color-border-light: #d6d3d1;
   --color-muted: #78716c;
+  --color-muted-foreground: #78716c;
   --color-accent: #b45309;
+  --color-accent-foreground: #ffffff;
   --color-accent-hover: #92400e;
   --color-accent-light: rgba(180, 83, 9, 0.07);
   --color-teal: #0f766e;
@@ -85,253 +104,142 @@ body {
   box-shadow: var(--shadow-card-hover);
 }
 
-/* WhatsApp Marketing imports came from a dark dashboard. Scope palette
-   translation here so Inbox, Broadcasts, Automations, and Settings match
-   the CRM's light surfaces without rewriting every nested widget class. */
-:where(.wa-light, .wa-light-active) .bg-slate-950,
-:where(.wa-light, .wa-light-active) .bg-slate-950\/50,
-:where(.wa-light, .wa-light-active) .bg-slate-900,
-:where(.wa-light, .wa-light-active) .bg-slate-900\/80,
-:where(.wa-light, .wa-light-active) .bg-slate-900\/60,
-:where(.wa-light, .wa-light-active) .bg-slate-900\/50,
-:where(.wa-light, .wa-light-active) .bg-slate-900\/40 {
+/* WhatsApp Marketing was originally imported from a dark dashboard. Keep the
+   translation scoped so nested widgets and body-level portals inherit the CRM
+   palette without affecting the rest of the app. */
+:where(.wa-light, .wa-light-active) :is(
+  .bg-slate-950, .bg-slate-950\/95, .bg-slate-950\/90, .bg-slate-950\/80, .bg-slate-950\/70, .bg-slate-950\/60, .bg-slate-950\/50, .bg-slate-950\/40, .bg-slate-950\/30, .bg-slate-950\/20, .bg-slate-950\/10,
+  .bg-slate-900, .bg-slate-900\/95, .bg-slate-900\/90, .bg-slate-900\/80, .bg-slate-900\/70, .bg-slate-900\/60, .bg-slate-900\/50, .bg-slate-900\/40, .bg-slate-900\/30, .bg-slate-900\/20, .bg-slate-900\/10,
+  .bg-black, .bg-black\/20
+) {
   background-color: var(--color-surface) !important;
 }
 
-:where(.wa-light, .wa-light-active) .bg-slate-800,
-:where(.wa-light, .wa-light-active) .bg-slate-800\/70,
-:where(.wa-light, .wa-light-active) .bg-slate-800\/60,
-:where(.wa-light, .wa-light-active) .bg-slate-800\/50,
-:where(.wa-light, .wa-light-active) .bg-slate-700 {
+:where(.wa-light, .wa-light-active) :is(
+  .bg-slate-800, .bg-slate-800\/95, .bg-slate-800\/90, .bg-slate-800\/80, .bg-slate-800\/70, .bg-slate-800\/60, .bg-slate-800\/50, .bg-slate-800\/40, .bg-slate-800\/30, .bg-slate-800\/20, .bg-slate-800\/10,
+  .bg-slate-700, .bg-slate-700\/95, .bg-slate-700\/90, .bg-slate-700\/80, .bg-slate-700\/70, .bg-slate-700\/60, .bg-slate-700\/50, .bg-slate-700\/40, .bg-slate-700\/30, .bg-slate-700\/20, .bg-slate-700\/10,
+  .bg-slate-600, .bg-slate-600\/50, .bg-slate-600\/30, .bg-slate-600\/20, .bg-slate-500
+) {
   background-color: var(--color-surface-light) !important;
 }
 
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-950:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-900:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-800:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-800\/50:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-800\/60:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-slate-700:hover {
+:where(.wa-light, .wa-light-active) :is(
+  .hover\:bg-slate-950:hover, .hover\:bg-slate-900:hover, .hover\:bg-slate-900\/80:hover, .hover\:bg-slate-900\/60:hover,
+  .hover\:bg-slate-800:hover, .hover\:bg-slate-800\/80:hover, .hover\:bg-slate-800\/60:hover, .hover\:bg-slate-800\/50:hover,
+  .hover\:bg-slate-700:hover, .hover\:bg-slate-700\/50:hover, .focus\:bg-slate-800:focus, .focus\:bg-slate-700:focus
+) {
   background-color: var(--color-surface-hover) !important;
 }
 
-:where(.wa-light, .wa-light-active) .focus\:bg-slate-800:focus,
-:where(.wa-light, .wa-light-active) .focus\:bg-slate-700:focus,
-:where(.wa-light, .wa-light-active) .data-active\:bg-slate-800[data-active],
-:where(.wa-light, .wa-light-active) .data-\[popup-open\]\:bg-slate-800[data-popup-open] {
-  background-color: var(--color-surface-light) !important;
-}
-
-:where(.wa-light, .wa-light-active) .border-slate-900,
-:where(.wa-light, .wa-light-active) .border-slate-800,
-:where(.wa-light, .wa-light-active) .border-slate-700,
-:where(.wa-light, .wa-light-active) .border-slate-600 {
-  border-color: var(--color-border) !important;
-}
-
-:where(.wa-light, .wa-light-active) .hover\:border-slate-700:hover,
-:where(.wa-light, .wa-light-active) .hover\:border-slate-600:hover {
-  border-color: var(--color-border-light) !important;
-}
-
-:where(.wa-light, .wa-light-active) .text-white,
-:where(.wa-light, .wa-light-active) .text-slate-100,
-:where(.wa-light, .wa-light-active) .text-slate-200,
-:where(.wa-light, .wa-light-active) .text-slate-300,
-:where(.wa-light, .wa-light-active) .fill-white {
-  color: var(--color-foreground) !important;
-  fill: var(--color-foreground) !important;
-}
-
-:where(.wa-light, .wa-light-active) .text-slate-400,
-:where(.wa-light, .wa-light-active) .text-slate-500,
-:where(.wa-light, .wa-light-active) .text-slate-600,
-:where(.wa-light, .wa-light-active) .text-white\/60,
-:where(.wa-light, .wa-light-active) .focus\:text-white:focus,
-:where(.wa-light, .wa-light-active) .hover\:text-white:hover,
-:where(.wa-light, .wa-light-active) .fill-slate-400,
-:where(.wa-light, .wa-light-active) .fill-slate-500,
-:where(.wa-light, .wa-light-active) .fill-slate-600 {
-  color: var(--color-muted) !important;
-  fill: var(--color-muted) !important;
-}
-
-:where(.wa-light, .wa-light-active) .placeholder\:text-slate-500::placeholder {
-  color: #a8a29e !important;
-}
-
-:where(.wa-light, .wa-light-active) .bg-violet-600.text-white,
-:where(.wa-light, .wa-light-active) .bg-violet-500.text-white,
-:where(.wa-light, .wa-light-active) .bg-accent.text-white,
-:where(.wa-light, .wa-light-active) .bg-success.text-white,
-:where(.wa-light, .wa-light-active) .bg-danger.text-white,
-:where(.wa-light, .wa-light-active) .bg-warning.text-white,
-:where(.wa-light, .wa-light-active) .bg-red-600.text-white,
-:where(.wa-light, .wa-light-active) .bg-amber-600.text-white {
-  color: #ffffff !important;
-}
-
-:where(.wa-light, .wa-light-active) .bg-violet-600,
-:where(.wa-light, .wa-light-active) .bg-violet-500 {
-  background-color: var(--color-accent) !important;
-}
-
-:where(.wa-light, .wa-light-active) .hover\:bg-violet-700:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-violet-600:hover,
-:where(.wa-light, .wa-light-active) .hover\:bg-violet-500:hover {
-  background-color: var(--color-accent-hover) !important;
-}
-
-:where(.wa-light, .wa-light-active) .text-violet-300,
-:where(.wa-light, .wa-light-active) .text-violet-400,
-:where(.wa-light, .wa-light-active) .text-violet-500,
-:where(.wa-light, .wa-light-active) .text-violet-600 {
-  color: var(--color-accent) !important;
-}
-
-:where(.wa-light, .wa-light-active) .data-active\:text-violet-400[data-active],
-:where(.wa-light, .wa-light-active) .data-\[popup-open\]\:text-violet-400[data-popup-open],
-:where(.wa-light, .wa-light-active) .hover\:text-violet-400:hover {
-  color: var(--color-accent) !important;
-}
-
-:where(.wa-light, .wa-light-active) .border-violet-500,
-:where(.wa-light, .wa-light-active) .border-violet-500\/30,
-:where(.wa-light, .wa-light-active) .border-violet-500\/40,
-:where(.wa-light, .wa-light-active) .border-violet-500\/50,
-:where(.wa-light, .wa-light-active) .border-violet-600\/30 {
-  border-color: rgba(180, 83, 9, 0.35) !important;
-}
-
-:where(.wa-light, .wa-light-active) .bg-violet-500\/10,
-:where(.wa-light, .wa-light-active) .bg-violet-500\/15,
-:where(.wa-light, .wa-light-active) .bg-violet-500\/20,
-:where(.wa-light, .wa-light-active) .bg-violet-600\/20 {
-  background-color: var(--color-accent-light) !important;
-}
-
-/* Exact-token safety net for WhatsApp Marketing. Some imported widgets use
-   uncommon opacity utilities (for example bg-slate-900/95) that are easy to
-   miss with hand-picked selectors. These rules keep every slate/black card,
-   table, dialog, menu, and editor surface on the CRM light palette. */
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/95"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/90"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/80"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/70"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/60"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/50"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/40"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/30"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/20"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-950/10"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/95"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/90"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/80"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/70"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/60"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/50"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/40"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/30"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/20"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-900/10"],
-:where(.wa-light, .wa-light-active) [class~="bg-black/20"] {
-  background-color: var(--color-surface) !important;
-}
-
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/95"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/90"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/80"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/70"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/60"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/50"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/40"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/30"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/20"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-800/10"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/95"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/90"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/80"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/70"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/60"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/50"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/40"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/30"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/20"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-700/10"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-600"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-600/50"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-600/30"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-600/20"],
-:where(.wa-light, .wa-light-active) [class~="bg-slate-500"] {
-  background-color: var(--color-surface-light) !important;
-}
-
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-950"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-900"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-900/80"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-900/60"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-800"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-800/80"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-800/60"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-800/50"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-700"]:hover,
-:where(.wa-light, .wa-light-active) [class~="hover:bg-slate-700/50"]:hover {
-  background-color: var(--color-surface-hover) !important;
-}
-
-:where(.wa-light, .wa-light-active) [class~="border-slate-900"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-800"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-800/80"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-800/50"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-700"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-700/80"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-700/50"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-600"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-600/30"],
-:where(.wa-light, .wa-light-active) [class~="border-slate-600/50"],
-:where(.wa-light, .wa-light-active) [class~="divide-slate-800"],
-:where(.wa-light, .wa-light-active) [class~="divide-slate-700"],
-:where(.wa-light, .wa-light-active) [class~="ring-slate-800"],
-:where(.wa-light, .wa-light-active) [class~="ring-slate-700"] {
+:where(.wa-light, .wa-light-active) :is(
+  .border-slate-900, .border-slate-800, .border-slate-800\/80, .border-slate-800\/50,
+  .border-slate-700, .border-slate-700\/80, .border-slate-700\/50, .border-slate-600,
+  .border-slate-600\/30, .border-slate-600\/50, .divide-slate-800, .divide-slate-700,
+  .ring-slate-800, .ring-slate-700
+) {
   border-color: var(--color-border) !important;
   --tw-divide-opacity: 1 !important;
   --tw-ring-color: var(--color-border) !important;
 }
 
-:where(.wa-light, .wa-light-active) [class~="text-white"],
-:where(.wa-light, .wa-light-active) [class~="text-white/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-100"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-100/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-200"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-200/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-200/80"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-300"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-300/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-300/80"] {
+:where(.wa-light, .wa-light-active) :is(
+  .text-white, .text-white\/90, .text-slate-100, .text-slate-100\/90,
+  .text-slate-200, .text-slate-200\/90, .text-slate-200\/80,
+  .text-slate-300, .text-slate-300\/90, .text-slate-300\/80
+) {
   color: var(--color-foreground) !important;
 }
 
-:where(.wa-light, .wa-light-active) [class~="text-white/70"],
-:where(.wa-light, .wa-light-active) [class~="text-white/60"],
-:where(.wa-light, .wa-light-active) [class~="text-white/50"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-400"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-400/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-400/80"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-500"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-500/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-500/80"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-600"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-600/90"],
-:where(.wa-light, .wa-light-active) [class~="text-slate-600/80"] {
+:where(.wa-light, .wa-light-active) :is(
+  .text-white\/70, .text-white\/60, .text-white\/50, .text-slate-400, .text-slate-400\/90,
+  .text-slate-400\/80, .text-slate-500, .text-slate-500\/90, .text-slate-500\/80,
+  .text-slate-600, .text-slate-600\/90, .text-slate-600\/80
+) {
   color: var(--color-muted) !important;
 }
 
-.wa-light-active .bg-sidebar .text-white,
-.wa-light-active .bg-stone-700.text-white {
+:where(.wa-light, .wa-light-active) :is(.bg-violet-600, .bg-violet-500) {
+  background-color: var(--color-accent) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.hover\:bg-violet-700:hover, .hover\:bg-violet-600:hover, .hover\:bg-violet-500:hover) {
+  background-color: var(--color-accent-hover) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-violet-300, .text-violet-400, .text-violet-500, .text-violet-600) {
+  color: var(--color-accent) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-violet-500, .border-violet-500\/30, .border-violet-500\/40, .border-violet-500\/50, .border-violet-600\/30) {
+  border-color: rgba(180, 83, 9, 0.35) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-violet-500\/10, .bg-violet-500\/15, .bg-violet-500\/20, .bg-violet-600\/20) {
+  background-color: var(--color-accent-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-blue-300, .text-blue-400, .text-blue-500, .text-blue-600) {
+  color: var(--color-info) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-blue-500, .bg-blue-600) {
+  background-color: var(--color-info) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-blue-500\/10, .bg-blue-600\/20) {
+  background-color: var(--color-info-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-blue-500\/20, .border-blue-600\/30) {
+  border-color: rgba(29, 78, 216, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-amber-100\/80, .text-amber-200, .text-amber-300, .text-amber-400, .text-amber-600, .text-yellow-400, .text-orange-400) {
+  color: var(--color-warning) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-amber-500\/5, .bg-amber-500\/10, .bg-amber-950\/40, .bg-yellow-600\/20, .bg-orange-500\/10) {
+  background-color: var(--color-warning-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-amber-500\/20, .border-amber-500\/30, .border-amber-600\/40, .border-yellow-600\/30, .border-orange-500\/20) {
+  border-color: rgba(161, 98, 7, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-red-300, .text-red-400, .text-red-500) {
+  color: var(--color-danger) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-red-500\/5, .bg-red-500\/10, .bg-red-500\/15, .bg-red-600\/20, .hover\:bg-red-950\/30:hover, .hover\:bg-red-950\/40:hover) {
+  background-color: var(--color-danger-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-red-500\/30, .border-red-600\/30, .border-red-900) {
+  border-color: rgba(185, 28, 28, 0.25) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-red-600, .hover\:bg-red-700:hover) {
+  background-color: var(--color-danger) !important;
+  color: #ffffff !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-amber-600, .hover\:bg-amber-700:hover, .bg-yellow-400) {
+  background-color: var(--color-warning) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.bg-purple-500\/10, .bg-purple-600\/20) {
+  background-color: var(--color-purple-light) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.text-purple-400, .text-purple-600) {
+  color: var(--color-purple) !important;
+}
+
+:where(.wa-light, .wa-light-active) :is(.border-purple-500\/20, .border-purple-600\/30) {
+  border-color: rgba(109, 40, 217, 0.25) !important;
+}
+
+.wa-light-active .bg-sidebar :is(.text-white, .text-white\/90) {
   color: #ffffff !important;
 }
 
@@ -350,6 +258,8 @@ body {
 .wa-light-active .bg-sidebar .text-white\/40 {
   color: rgba(255, 255, 255, 0.4) !important;
 }
+
+
 
 /* Status badges */
 .badge {

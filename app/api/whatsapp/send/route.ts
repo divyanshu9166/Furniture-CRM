@@ -1,12 +1,17 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/meta-api'
+import {
+  sendTextMessage,
+  sendTemplateMessage,
+} from '@/lib/whatsapp/meta-api'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import {
-  sanitizePhoneForMeta,
+  normalizePhoneForMetaIndia,
   isValidE164,
   phoneVariants,
   isRecipientNotAllowedError,
+  isRecipientNotRegisteredError,
+  humanReadableMetaError,
 } from '@/lib/whatsapp/phone-utils'
 import {
   checkRateLimit,
@@ -93,7 +98,7 @@ export async function POST(request: Request) {
     }
 
     // Sanitize and validate phone
-    const sanitizedPhone = sanitizePhoneForMeta(contact.phone)
+    const sanitizedPhone = normalizePhoneForMetaIndia(contact.phone)
     if (!isValidE164(sanitizedPhone)) {
       return NextResponse.json(
         { error: 'Invalid phone number format' },
@@ -204,6 +209,11 @@ export async function POST(request: Request) {
           break
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
+          // "Account not registered" (#133010) is a sender-side config
+          // issue — retrying with phone variants won't help.
+          if (isRecipientNotRegisteredError(message)) {
+            throw err
+          }
           // Only retry when the failure is specifically that the
           // recipient isn't in Meta's allowed list. Any other error
           // (bad token, invalid template, etc.) bubbles up immediately.
@@ -217,10 +227,11 @@ export async function POST(request: Request) {
 
       if (lastError) throw lastError
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown Meta API error'
-      console.error('Meta API send failed for all variants:', message)
+      const rawMessage = err instanceof Error ? err.message : 'Unknown Meta API error'
+      const friendlyMessage = humanReadableMetaError(rawMessage)
+      console.error('Meta API send failed for all variants:', rawMessage)
       return NextResponse.json(
-        { error: `Meta API error: ${message}` },
+        { error: friendlyMessage },
         { status: 502 }
       )
     }

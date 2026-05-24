@@ -16,10 +16,22 @@ import {
 } from '@/components/ui/dialog';
 import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
 
+type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv' | 'manual';
+type CustomFieldOperator = 'is' | 'is_not' | 'contains';
+
+interface CustomFieldFilter {
+  fieldId: string;
+  operator: CustomFieldOperator;
+  value: string;
+}
+
 interface AudienceConfig {
-  type: string;
+  type: AudienceType;
   tagIds?: string[];
+  customField?: CustomFieldFilter;
   csvContacts?: { phone: string; name?: string }[];
+  selectedContactIds?: string[];
+  excludeTagIds?: string[];
 }
 
 interface Step4Props {
@@ -55,23 +67,63 @@ export function Step4ScheduleSend({
       try {
         const supabase = createClient();
 
+        let baseIds: Set<string> | null = null;
+
         if (audience.type === 'all') {
-          const { count } = await supabase
-            .from('contacts')
-            .select('*', { count: 'exact', head: true });
-          setEstimatedReach(count ?? 0);
+          // Count handled below to apply excludes.
         } else if (audience.type === 'tags' && audience.tagIds && audience.tagIds.length > 0) {
           const { data: contactTags } = await supabase
             .from('contact_tags')
             .select('contact_id')
             .in('tag_id', audience.tagIds);
-
-          const uniqueIds = new Set((contactTags ?? []).map((ct) => ct.contact_id));
-          setEstimatedReach(uniqueIds.size);
+          baseIds = new Set((contactTags ?? []).map((ct) => ct.contact_id));
+        } else if (
+          audience.type === 'custom_field' &&
+          audience.customField?.fieldId &&
+          audience.customField.value
+        ) {
+          const { fieldId, operator, value } = audience.customField;
+          let query = supabase
+            .from('contact_custom_values')
+            .select('contact_id')
+            .eq('custom_field_id', fieldId);
+          if (operator === 'is') query = query.eq('value', value);
+          else if (operator === 'is_not') query = query.neq('value', value);
+          else query = query.ilike('value', `%${value}%`);
+          const { data } = await query;
+          baseIds = new Set((data ?? []).map((row) => row.contact_id));
+        } else if (
+          audience.type === 'manual' &&
+          audience.selectedContactIds &&
+          audience.selectedContactIds.length > 0
+        ) {
+          baseIds = new Set(audience.selectedContactIds);
         } else if (audience.type === 'csv' && audience.csvContacts) {
           setEstimatedReach(audience.csvContacts.length);
+          return;
         } else {
           setEstimatedReach(0);
+          return;
+        }
+
+        let excludeSet: Set<string> | null = null;
+        if (audience.excludeTagIds && audience.excludeTagIds.length > 0) {
+          const { data: excludeRows } = await supabase
+            .from('contact_tags')
+            .select('contact_id')
+            .in('tag_id', audience.excludeTagIds);
+          excludeSet = new Set((excludeRows ?? []).map((row) => row.contact_id));
+        }
+
+        if (baseIds) {
+          const effective = [...baseIds].filter((id) => !excludeSet?.has(id));
+          setEstimatedReach(effective.length);
+        } else {
+          const { count } = await supabase
+            .from('contacts')
+            .select('*', { count: 'exact', head: true });
+          const total = count ?? 0;
+          setEstimatedReach(excludeSet ? Math.max(0, total - excludeSet.size) : total);
         }
       } finally {
         setLoadingReach(false);
@@ -86,87 +138,88 @@ export function Step4ScheduleSend({
       ? 'All Contacts'
       : audience.type === 'tags'
         ? `Tags (${audience.tagIds?.length ?? 0} selected)`
-        : audience.type === 'csv'
-          ? 'CSV Upload'
-          : 'Custom';
+        : audience.type === 'manual'
+          ? `Selected Contacts (${audience.selectedContactIds?.length ?? 0})`
+          : audience.type === 'csv'
+            ? 'CSV Upload'
+            : 'Custom Field';
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-white">Review and Send</h2>
-        <p className="mt-1 text-sm text-slate-400">
+        <h2 className="text-lg font-semibold text-foreground">Review and Send</h2>
+        <p className="mt-1 text-sm text-muted">
           Name your broadcast, review the details, and send.
         </p>
       </div>
 
       {/* Broadcast Name */}
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-white">Broadcast Name</label>
+        <label className="mb-1.5 block text-sm font-medium text-foreground">Broadcast Name</label>
         <Input
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
           placeholder="e.g. Summer Sale Announcement"
-          className="border-slate-700 bg-slate-800 text-white placeholder:text-slate-500"
         />
       </div>
 
       {/* Summary Card */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 space-y-3">
-        <p className="text-sm font-medium text-white">Summary</p>
+      <div className="glass-card p-4 space-y-3">
+        <p className="text-sm font-medium text-foreground">Summary</p>
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <p className="text-xs text-slate-400">Template</p>
-            <p className="text-white">{template.name}</p>
+            <p className="text-xs text-muted">Template</p>
+            <p className="text-foreground">{template.name}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-400">Audience</p>
-            <p className="text-white">{audienceLabel}</p>
+            <p className="text-xs text-muted">Audience</p>
+            <p className="text-foreground">{audienceLabel}</p>
           </div>
           <div>
-            <p className="text-xs text-slate-400">Estimated Reach</p>
+            <p className="text-xs text-muted">Estimated Reach</p>
             <div className="flex items-center gap-1.5">
               {loadingReach ? (
-                <Loader2 className="h-3 w-3 animate-spin text-violet-500" />
+                <Loader2 className="h-3 w-3 animate-spin text-accent" />
               ) : (
                 <>
-                  <Users className="h-3.5 w-3.5 text-violet-400" />
-                  <p className="font-medium text-white">{estimatedReach.toLocaleString()}</p>
+                  <Users className="h-3.5 w-3.5 text-accent" />
+                  <p className="font-medium text-foreground">{estimatedReach.toLocaleString()}</p>
                 </>
               )}
             </div>
           </div>
           <div>
-            <p className="text-xs text-slate-400">Language</p>
-            <p className="text-white">{template.language ?? 'en_US'}</p>
+            <p className="text-xs text-muted">Language</p>
+            <p className="text-foreground">{template.language ?? 'en_US'}</p>
           </div>
         </div>
       </div>
 
       {/* Processing overlay */}
       {isProcessing && (
-        <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-4">
+        <div className="rounded-xl border border-accent/20 bg-accent-light p-4">
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-violet-500" />
-              <p className="text-sm font-medium text-white">Sending broadcast...</p>
+              <Loader2 className="h-4 w-4 animate-spin text-accent" />
+              <p className="text-sm font-medium text-foreground">Sending broadcast...</p>
             </div>
-            <span className="text-xs font-medium text-violet-400">{progress}%</span>
+            <span className="text-xs font-medium text-accent">{progress}%</span>
           </div>
-          <div className="h-1.5 w-full rounded-full bg-slate-800">
+          <div className="h-1.5 w-full rounded-full bg-surface-light">
             <div
-              className="h-1.5 rounded-full bg-violet-500 transition-all duration-300"
+              className="h-1.5 rounded-full bg-accent transition-all duration-300"
               style={{ width: `${progress}%` }}
             />
           </div>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
         <Button
           variant="outline"
           onClick={onBack}
           disabled={isProcessing}
-          className="border-slate-700 text-slate-300"
+          className="border-border text-muted"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -178,7 +231,7 @@ export function Step4ScheduleSend({
               variant="outline"
               onClick={onSaveDraft}
               disabled={!name.trim() || isProcessing}
-              className="border-slate-700 text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+              className="border-border text-muted disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
               Save as Draft
@@ -190,21 +243,21 @@ export function Step4ScheduleSend({
               render={
                 <Button
                   disabled={!name.trim() || isProcessing}
-                  className="bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+                  className="bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
                 />
               }
             >
               <Send className="h-4 w-4" />
               Send Broadcast
             </DialogTrigger>
-            <DialogContent className="border-slate-700 bg-slate-900 sm:max-w-md">
+            <DialogContent className="sm:max-w-md">
               <DialogHeader>
-                <DialogTitle className="text-white">Confirm Broadcast</DialogTitle>
-                <DialogDescription className="text-slate-400">
+                <DialogTitle className="text-foreground">Confirm Broadcast</DialogTitle>
+                <DialogDescription className="text-muted">
                   You are about to send this broadcast to{' '}
-                  <span className="font-medium text-white">{estimatedReach.toLocaleString()}</span>{' '}
+                  <span className="font-medium text-foreground">{estimatedReach.toLocaleString()}</span>{' '}
                   contacts using the{' '}
-                  <span className="font-medium text-white">{template.name}</span> template.
+                  <span className="font-medium text-foreground">{template.name}</span> template.
                   This action cannot be undone.
                 </DialogDescription>
               </DialogHeader>
@@ -212,7 +265,7 @@ export function Step4ScheduleSend({
                 <Button
                   variant="outline"
                   onClick={() => setShowConfirm(false)}
-                  className="border-slate-700 text-slate-300"
+                  className="border-border text-muted"
                 >
                   Cancel
                 </Button>
@@ -221,7 +274,7 @@ export function Step4ScheduleSend({
                     setShowConfirm(false);
                     onSend();
                   }}
-                  className="bg-violet-600 text-white hover:bg-violet-700"
+                  className="bg-accent text-white hover:bg-accent-hover"
                 >
                   <Send className="h-4 w-4" />
                   Confirm and Send

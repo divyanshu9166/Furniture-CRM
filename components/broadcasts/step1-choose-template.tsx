@@ -7,9 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Loader2, FileText, ArrowRight } from 'lucide-react';
 
 const categoryColors: Record<string, string> = {
-  Marketing: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  Utility: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  Authentication: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  Marketing: 'bg-purple-light text-purple border-purple/20',
+  Utility: 'bg-info-light text-info border-info/20',
+  Authentication: 'bg-warning-light text-warning border-warning/20',
 };
 
 interface Step1Props {
@@ -48,7 +48,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-violet-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-accent" />
       </div>
     );
   }
@@ -56,7 +56,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   if (error) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2">
-        <p className="text-sm text-red-400">{error}</p>
+        <p className="text-sm text-danger">{error}</p>
       </div>
     );
   }
@@ -64,17 +64,17 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-white">Choose a Template</h2>
-        <p className="mt-1 text-sm text-slate-400">
+        <h2 className="text-lg font-semibold text-foreground">Choose a Template</h2>
+        <p className="mt-1 text-sm text-muted">
           Select an approved message template for your broadcast.
         </p>
       </div>
 
       {templates.length === 0 ? (
-        <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-slate-800 bg-slate-900/50">
-          <FileText className="mb-2 h-8 w-8 text-slate-600" />
-          <p className="text-sm text-slate-400">No templates available.</p>
-          <p className="mt-1 text-xs text-slate-500">Create a template in Settings first.</p>
+        <div className="flex h-48 flex-col items-center justify-center glass-card">
+          <FileText className="mb-2 h-8 w-8 text-muted" />
+          <p className="text-sm text-muted">No templates available.</p>
+          <p className="mt-1 text-xs text-muted opacity-60">Create a template in Settings first.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -88,20 +88,20 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
                 onClick={() => onSelect(template)}
                 className={`flex flex-col gap-3 rounded-xl border p-4 text-left transition-all ${
                   isSelected
-                    ? 'border-violet-500 bg-violet-500/5 ring-1 ring-violet-500/30'
-                    : 'border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900'
+                    ? 'border-accent bg-accent-light ring-1 ring-accent/30'
+                    : 'border-border bg-surface hover:border-border-light hover:shadow-card-hover'
                 }`}
               >
                 <div className="flex items-start justify-between">
-                  <h3 className="text-sm font-medium text-white">{template.name}</h3>
+                  <h3 className="text-sm font-medium text-foreground">{template.name}</h3>
                   <span
                     className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${catColor}`}
                   >
                     {template.category}
                   </span>
                 </div>
-                <p className="line-clamp-3 text-xs text-slate-400">{template.body_text}</p>
-                <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                <p className="line-clamp-3 text-xs text-muted">{template.body_text}</p>
+                <div className="flex items-center gap-2 text-[10px] text-muted opacity-60">
                   <span>{template.language ?? 'en_US'}</span>
                   {template.status && (
                     <>
@@ -116,14 +116,14 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-slate-800 pt-4">
-        <Button variant="outline" onClick={onBack} className="border-slate-700 text-slate-300">
+      <div className="flex items-center justify-between border-t border-border pt-4">
+        <Button variant="outline" onClick={onBack} className="border-border text-muted">
           Back
         </Button>
         <Button
           onClick={onNext}
           disabled={!selectedTemplate}
-          className="bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+          className="bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
         >
           Next
           <ArrowRight className="h-4 w-4" />

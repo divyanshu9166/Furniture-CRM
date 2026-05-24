@@ -1,16 +1,50 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import {
+  createCompatSupabaseClient,
+  type CompatSupabaseClient,
+} from '@/lib/supabase/compat-client'
+import { executeQuery, executeRpc } from '@/lib/supabase/query-engine'
 
-// Lazy, shared service-role client for automation engine work.
-// Mirrors the pattern used by the webhook handler
-// (src/app/api/whatsapp/webhook/route.ts).
-let _adminClient: SupabaseClient | null = null
+let _adminClient: CompatSupabaseClient | null = null
 
-export function supabaseAdmin(): SupabaseClient {
-  if (!_adminClient) {
-    _adminClient = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    )
-  }
+export function supabaseAdmin(): CompatSupabaseClient {
+  if (_adminClient) return _adminClient
+
+  _adminClient = createCompatSupabaseClient({
+    executeQuery: (request) => executeQuery(request, { admin: true }),
+    executeRpc: (fn, args) => executeRpc(fn, args, { admin: true }),
+    auth: {
+      async getSession() {
+        return { data: { session: null }, error: null }
+      },
+      async getUser() {
+        return { data: { user: null }, error: null }
+      },
+      async signOut() {
+        return { error: null }
+      },
+      async signInWithPassword() {
+        return {
+          data: { session: null, user: null },
+          error: { message: 'Not supported on admin client' },
+        }
+      },
+      async updateUser() {
+        return {
+          data: { user: null },
+          error: { message: 'Not supported on admin client' },
+        }
+      },
+      onAuthStateChange() {
+        return {
+          data: {
+            subscription: {
+              unsubscribe() {},
+            },
+          },
+        }
+      },
+    },
+  })
+
   return _adminClient
 }

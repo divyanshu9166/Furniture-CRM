@@ -23,6 +23,8 @@ export interface MetaPhoneInfo {
   quality_rating?: string
 }
 
+
+
 interface MetaErrorResponse {
   error?: { message?: string; code?: number; type?: string }
 }
@@ -62,6 +64,44 @@ export async function verifyPhoneNumber(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
+  return response.json()
+}
+
+export interface RegisterPhoneNumberArgs {
+  phoneNumberId: string
+  accessToken: string
+  pin: string
+}
+
+/**
+ * Register a phone number with the WhatsApp Cloud API.
+ * Required when the number shows "Pending" status in WhatsApp Manager
+ * or when Meta returns error #133010 ("Account not registered").
+ *
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/reference/registration
+ */
+export async function registerPhoneNumber(
+  args: RegisterPhoneNumberArgs
+): Promise<{ success: boolean }> {
+  const { phoneNumberId, accessToken, pin } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/register`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      pin,
+    }),
+  })
+
+  if (!response.ok) {
+    await throwMetaError(response, `Phone registration failed: ${response.status}`)
+  }
+
   return response.json()
 }
 

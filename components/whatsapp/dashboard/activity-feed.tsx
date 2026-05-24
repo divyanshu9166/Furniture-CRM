@@ -32,8 +32,8 @@ interface KindTheme {
 
 const KIND_THEME: Record<ActivityKind, KindTheme> = {
   message: { icon: MessageSquare, badge: 'bg-blue-500/10 text-blue-600' },
-  contact: { icon: UserPlus, badge: 'bg-violet-500/10 text-violet-600' },
-  deal: { icon: Briefcase, badge: 'bg-violet-500/10 text-violet-600' },
+  contact: { icon: UserPlus, badge: 'bg-accent text-accent' },
+  deal: { icon: Briefcase, badge: 'bg-accent text-accent' },
   broadcast: { icon: Radio, badge: 'bg-amber-500/10 text-amber-600' },
   automation: { icon: Zap, badge: 'bg-rose-500/10 text-rose-600' },
 }

@@ -289,8 +289,8 @@ function LineSvg({
               <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-500" />
               {hovered.incoming} incoming
             </span>
-            <span className="flex items-center gap-1.5 text-violet-300">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet-500" />
+            <span className="flex items-center gap-1.5 text-accent">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent" />
               {hovered.outgoing} outgoing
             </span>
           </div>

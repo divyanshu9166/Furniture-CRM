@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { AuthProvider } from '@/hooks/use-auth';
 
 const WhatsAppMarketingClient = dynamic(
   () => import('./whatsapp-marketing-client').then((mod) => mod.WhatsAppMarketingClient),
@@ -11,5 +12,9 @@ const WhatsAppMarketingClient = dynamic(
 );
 
 export function WhatsAppMarketingShell() {
-  return <WhatsAppMarketingClient />;
+  return (
+    <AuthProvider>
+      <WhatsAppMarketingClient />
+    </AuthProvider>
+  );
 }

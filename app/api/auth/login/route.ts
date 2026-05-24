@@ -22,7 +22,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
       }
 
-      const isValid = await bcrypt.compare(password, user.hashedPassword)
+      const isValid = await bcrypt.compare(String(password), user.hashedPassword)
       if (!isValid) {
         return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
       }
@@ -36,15 +36,15 @@ export async function POST(req: Request) {
       })
 
       return NextResponse.json({ success: true })
-    } 
-    
+    }
+
     if (type === 'staff-credentials') {
       if (!staffId || !password) {
         return NextResponse.json({ error: 'Missing staff ID or password' }, { status: 400 })
       }
 
       const sId = parseInt(staffId)
-      if (isNaN(sId)) {
+      if (Number.isNaN(sId)) {
         return NextResponse.json({ error: 'Invalid staff ID' }, { status: 400 })
       }
 
@@ -58,11 +58,17 @@ export async function POST(req: Request) {
       }
 
       if (!staff.user) {
-        return NextResponse.json({ error: 'Login credentials are not assigned for this staff member' }, { status: 401 })
+        return NextResponse.json(
+          { error: 'Login credentials are not assigned for this staff member' },
+          { status: 401 },
+        )
       }
 
       if (!staff.user.isActive) {
-        return NextResponse.json({ error: 'Staff login is disabled. Please contact admin.' }, { status: 401 })
+        return NextResponse.json(
+          { error: 'Staff login is disabled. Please contact admin.' },
+          { status: 401 },
+        )
       }
 
       const isValid = await bcrypt.compare(String(password), staff.user.hashedPassword)
@@ -82,7 +88,10 @@ export async function POST(req: Request) {
     }
 
     if (type === 'staff-pin') {
-      return NextResponse.json({ error: 'PIN login is no longer supported. Please use your assigned login password.' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'PIN login is no longer supported. Please use your assigned login password.' },
+        { status: 400 },
+      )
     }
 
     return NextResponse.json({ error: 'Invalid login type' }, { status: 400 })
@@ -91,3 +100,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
