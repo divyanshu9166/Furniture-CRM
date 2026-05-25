@@ -33,7 +33,7 @@ services:
       context: .
       target: builder
     command: >
-      sh -c "npx prisma migrate deploy"
+      sh -c "npx prisma migrate deploy --schema ./prisma/schema.prisma"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
     depends_on:
@@ -47,6 +47,8 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-furniturecrm}"
+      NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
+      NEXTAUTH_URL: "${NEXTAUTH_URL}"
       SESSION_SECRET: "${SESSION_SECRET}"
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
