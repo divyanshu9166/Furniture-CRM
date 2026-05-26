@@ -468,11 +468,10 @@ export function WhatsAppConfig() {
     <div className="space-y-4 mt-2">
       {/* Connection Status Banner */}
       <div
-        className={`glass-card flex items-center gap-3 px-4 sm:px-5 py-3.5 ${
-          connectionStatus === 'connected'
+        className={`glass-card flex items-center gap-3 px-4 sm:px-5 py-3.5 ${connectionStatus === 'connected'
             ? 'border-green-500/30 bg-green-50/50'
             : 'border-red-500/20 bg-red-50/30'
-        }`}
+          }`}
         style={{
           borderColor:
             connectionStatus === 'connected'
@@ -497,7 +496,7 @@ export function WhatsAppConfig() {
             {connectionStatus === 'connected'
               ? 'WhatsApp Business API is connected and ready.'
               : statusMessage ||
-                'Configure your Meta API credentials below to connect.'}
+              'Configure your Meta API credentials below to connect.'}
           </p>
         </div>
       </div>

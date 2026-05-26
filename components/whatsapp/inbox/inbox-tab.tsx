@@ -3,11 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
-import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/whatsapp/inbox/conversation-list";
 import { MessageThread } from "@/components/whatsapp/inbox/message-thread";
 import { ContactSidebar } from "@/components/whatsapp/inbox/contact-sidebar";
-import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -42,93 +40,6 @@ export function InboxTab() {
       .then((data) => setWhatsappConnected(data?.connected === true))
       .catch(() => setWhatsappConnected(false));
   }, []);
-
-  // Handle realtime message events
-  const handleMessageEvent = useCallback(
-    (event: { eventType: string; new: Message; old: Partial<Message> }) => {
-      const newMsg = event.new;
-
-      if (event.eventType === "INSERT") {
-        // Add to messages if it belongs to active conversation
-        if (
-          activeConversation &&
-          newMsg.conversation_id === activeConversation.id
-        ) {
-          setMessages((prev) => {
-            // Avoid duplicates
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            // Replace optimistic message if it exists
-            const withoutOptimistic = prev.filter(
-              (m) => !m.id.startsWith("temp-")
-            );
-            return [...withoutOptimistic, newMsg];
-          });
-        }
-
-        // Update conversation list preview
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === newMsg.conversation_id
-              ? {
-                  ...c,
-                  last_message_text: newMsg.content_text ?? "",
-                  last_message_at: newMsg.created_at,
-                  unread_count:
-                    activeConversation?.id === newMsg.conversation_id
-                      ? 0
-                      : c.unread_count + 1,
-                }
-              : c
-          )
-        );
-      }
-
-      if (event.eventType === "UPDATE") {
-        // Update message status
-        setMessages((prev) =>
-          prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
-        );
-      }
-    },
-    [activeConversation]
-  );
-
-  // Handle realtime conversation events
-  const handleConversationEvent = useCallback(
-    (event: {
-      eventType: string;
-      new: Conversation;
-      old: Partial<Conversation>;
-    }) => {
-      const conv = event.new;
-
-      if (event.eventType === "INSERT") {
-        setConversations((prev) => [conv, ...prev]);
-      }
-
-      if (event.eventType === "UPDATE") {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
-        );
-
-        // Update active conversation if it changed
-        if (activeConversation && conv.id === activeConversation.id) {
-          setActiveConversation((prev) =>
-            prev ? { ...prev, ...conv } : prev
-          );
-        }
-      }
-    },
-    [activeConversation]
-  );
-
-  // Subscribe to realtime
-  useRealtime({
-    channelName: "inbox-realtime",
-    onMessageEvent: handleMessageEvent,
-    onConversationEvent: handleConversationEvent,
-    enabled: true,
-  });
 
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {

@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import type { Contact, Tag, ContactTag } from '@/types';
+import type { Contact, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -53,8 +52,6 @@ interface ContactWithTags extends Contact {
 }
 
 export function ContactsTab() {
-  const supabase = createClient();
-
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -66,7 +63,7 @@ export function ContactsTab() {
   // Modals
   const [formOpen, setFormOpen] = useState(false);
   const [editContact, setEditContact] = useState<Contact | null>(null);
-  const [editContactTags, setEditContactTags] = useState<ContactTag[]>([]);
+  const [editContactTagIds, setEditContactTagIds] = useState<string[]>([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailContactId, setDetailContactId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -74,74 +71,40 @@ export function ContactsTab() {
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // All tags for display
-  const [tagsMap, setTagsMap] = useState<Record<string, Tag>>({});
-
-  const fetchTags = useCallback(async () => {
-    const { data } = await supabase.from('tags').select('*');
-    if (data) {
-      const map: Record<string, Tag> = {};
-      data.forEach((t) => (map[t.id] = t));
-      setTagsMap(map);
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Request failed');
     }
-  }, [supabase]);
+    return data as T;
+  }
 
   const fetchContacts = useCallback(async () => {
     setLoading(true);
 
-    const from = page * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-
-    let query = supabase
-      .from('contacts')
-      .select('*', { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(from, to);
-
-    if (search.trim()) {
-      const term = `%${search.trim()}%`;
-      query = query.or(`name.ilike.${term},phone.ilike.${term},email.ilike.${term}`);
-    }
-
-    const { data, count, error } = await query;
-
-    if (error) {
-      toast.error('Failed to load contacts');
-      setLoading(false);
-      return;
-    }
-
-    setTotalCount(count ?? 0);
-
-    if (!data || data.length === 0) {
-      setContacts([]);
-      setLoading(false);
-      return;
-    }
-
-    // Fetch tags for these contacts
-    const contactIds = data.map((c) => c.id);
-    const { data: contactTags } = await supabase
-      .from('contact_tags')
-      .select('contact_id, tag_id')
-      .in('contact_id', contactIds);
-
-    const tagsByContact: Record<string, string[]> = {};
-    contactTags?.forEach((ct) => {
-      if (!tagsByContact[ct.contact_id]) tagsByContact[ct.contact_id] = [];
-      tagsByContact[ct.contact_id].push(ct.tag_id);
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(PAGE_SIZE),
     });
 
-    const enriched: ContactWithTags[] = data.map((c) => ({
-      ...c,
-      tags: (tagsByContact[c.id] ?? [])
-        .map((tid) => tagsMap[tid])
-        .filter(Boolean),
-    }));
+    if (search.trim()) {
+      params.set('search', search.trim());
+    }
 
-    setContacts(enriched);
-    setLoading(false);
-  }, [supabase, page, search, tagsMap]);
+    try {
+      const data = await fetchJson<{ data: ContactWithTags[]; count: number }>(
+        `/api/whatsapp/contacts?${params.toString()}`,
+      );
+      setContacts(data.data ?? []);
+      setTotalCount(data.count ?? 0);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load contacts';
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search]);
 
   async function handleSyncFromCrm() {
     setSyncing(true);
@@ -182,15 +145,6 @@ export function ContactsTab() {
     }
   }
 
-  // Load-once-on-mount-ish data fetches. Each setter inside runs
-  // inside an async promise completion (Supabase await), not
-  // synchronously in the effect body, so the cascade the lint rule
-  // warns about doesn't apply here.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchTags();
-  }, [fetchTags]);
-
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContacts();
@@ -198,18 +152,22 @@ export function ContactsTab() {
 
   function openAddForm() {
     setEditContact(null);
-    setEditContactTags([]);
+    setEditContactTagIds([]);
     setFormOpen(true);
   }
 
   async function openEditForm(contact: Contact) {
-    const { data } = await supabase
-      .from('contact_tags')
-      .select('*')
-      .eq('contact_id', contact.id);
-    setEditContact(contact);
-    setEditContactTags(data ?? []);
-    setFormOpen(true);
+    try {
+      const data = await fetchJson<{ tag_ids: string[] }>(
+        `/api/whatsapp/contacts/${contact.id}`,
+      );
+      setEditContact(contact);
+      setEditContactTagIds(data.tag_ids ?? []);
+      setFormOpen(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load contact';
+      toast.error(message);
+    }
   }
 
   function openDetail(contactId: string) {
@@ -226,16 +184,15 @@ export function ContactsTab() {
     if (!deleteTarget) return;
     setDeleting(true);
 
-    const { error } = await supabase
-      .from('contacts')
-      .delete()
-      .eq('id', deleteTarget.id);
-
-    if (error) {
-      toast.error('Failed to delete contact');
-    } else {
+    try {
+      await fetchJson(`/api/whatsapp/contacts/${deleteTarget.id}`, {
+        method: 'DELETE',
+      });
       toast.success('Contact deleted');
       fetchContacts();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete contact';
+      toast.error(message);
     }
 
     setDeleting(false);
@@ -494,10 +451,9 @@ export function ContactsTab() {
         open={formOpen}
         onOpenChange={setFormOpen}
         contact={editContact}
-        contactTags={editContactTags}
+        contactTagIds={editContactTagIds}
         onSaved={() => {
           fetchContacts();
-          fetchTags();
         }}
       />
 

@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import type { Contact, Tag, ContactTag } from '@/types';
+import type { Contact, Tag } from '@/types';
 import {
   Dialog,
   DialogContent,
@@ -15,14 +14,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
 
 interface ContactFormProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   contact?: Contact | null;
-  contactTags?: ContactTag[];
+  contactTagIds?: string[];
   onSaved: () => void;
 }
 
@@ -30,10 +28,9 @@ export function ContactForm({
   open,
   onOpenChange,
   contact,
-  contactTags = [],
+  contactTagIds = [],
   onSaved,
 }: ContactFormProps) {
-  const supabase = createClient();
   const isEdit = !!contact;
 
   const [name, setName] = useState('');
@@ -46,15 +43,27 @@ export function ContactForm({
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
 
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Request failed');
+    }
+    return data as T;
+  }
+
   const fetchTags = useCallback(async () => {
     setLoadingTags(true);
-    const { data } = await supabase
-      .from('tags')
-      .select('*')
-      .order('name');
-    if (data) setTags(data);
-    setLoadingTags(false);
-  }, [supabase]);
+    try {
+      const data = await fetchJson<{ data: Tag[] }>('/api/whatsapp/tags');
+      setTags(data.data ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load tags';
+      toast.error(message);
+    } finally {
+      setLoadingTags(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -63,10 +72,10 @@ export function ContactForm({
       setPhone(contact?.phone ?? '');
       setEmail(contact?.email ?? '');
       setCompany(contact?.company ?? '');
-      setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
+      setSelectedTagIds(contactTagIds);
       fetchTags();
     }
-  }, [open, contact, contactTags, fetchTags]);
+  }, [open, contact, contactTagIds, fetchTags]);
 
   function toggleTag(tagId: string) {
     setSelectedTagIds((prev) =>
@@ -87,59 +96,26 @@ export function ContactForm({
     setSaving(true);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error('Not authenticated');
+      const payload = {
+        name: name.trim() || null,
+        phone: phone.trim(),
+        email: email.trim() || null,
+        company: company.trim() || null,
+        tag_ids: selectedTagIds,
+      };
 
-      let contactId = contact?.id;
-
-      if (isEdit && contactId) {
-        const { error } = await supabase
-          .from('contacts')
-          .update({
-            name: name.trim() || null,
-            phone: phone.trim(),
-            email: email.trim() || null,
-            company: company.trim() || null,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', contactId);
-        if (error) throw error;
+      if (isEdit && contact?.id) {
+        await fetchJson(`/api/whatsapp/contacts/${contact.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       } else {
-        const { data, error } = await supabase
-          .from('contacts')
-          .insert({
-            user_id: user.id,
-            name: name.trim() || null,
-            phone: phone.trim(),
-            email: email.trim() || null,
-            company: company.trim() || null,
-          })
-          .select('id')
-          .single();
-        if (error) throw error;
-        contactId = data.id;
-      }
-
-      // Sync tags
-      if (contactId) {
-        await supabase
-          .from('contact_tags')
-          .delete()
-          .eq('contact_id', contactId);
-
-        if (selectedTagIds.length > 0) {
-          const tagRows = selectedTagIds.map((tag_id) => ({
-            contact_id: contactId!,
-            tag_id,
-          }));
-          const { error: tagError } = await supabase
-            .from('contact_tags')
-            .insert(tagRows);
-          if (tagError) throw tagError;
-        }
+        await fetchJson('/api/whatsapp/contacts/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
       }
 
       toast.success(isEdit ? 'Contact updated' : 'Contact created');
@@ -244,11 +220,10 @@ export function ContactForm({
                       key={tag.id}
                       type="button"
                       onClick={() => toggleTag(tag.id)}
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
-                        selected
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${selected
                           ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface'
                           : 'opacity-60 hover:opacity-100'
-                      }`}
+                        }`}
                       style={{
                         backgroundColor: tag.color + '20',
                         color: tag.color,

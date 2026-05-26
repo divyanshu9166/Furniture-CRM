@@ -16,7 +16,6 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { createClient } from "@/lib/supabase/client";
 import type { Pipeline, PipelineStage } from "@/types";
 import {
   Dialog,
@@ -68,8 +67,6 @@ export function PipelineSettings({
   onStagesChanged,
   onCreateNewPipeline,
 }: PipelineSettingsProps) {
-  const supabase = createClient();
-
   const [name, setName] = useState(pipeline.name);
   const [localStages, setLocalStages] = useState<PipelineStage[]>(stages);
   const [newStageName, setNewStageName] = useState("");
@@ -77,6 +74,15 @@ export function PipelineSettings({
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || "Request failed");
+    }
+    return data as T;
+  }
 
   // Reset form state when the dialog opens or its prop inputs change
   // — legitimate prop-driven sync.
@@ -116,20 +122,23 @@ export function PipelineSettings({
       position: i,
     }));
 
-    const [renameRes, stagesRes] = await Promise.all([
-      supabase
-        .from("pipelines")
-        .update({ name: name.trim() })
-        .eq("id", pipeline.id),
-      supabase.from("pipeline_stages").upsert(stageRows, { onConflict: "id" }),
-    ]);
-
-    setSaving(false);
-
-    if (renameRes.error || stagesRes.error) {
+    try {
+      await fetchJson(`/api/whatsapp/pipelines/${pipeline.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          stages: stageRows,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to save pipeline:", error);
       toast.error("Failed to save pipeline");
+      setSaving(false);
       return;
     }
+
+    setSaving(false);
 
     onOpenChange(false);
     onPipelinesChanged();
@@ -140,58 +149,54 @@ export function PipelineSettings({
   async function handleAddStage() {
     const trimmed = newStageName.trim();
     if (!trimmed) return;
-    const { data, error } = await supabase
-      .from("pipeline_stages")
-      .insert({
-        pipeline_id: pipeline.id,
-        name: trimmed,
-        color: newStageColor,
-        position: localStages.length,
-      })
-      .select()
-      .single();
-    if (error || !data) {
+    try {
+      const data = await fetchJson<{ data: PipelineStage }>(
+        `/api/whatsapp/pipelines/${pipeline.id}/stages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: trimmed,
+            color: newStageColor,
+            position: localStages.length,
+          }),
+        },
+      );
+      setLocalStages([...localStages, data.data]);
+    } catch (error) {
+      console.error("Failed to add stage:", error);
       toast.error("Failed to add stage");
       return;
     }
-    setLocalStages([...localStages, data as PipelineStage]);
     setNewStageName("");
     setNewStageColor(STAGE_COLORS[(localStages.length + 1) % STAGE_COLORS.length]);
   }
 
   async function handleRemoveStage(stageId: string) {
-    // Refuse to delete if deals still reference the stage (FK would fail).
-    const { count } = await supabase
-      .from("deals")
-      .select("id", { count: "exact", head: true })
-      .eq("stage_id", stageId);
-    if (count && count > 0) {
-      toast.error("Move or delete deals in this stage first");
-      return;
-    }
-    const { error } = await supabase
-      .from("pipeline_stages")
-      .delete()
-      .eq("id", stageId);
-    if (error) {
+    try {
+      await fetchJson(`/api/whatsapp/pipeline-stages/${stageId}`, {
+        method: "DELETE",
+      });
+      setLocalStages(localStages.filter((s) => s.id !== stageId));
+    } catch (error) {
+      console.error("Failed to delete stage:", error);
       toast.error("Failed to delete stage");
-      return;
     }
-    setLocalStages(localStages.filter((s) => s.id !== stageId));
   }
 
   async function handleDeletePipeline() {
     setDeleting(true);
-    // ON DELETE CASCADE handles deals + stages.
-    const { error } = await supabase
-      .from("pipelines")
-      .delete()
-      .eq("id", pipeline.id);
-    setDeleting(false);
-    if (error) {
+    try {
+      await fetchJson(`/api/whatsapp/pipelines/${pipeline.id}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      console.error("Failed to delete pipeline:", error);
       toast.error("Failed to delete pipeline");
+      setDeleting(false);
       return;
     }
+    setDeleting(false);
     onOpenChange(false);
     onPipelinesChanged();
     toast.success("Pipeline deleted");

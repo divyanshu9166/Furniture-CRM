@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/auth-helpers'
 import {
   sendTextMessage,
   sendTemplateMessage,
@@ -21,23 +22,16 @@ import {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+    const session = await getSession()
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const userId = String(session.user.id)
 
     // Per-user rate limit. Bucket key is scoped to this route so
     // `/broadcast` has an independent budget.
-    const limit = checkRateLimit(`send:${user.id}`, RATE_LIMITS.send)
+    const limit = checkRateLimit(`send:${userId}`, RATE_LIMITS.send)
     if (!limit.success) {
       return rateLimitResponse(limit)
     }
@@ -75,18 +69,13 @@ export async function POST(request: Request) {
     }
 
     // Fetch conversation and contact
-    const { data: conversation, error: convError } = await supabase
-      .from('conversations')
-      .select('*, contact:contacts(*)')
-      .eq('id', conversation_id)
-      .eq('user_id', user.id)
-      .single()
+    const conversation = await prisma.waConversation.findFirst({
+      where: { id: conversation_id, user_id: userId },
+      include: { contact: true },
+    })
 
-    if (convError || !conversation) {
-      return NextResponse.json(
-        { error: 'Conversation not found' },
-        { status: 404 }
-      )
+    if (!conversation) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
 
     const contact = conversation.contact
@@ -107,13 +96,11 @@ export async function POST(request: Request) {
     }
 
     // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    const config = await prisma.waWhatsappConfig.findFirst({
+      where: { user_id: userId },
+    })
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
         { status: 400 }
@@ -128,17 +115,16 @@ export async function POST(request: Request) {
     // concurrent sends both produce valid GCM ciphertexts of the same
     // plaintext, last write wins.
     if (isLegacyFormat(config.access_token)) {
-      void supabase
-        .from('whatsapp_config')
-        .update({ access_token: encrypt(accessToken) })
-        .eq('id', config.id)
-        .then(({ error }) => {
-          if (error) {
-            console.warn(
-              '[whatsapp/send] access_token GCM upgrade failed:',
-              error.message,
-            )
-          }
+      void prisma.waWhatsappConfig
+        .update({
+          where: { id: config.id },
+          data: { access_token: encrypt(accessToken) },
+        })
+        .catch((error) => {
+          console.warn(
+            '[whatsapp/send] access_token GCM upgrade failed:',
+            error instanceof Error ? error.message : error,
+          )
         })
     }
 
@@ -149,14 +135,12 @@ export async function POST(request: Request) {
     // next send goes through on the first attempt.
     let contextMessageId: string | undefined
     if (reply_to_message_id) {
-      const { data: parent, error: parentError } = await supabase
-        .from('messages')
-        .select('message_id, conversation_id')
-        .eq('id', reply_to_message_id)
-        .eq('conversation_id', conversation_id)
-        .maybeSingle()
+      const parent = await prisma.waMessage.findFirst({
+        where: { id: reply_to_message_id, conversation_id },
+        select: { message_id: true },
+      })
 
-      if (parentError || !parent) {
+      if (!parent) {
         return NextResponse.json(
           { error: 'reply_to_message_id not found in this conversation' },
           { status: 400 }
@@ -243,21 +227,21 @@ export async function POST(request: Request) {
       console.log(
         `[whatsapp/send] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
       )
-      await supabase
-        .from('contacts')
-        .update({ phone: workingPhone })
-        .eq('id', contact.id)
+      await prisma.waContact.update({
+        where: { id: contact.id },
+        data: { phone: workingPhone },
+      })
     }
 
     // Insert message into DB — field names MUST match the messages schema
     // (see supabase/migrations/001_initial_schema.sql):
     //   conversation_id, sender_type, content_type, content_text,
     //   media_url, template_name, message_id, status, created_at
-    const { data: messageRecord, error: msgError } = await supabase
-      .from('messages')
-      .insert({
+    const messageRecord = await prisma.waMessage.create({
+      data: {
         conversation_id,
         sender_type: 'agent',
+        sender_id: userId,
         content_type: message_type,
         content_text: content_text || null,
         media_url: media_url || null,
@@ -265,27 +249,17 @@ export async function POST(request: Request) {
         message_id: waMessageId,
         status: 'sent',
         reply_to_message_id: reply_to_message_id || null,
-      })
-      .select()
-      .single()
-
-    if (msgError) {
-      console.error('Error inserting sent message:', msgError)
-      return NextResponse.json(
-        { error: `Message sent to Meta but failed to save to DB: ${msgError.message}` },
-        { status: 500 }
-      )
-    }
+      },
+    })
 
     // Update conversation
-    await supabase
-      .from('conversations')
-      .update({
+    await prisma.waConversation.update({
+      where: { id: conversation_id },
+      data: {
         last_message_text: content_text || `[${message_type}]`,
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversation_id)
+        last_message_at: new Date(),
+      },
+    })
 
     return NextResponse.json({
       success: true,

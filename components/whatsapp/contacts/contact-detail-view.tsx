@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import type { Contact, Tag, ContactTag, ContactNote, CustomField, ContactCustomValue, Deal } from '@/types';
+import type { Contact, Tag, ContactNote, CustomField, Deal } from '@/types';
 import {
   Sheet,
   SheetContent,
@@ -17,8 +16,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone,
   Mail,
@@ -29,7 +26,6 @@ import {
   Plus,
   Trash2,
   Save,
-  X,
   DollarSign,
 } from 'lucide-react';
 
@@ -46,8 +42,6 @@ export function ContactDetailView({
   contactId,
   onUpdated,
 }: ContactDetailViewProps) {
-  const supabase = createClient();
-
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
@@ -80,88 +74,101 @@ export function ContactDetailView({
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(false);
 
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || 'Request failed');
+    }
+    return data as T;
+  }
+
   const fetchContact = useCallback(async () => {
     if (!contactId) return;
     setLoading(true);
-
-    const { data } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('id', contactId)
-      .single();
-
-    if (data) {
-      setContact(data);
-      setEditName(data.name ?? '');
-      setEditPhone(data.phone);
-      setEditEmail(data.email ?? '');
-      setEditCompany(data.company ?? '');
+    try {
+      const data = await fetchJson<{ data: Contact }>(
+        `/api/whatsapp/contacts/${contactId}`,
+      );
+      if (data?.data) {
+        setContact(data.data);
+        setEditName(data.data.name ?? '');
+        setEditPhone(data.data.phone);
+        setEditEmail(data.data.email ?? '');
+        setEditCompany(data.data.company ?? '');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load contact';
+      toast.error(message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  }, [contactId, supabase]);
+  }, [contactId]);
 
   const fetchTags = useCallback(async () => {
     if (!contactId) return;
+    try {
+      const [tagsRes, contactRes] = await Promise.all([
+        fetchJson<{ data: Tag[] }>('/api/whatsapp/tags'),
+        fetchJson<{ tag_ids: string[] }>(`/api/whatsapp/contacts/${contactId}`),
+      ]);
 
-    const [tagsRes, contactTagsRes] = await Promise.all([
-      supabase.from('tags').select('*').order('name'),
-      supabase.from('contact_tags').select('tag_id').eq('contact_id', contactId),
-    ]);
-
-    if (tagsRes.data) setAllTags(tagsRes.data);
-    if (contactTagsRes.data) {
-      setContactTagIds(contactTagsRes.data.map((ct) => ct.tag_id));
+      setAllTags(tagsRes.data ?? []);
+      setContactTagIds(contactRes.tag_ids ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load tags';
+      toast.error(message);
     }
-  }, [contactId, supabase]);
+  }, [contactId]);
 
   const fetchNotes = useCallback(async () => {
     if (!contactId) return;
     setLoadingNotes(true);
-
-    const { data } = await supabase
-      .from('contact_notes')
-      .select('*')
-      .eq('contact_id', contactId)
-      .order('created_at', { ascending: false });
-
-    if (data) setNotes(data);
-    setLoadingNotes(false);
-  }, [contactId, supabase]);
+    try {
+      const data = await fetchJson<{ data: ContactNote[] }>(
+        `/api/whatsapp/contacts/${contactId}/notes`,
+      );
+      setNotes(data.data ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load notes';
+      toast.error(message);
+    } finally {
+      setLoadingNotes(false);
+    }
+  }, [contactId]);
 
   const fetchCustomFields = useCallback(async () => {
     if (!contactId) return;
     setLoadingCustom(true);
-
-    const [fieldsRes, valuesRes] = await Promise.all([
-      supabase.from('custom_fields').select('*').order('field_name'),
-      supabase
-        .from('contact_custom_values')
-        .select('*')
-        .eq('contact_id', contactId),
-    ]);
-
-    if (fieldsRes.data) setCustomFields(fieldsRes.data);
-    if (valuesRes.data) {
-      const map: Record<string, string> = {};
-      valuesRes.data.forEach((v) => {
-        map[v.custom_field_id] = v.value ?? '';
-      });
-      setCustomValues(map);
+    try {
+      const data = await fetchJson<{ fields: CustomField[]; values: Record<string, string> }>(
+        `/api/whatsapp/contacts/${contactId}/custom-values`,
+      );
+      setCustomFields(data.fields ?? []);
+      setCustomValues(data.values ?? {});
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load custom fields';
+      toast.error(message);
+    } finally {
+      setLoadingCustom(false);
     }
-    setLoadingCustom(false);
-  }, [contactId, supabase]);
+  }, [contactId]);
 
   const fetchDeals = useCallback(async () => {
     if (!contactId) return;
     setLoadingDeals(true);
-    const { data } = await supabase
-      .from('deals')
-      .select('*, stage:pipeline_stages(*)')
-      .eq('contact_id', contactId)
-      .order('created_at', { ascending: false });
-    setDeals((data ?? []) as Deal[]);
-    setLoadingDeals(false);
-  }, [contactId, supabase]);
+    try {
+      const data = await fetchJson<{ data: Deal[] }>(
+        `/api/whatsapp/contacts/${contactId}/deals`,
+      );
+      setDeals(data.data ?? []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load deals';
+      toast.error(message);
+    } finally {
+      setLoadingDeals(false);
+    }
+  }, [contactId]);
 
   useEffect(() => {
     if (open && contactId) {
@@ -188,25 +195,26 @@ export function ContactDetailView({
     }
 
     setSavingDetails(true);
-    const { error } = await supabase
-      .from('contacts')
-      .update({
-        name: editName.trim() || null,
-        phone: editPhone.trim(),
-        email: editEmail.trim() || null,
-        company: editCompany.trim() || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', contactId);
-
-    if (error) {
-      toast.error('Failed to update contact');
-    } else {
+    try {
+      await fetchJson(`/api/whatsapp/contacts/${contactId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editName.trim() || null,
+          phone: editPhone.trim(),
+          email: editEmail.trim() || null,
+          company: editCompany.trim() || null,
+        }),
+      });
       toast.success('Contact updated');
       fetchContact();
       onUpdated();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update contact';
+      toast.error(message);
+    } finally {
+      setSavingDetails(false);
     }
-    setSavingDetails(false);
   }
 
   async function toggleTag(tagId: string) {
@@ -214,70 +222,57 @@ export function ContactDetailView({
     setSavingTags(true);
 
     const isSelected = contactTagIds.includes(tagId);
+    const updated = isSelected
+      ? contactTagIds.filter((id) => id !== tagId)
+      : [...contactTagIds, tagId];
 
-    if (isSelected) {
-      const { error } = await supabase
-        .from('contact_tags')
-        .delete()
-        .eq('contact_id', contactId)
-        .eq('tag_id', tagId);
-      if (!error) {
-        setContactTagIds((prev) => prev.filter((id) => id !== tagId));
-        onUpdated();
-      }
-    } else {
-      const { error } = await supabase
-        .from('contact_tags')
-        .insert({ contact_id: contactId, tag_id: tagId });
-      if (!error) {
-        setContactTagIds((prev) => [...prev, tagId]);
-        onUpdated();
-      }
+    try {
+      await fetchJson(`/api/whatsapp/contacts/${contactId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag_ids: updated }),
+      });
+      setContactTagIds(updated);
+      onUpdated();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update tags';
+      toast.error(message);
+    } finally {
+      setSavingTags(false);
     }
-    setSavingTags(false);
   }
 
   async function addNote() {
     if (!contactId || !newNote.trim()) return;
     setSavingNote(true);
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) {
-      toast.error('Not authenticated');
-      setSavingNote(false);
-      return;
-    }
-
-    const { error } = await supabase.from('contact_notes').insert({
-      contact_id: contactId,
-      user_id: user.id,
-      note_text: newNote.trim(),
-    });
-
-    if (error) {
-      toast.error('Failed to add note');
-    } else {
+    try {
+      await fetchJson(`/api/whatsapp/contacts/${contactId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note_text: newNote.trim() }),
+      });
       setNewNote('');
       fetchNotes();
       toast.success('Note added');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add note';
+      toast.error(message);
+    } finally {
+      setSavingNote(false);
     }
-    setSavingNote(false);
   }
 
   async function deleteNote(noteId: string) {
-    const { error } = await supabase
-      .from('contact_notes')
-      .delete()
-      .eq('id', noteId);
-
-    if (error) {
-      toast.error('Failed to delete note');
-    } else {
+    if (!contactId) return;
+    try {
+      await fetchJson(`/api/whatsapp/contacts/${contactId}/notes/${noteId}`, {
+        method: 'DELETE',
+      });
       setNotes((prev) => prev.filter((n) => n.id !== noteId));
       toast.success('Note deleted');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete note';
+      toast.error(message);
     }
   }
 
@@ -286,32 +281,18 @@ export function ContactDetailView({
     setSavingCustom(true);
 
     try {
-      // Delete existing values and re-insert
-      await supabase
-        .from('contact_custom_values')
-        .delete()
-        .eq('contact_id', contactId);
-
-      const rows = Object.entries(customValues)
-        .filter(([, val]) => val.trim())
-        .map(([fieldId, val]) => ({
-          contact_id: contactId,
-          custom_field_id: fieldId,
-          value: val.trim(),
-        }));
-
-      if (rows.length > 0) {
-        const { error } = await supabase
-          .from('contact_custom_values')
-          .insert(rows);
-        if (error) throw error;
-      }
-
+      await fetchJson(`/api/whatsapp/contacts/${contactId}/custom-values`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: customValues }),
+      });
       toast.success('Custom fields saved');
-    } catch {
-      toast.error('Failed to save custom fields');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to save custom fields';
+      toast.error(message);
+    } finally {
+      setSavingCustom(false);
     }
-    setSavingCustom(false);
   }
 
   function getInitials(name?: string | null) {
@@ -488,11 +469,10 @@ export function ContactDetailView({
                             key={tag.id}
                             onClick={() => toggleTag(tag.id)}
                             disabled={savingTags}
-                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
-                              selected
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${selected
                                 ? 'ring-2 ring-accent ring-offset-1 ring-offset-surface'
                                 : 'opacity-50 hover:opacity-80'
-                            }`}
+                              }`}
                             style={{
                               backgroundColor: tag.color + '20',
                               color: tag.color,

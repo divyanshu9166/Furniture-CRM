@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type {
@@ -42,6 +41,20 @@ interface ReplyDraft {
   id: string;
   authorLabel: string;
   preview: string;
+}
+
+const POLL_INTERVAL_MS = 4000;
+
+async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(input, init);
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    const reason = (data as { error?: string })?.error ?? `HTTP ${res.status}`;
+    throw new Error(reason);
+  }
+
+  return data as T;
 }
 
 function renderTemplateBody(body: string, params: string[]): string {
@@ -120,25 +133,35 @@ export function MessageThread({
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
+  const messagesRef = useRef<Message[]>(messages);
+  const reactionsRef = useRef<MessageReaction[]>(reactions);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    reactionsRef.current = reactions;
+  }, [reactions]);
 
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
   // shape ready for shared-team workspaces without a refactor.
   useEffect(() => {
     let cancelled = false;
-    const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("*")
-      .order("full_name")
-      .then(({ data, error }) => {
+
+    fetchJson<{ data: Profile[] }>("/api/whatsapp/profiles", {
+      cache: "no-store",
+    })
+      .then((body) => {
         if (cancelled) return;
-        if (error) {
-          console.error("Failed to fetch profiles:", error);
-          return;
-        }
-        setProfiles((data as Profile[]) ?? []);
+        setProfiles(body.data ?? []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to fetch profiles:", error);
       });
+
     return () => {
       cancelled = true;
     };
@@ -192,32 +215,57 @@ export function MessageThread({
   // they only flip hasUnread, which only the reset effect listens to.
   useEffect(() => {
     if (!conversationId) return;
-
-    const supabase = createClient();
     let cancelled = false;
+    let initial = true;
 
-    (async () => {
-      setLoading(true);
+    const finishInitial = () => {
+      if (!initial) return;
+      setLoading(false);
+      initial = false;
+    };
 
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+    const mergeMessages = (serverMessages: Message[]) => {
+      const tempMessages = messagesRef.current.filter((m) =>
+        m.id.startsWith("temp-")
+      );
+      const serverIds = new Set(serverMessages.map((m) => m.id));
+      const merged = [
+        ...serverMessages,
+        ...tempMessages.filter((m) => !serverIds.has(m.id)),
+      ];
+      merged.sort(
+        (a, b) =>
+          new Date(a.created_at).getTime() -
+          new Date(b.created_at).getTime()
+      );
+      return merged;
+    };
 
-      if (cancelled) return;
+    const fetchMessages = async () => {
+      if (initial) setLoading(true);
 
-      if (error) {
+      try {
+        const body = await fetchJson<{ data: Message[] }>(
+          `/api/whatsapp/messages?conversation_id=${conversationId}`,
+          { cache: "no-store" }
+        );
+        if (cancelled) return;
+        onMessagesLoadedRef.current(mergeMessages(body.data ?? []));
+      } catch (error) {
+        if (cancelled) return;
         console.error("Failed to fetch messages:", error);
-      } else {
-        onMessagesLoadedRef.current(data ?? []);
+      } finally {
+        if (cancelled) return;
+        finishInitial();
       }
+    };
 
-      if (!cancelled) setLoading(false);
-    })();
+    fetchMessages();
+    const interval = setInterval(fetchMessages, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [conversationId]);
 
@@ -227,95 +275,40 @@ export function MessageThread({
       setReactions([]);
       return;
     }
-
-    const supabase = createClient();
     let cancelled = false;
 
-    (async () => {
-      const { data, error } = await supabase
-        .from("message_reactions")
-        .select("*")
-        .eq("conversation_id", conversationId);
+    const mergeReactions = (serverReactions: MessageReaction[]) => {
+      const tempReactions = reactionsRef.current.filter((reaction) =>
+        reaction.id.startsWith("temp-")
+      );
+      const serverIds = new Set(serverReactions.map((reaction) => reaction.id));
+      return [
+        ...serverReactions,
+        ...tempReactions.filter((reaction) => !serverIds.has(reaction.id)),
+      ];
+    };
 
-      if (cancelled) return;
+    const fetchReactions = async () => {
+      try {
+        const body = await fetchJson<{ data: MessageReaction[] }>(
+          `/api/whatsapp/reactions?conversation_id=${conversationId}`,
+          { cache: "no-store" }
+        );
 
-      if (error) {
+        if (cancelled) return;
+        setReactions(mergeReactions(body.data ?? []));
+      } catch (error) {
+        if (cancelled) return;
         console.error("Failed to fetch reactions:", error);
-        return;
       }
+    };
 
-      setReactions((data as MessageReaction[]) ?? []);
-    })();
-
-    const channel = supabase
-      .channel(`reactions:${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "message_reactions",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const row = payload.new as MessageReaction;
-          setReactions((prev) => {
-            if (prev.some((reaction) => reaction.id === row.id)) return prev;
-
-            const tempIndex = prev.findIndex(
-              (reaction) =>
-                reaction.id.startsWith("temp-") &&
-                reaction.message_id === row.message_id &&
-                reaction.actor_type === row.actor_type &&
-                reaction.actor_id === row.actor_id,
-            );
-
-            if (tempIndex >= 0) {
-              const next = prev.slice();
-              next[tempIndex] = row;
-              return next;
-            }
-
-            return [...prev, row];
-          });
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "message_reactions",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const row = payload.new as MessageReaction;
-          setReactions((prev) =>
-            prev.map((reaction) => (reaction.id === row.id ? row : reaction)),
-          );
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "message_reactions",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const old = payload.old as Partial<MessageReaction>;
-          if (!old?.id) return;
-          setReactions((prev) =>
-            prev.filter((reaction) => reaction.id !== old.id),
-          );
-        },
-      )
-      .subscribe();
+    fetchReactions();
+    const interval = setInterval(fetchReactions, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      supabase.removeChannel(channel);
+      clearInterval(interval);
     };
   }, [conversationId]);
 
@@ -335,14 +328,13 @@ export function MessageThread({
   // is 0 the condition is false, so no further UPDATE is issued.
   useEffect(() => {
     if (!conversationId || !hasUnread) return;
-    const supabase = createClient();
-    supabase
-      .from("conversations")
-      .update({ unread_count: 0 })
-      .eq("id", conversationId)
-      .then(({ error }) => {
-        if (error) console.error("Failed to reset unread_count:", error);
-      });
+    fetchJson(`/api/whatsapp/conversations/${conversationId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unread_count: 0 }),
+    }).catch((error) => {
+      console.error("Failed to reset unread_count:", error);
+    });
   }, [conversationId, hasUnread]);
 
   // Auto-scroll to bottom on new messages
@@ -396,10 +388,19 @@ export function MessageThread({
           return;
         }
 
-        // Success — the realtime INSERT event will replace the temp bubble
-        // with the real DB row. If realtime hasn't arrived yet, at least
-        // flip status to 'sent' so the UI stops showing "sending".
-        onUpdateMessage(tempId, { status: "sent" });
+        const nextId = payload?.message_id as string | undefined;
+        const metaId = payload?.whatsapp_message_id as string | undefined;
+
+        if (nextId) {
+          onUpdateMessage(tempId, {
+            id: nextId,
+            message_id: metaId,
+            status: "sent",
+          });
+        } else {
+          // Flip status so the UI stops showing "sending".
+          onUpdateMessage(tempId, { status: "sent" });
+        }
       } catch (err) {
         console.error("Failed to send message:", err);
         const reason = err instanceof Error ? err.message : "network error";
@@ -414,13 +415,18 @@ export function MessageThread({
     async (status: ConversationStatus) => {
       if (!conversation) return;
 
-      const supabase = createClient();
-      await supabase
-        .from("conversations")
-        .update({ status })
-        .eq("id", conversation.id);
+      try {
+        await fetchJson(`/api/whatsapp/conversations/${conversation.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
 
-      onStatusChange(conversation.id, status);
+        onStatusChange(conversation.id, status);
+      } catch (error) {
+        console.error("Failed to update status:", error);
+        toast.error("Failed to update status");
+      }
     },
     [conversation, onStatusChange]
   );
@@ -471,7 +477,18 @@ export function MessageThread({
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        const nextId = payload?.message_id as string | undefined;
+        const metaId = payload?.whatsapp_message_id as string | undefined;
+
+        if (nextId) {
+          onUpdateMessage(tempId, {
+            id: nextId,
+            message_id: metaId,
+            status: "sent",
+          });
+        } else {
+          onUpdateMessage(tempId, { status: "sent" });
+        }
       } catch (err) {
         console.error("Failed to send template:", err);
         const reason = err instanceof Error ? err.message : "network error";
@@ -591,19 +608,18 @@ export function MessageThread({
     async (agentId: string | null) => {
       if (!conversation) return;
 
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("conversations")
-        .update({ assigned_agent_id: agentId })
-        .eq("id", conversation.id);
+      try {
+        await fetchJson(`/api/whatsapp/conversations/${conversation.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assigned_agent_id: agentId }),
+        });
 
-      if (error) {
+        onAssignChange(conversation.id, agentId);
+      } catch (error) {
         console.error("Failed to update assignment:", error);
         toast.error("Failed to update assignment");
-        return;
       }
-
-      onAssignChange(conversation.id, agentId);
     },
     [conversation, onAssignChange],
   );
@@ -678,11 +694,11 @@ export function MessageThread({
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
-                  "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-surface-light",
-                  currentStatus?.color ?? "text-muted"
-                )}>
-                {currentStatus?.label ?? "Status"}
-                <ChevronDown className="h-3 w-3" />
+              "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-surface-light",
+              currentStatus?.color ?? "text-muted"
+            )}>
+              {currentStatus?.label ?? "Status"}
+              <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -788,9 +804,9 @@ export function MessageThread({
                       : null;
                     const reply = parent
                       ? {
-                          authorLabel: authorLabelFor(parent),
-                          preview: buildReplyPreview(parent),
-                        }
+                        authorLabel: authorLabelFor(parent),
+                        preview: buildReplyPreview(parent),
+                      }
                       : null;
                     const msgReactions = reactionsByMessageId.get(msg.id);
                     const handlePillToggle = (emoji: string) => {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/auth-helpers'
 import { sendReactionMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhoneForMetaIndia } from '@/lib/whatsapp/phone-utils'
@@ -11,18 +12,14 @@ import {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
+    const session = await getSession()
+    if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const limit = checkRateLimit(`react:${user.id}`, RATE_LIMITS.react)
+    const userId = String(session.user.id)
+
+    const limit = checkRateLimit(`react:${userId}`, RATE_LIMITS.react)
     if (!limit.success) {
       return rateLimitResponse(limit)
     }
@@ -40,13 +37,12 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: targetMessage, error: msgError } = await supabase
-      .from('messages')
-      .select('id, message_id, conversation_id')
-      .eq('id', message_id)
-      .maybeSingle()
+    const targetMessage = await prisma.waMessage.findFirst({
+      where: { id: message_id },
+      select: { id: true, message_id: true, conversation_id: true },
+    })
 
-    if (msgError || !targetMessage) {
+    if (!targetMessage) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 })
     }
 
@@ -57,23 +53,19 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: conversation, error: convError } = await supabase
-      .from('conversations')
-      .select('id, user_id, contact:contacts(phone)')
-      .eq('id', targetMessage.conversation_id)
-      .eq('user_id', user.id)
-      .maybeSingle()
+    const conversation = await prisma.waConversation.findFirst({
+      where: { id: targetMessage.conversation_id, user_id: userId },
+      include: { contact: { select: { phone: true } } },
+    })
 
-    if (convError || !conversation) {
+    if (!conversation) {
       return NextResponse.json(
         { error: 'Conversation not found' },
         { status: 404 }
       )
     }
 
-    const contact = Array.isArray(conversation.contact)
-      ? conversation.contact[0]
-      : conversation.contact
+    const contact = conversation.contact
 
     if (!contact?.phone) {
       return NextResponse.json(
@@ -82,13 +74,12 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, access_token')
-      .eq('user_id', user.id)
-      .single()
+    const config = await prisma.waWhatsappConfig.findFirst({
+      where: { user_id: userId },
+      select: { phone_number_id: true, access_token: true },
+    })
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         { error: 'WhatsApp not configured.' },
         { status: 400 }
@@ -114,41 +105,35 @@ export async function POST(request: Request) {
     }
 
     if (emoji === '') {
-      const { error: delError } = await supabase
-        .from('message_reactions')
-        .delete()
-        .eq('message_id', targetMessage.id)
-        .eq('actor_type', 'agent')
-        .eq('actor_id', user.id)
+      const result = await prisma.waMessageReaction.deleteMany({
+        where: {
+          message_id: targetMessage.id,
+          actor_type: 'agent',
+          actor_id: userId,
+        },
+      })
 
-      if (delError) {
-        console.error('[whatsapp/react] DB delete failed:', delError.message)
-        return NextResponse.json(
-          { error: 'Reaction sent to Meta but DB delete failed' },
-          { status: 500 }
-        )
+      if (result.count === 0) {
+        return NextResponse.json({ success: true })
       }
     } else {
-      const { error: upsertError } = await supabase
-        .from('message_reactions')
-        .upsert(
-          {
+      await prisma.waMessageReaction.upsert({
+        where: {
+          message_id_actor_type_actor_id: {
             message_id: targetMessage.id,
-            conversation_id: targetMessage.conversation_id,
             actor_type: 'agent',
-            actor_id: user.id,
-            emoji,
+            actor_id: userId,
           },
-          { onConflict: 'message_id,actor_type,actor_id' }
-        )
-
-      if (upsertError) {
-        console.error('[whatsapp/react] DB upsert failed:', upsertError.message)
-        return NextResponse.json(
-          { error: 'Reaction sent to Meta but DB upsert failed' },
-          { status: 500 }
-        )
-      }
+        },
+        update: { emoji },
+        create: {
+          message_id: targetMessage.id,
+          conversation_id: targetMessage.conversation_id,
+          actor_type: 'agent',
+          actor_id: userId,
+          emoji,
+        },
+      })
     }
 
     return NextResponse.json({ success: true })

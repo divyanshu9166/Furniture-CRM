@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import type {
   Contact,
   Conversation,
@@ -50,8 +49,6 @@ export function DealForm({
   defaultStageId,
   onSaved,
 }: DealFormProps) {
-  const supabase = createClient();
-
   const [title, setTitle] = useState("");
   const [value, setValue] = useState("");
   const [currency, setCurrency] = useState("USD");
@@ -70,6 +67,15 @@ export function DealForm({
   const [statusAction, setStatusAction] = useState<DealStatus | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || "Request failed");
+    }
+    return data as T;
+  }
 
   // Reset the form fields every time the sheet opens or its input
   // props change. This is a legitimate prop-driven sync; the rule is
@@ -108,8 +114,10 @@ export function DealForm({
     let cancelled = false;
     (async () => {
       const [c, p] = await Promise.all([
-        supabase.from("contacts").select("*").order("name"),
-        supabase.from("profiles").select("*").order("full_name"),
+        fetchJson<{ data: Contact[] }>(
+          "/api/whatsapp/contacts?all=1&fields=basic",
+        ),
+        fetchJson<{ data: Profile[] }>("/api/whatsapp/profiles"),
       ]);
       if (cancelled) return;
       setContacts((c.data ?? []) as Contact[]);
@@ -118,7 +126,7 @@ export function DealForm({
     return () => {
       cancelled = true;
     };
-  }, [open, supabase]);
+  }, [open]);
 
   // Fetch linked conversation for the selected contact (newest open one).
   // Clearing on no-selection is sync with prop state; the populated
@@ -131,20 +139,16 @@ export function DealForm({
     }
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("conversations")
-        .select("*")
-        .eq("contact_id", contactId)
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const data = await fetchJson<{ data: Conversation | null }>(
+        `/api/whatsapp/conversations?contact_id=${contactId}`,
+      );
       if (cancelled) return;
-      setLinkedConversation((data as Conversation | null) ?? null);
+      setLinkedConversation((data?.data as Conversation | null) ?? null);
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, contactId, supabase]);
+  }, [open, contactId]);
 
   async function handleSave() {
     if (!title.trim() || !contactId || !stageId) {
@@ -165,34 +169,25 @@ export function DealForm({
       expected_close_date: expectedCloseDate || null,
     };
 
-    if (deal) {
-      const { error } = await supabase
-        .from("deals")
-        .update(payload)
-        .eq("id", deal.id);
-      if (error) {
-        toast.error("Failed to save deal");
-        setSaving(false);
-        return;
+    try {
+      if (deal) {
+        await fetchJson(`/api/whatsapp/deals/${deal.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await fetchJson("/api/whatsapp/deals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, status: "open" }),
+        });
       }
-    } else {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) {
-        toast.error("Not signed in");
-        setSaving(false);
-        return;
-      }
-      const { error } = await supabase
-        .from("deals")
-        .insert({ ...payload, user_id: user.id, status: "open" });
-      if (error) {
-        toast.error("Failed to create deal");
-        setSaving(false);
-        return;
-      }
+    } catch (error) {
+      console.error("Failed to save deal:", error);
+      toast.error("Failed to save deal");
+      setSaving(false);
+      return;
     }
 
     setSaving(false);
@@ -204,15 +199,19 @@ export function DealForm({
   async function handleStatusChange(status: DealStatus) {
     if (!deal) return;
     setStatusAction(status);
-    const { error } = await supabase
-      .from("deals")
-      .update({ status })
-      .eq("id", deal.id);
-    setStatusAction(null);
-    if (error) {
+    try {
+      await fetchJson(`/api/whatsapp/deals/${deal.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+    } catch (error) {
+      console.error("Failed to update deal status:", error);
       toast.error("Failed to update deal status");
+      setStatusAction(null);
       return;
     }
+    setStatusAction(null);
     toast.success(
       status === "won" ? "Marked as won" : status === "lost" ? "Marked as lost" : "Deal reopened",
     );
@@ -223,12 +222,17 @@ export function DealForm({
   async function handleDelete() {
     if (!deal) return;
     setDeleting(true);
-    const { error } = await supabase.from("deals").delete().eq("id", deal.id);
-    setDeleting(false);
-    if (error) {
+    try {
+      await fetchJson(`/api/whatsapp/deals/${deal.id}`, {
+        method: "DELETE",
+      });
+    } catch (error) {
+      console.error("Failed to delete deal:", error);
       toast.error("Failed to delete deal");
+      setDeleting(false);
       return;
     }
+    setDeleting(false);
     toast.success("Deal deleted");
     setConfirmDelete(false);
     onOpenChange(false);

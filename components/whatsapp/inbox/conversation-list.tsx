@@ -35,6 +35,8 @@ const FILTER_OPTIONS: { label: string; value: ConversationStatus | "all" }[] = [
   { label: "Closed", value: "closed" },
 ];
 
+const POLL_INTERVAL_MS = 8000;
+
 export function ConversationList({
   activeConversationId,
   onSelect,
@@ -64,25 +66,38 @@ export function ConversationList({
 
   useEffect(() => {
     let cancelled = false;
+    let initial = true;
 
-    (async () => {
+    const finishInitial = () => {
+      if (!initial) return;
+      setLoading(false);
+      initial = false;
+    };
+
+    const fetchConversations = async () => {
+      if (initial) setLoading(true);
+
       const res = await fetch('/api/whatsapp/conversations', { cache: 'no-store' });
       if (cancelled) return;
 
       if (!res.ok) {
         console.error('Failed to fetch conversations:', res.status, res.statusText);
-        setLoading(false);
+        finishInitial();
         return;
       }
 
       const body = await res.json();
       if (cancelled) return;
-      onConversationsLoadedRef.current(body.conversations ?? []);
-      setLoading(false);
-    })();
+      onConversationsLoadedRef.current(body.data ?? []);
+      finishInitial();
+    };
+
+    fetchConversations();
+    const interval = setInterval(fetchConversations, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
@@ -141,8 +156,8 @@ export function ConversationList({
 
         <DropdownMenu>
           <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted hover:text-foreground rounded-md hover:bg-surface-light">
-              {activeFilter?.label ?? "All"}
-              <ChevronDown className="h-3 w-3" />
+            {activeFilter?.label ?? "All"}
+            <ChevronDown className="h-3 w-3" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -214,8 +229,8 @@ function ConversationItem({
 
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
-        addSuffix: false,
-      })
+      addSuffix: false,
+    })
     : "";
 
   return (

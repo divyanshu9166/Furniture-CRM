@@ -1,14 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { cn } from "@/lib/utils";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
   Phone,
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
@@ -26,7 +24,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
-  const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
@@ -42,16 +40,15 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
     if (dealsRes.ok) {
       const body = await dealsRes.json();
-      setDeals(body.deals ?? []);
+      setDeals(body.data ?? []);
     }
     if (notesRes.ok) {
       const body = await notesRes.json();
-      setNotes(body.notes ?? []);
+      setNotes(body.data ?? []);
     }
     if (contactRes.ok) {
       const body = await contactRes.json();
-      // Tags come back as contact.tags from the contact detail endpoint
-      const rawTags = body.contact?.tags ?? [];
+      const rawTags = body.data?.tags ?? [];
       setTags(rawTags);
     }
   }, [contact]);
@@ -84,8 +81,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
     if (res.ok) {
       const body = await res.json();
-      if (body.note) {
-        setNotes((prev) => [body.note, ...prev]);
+      if (body.data) {
+        setNotes((prev) => [body.data, ...prev]);
         setNewNote('');
       }
     }
@@ -166,7 +163,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               ) : (
                 tags.map((tag) => (
                   <span
-                    key={tag.contact_tag_id}
+                    key={tag.id}
                     className="rounded-full px-2 py-0.5 text-[10px] font-medium"
                     style={{
                       backgroundColor: `${tag.color}20`,

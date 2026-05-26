@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import type { Pipeline, PipelineStage, Deal } from "@/types";
 import { PipelineBoard } from "@/components/whatsapp/pipelines/pipeline-board";
 import { PipelineSettings } from "@/components/whatsapp/pipelines/pipeline-settings";
@@ -27,18 +26,7 @@ import { Label } from "@/components/ui/label";
 import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
 import { toast } from "sonner";
 
-// Spec-defined seed — name and color per the product spec.
-const SPEC_DEFAULT_STAGES = [
-  { name: "New Lead", color: "#3b82f6", position: 0 }, // blue
-  { name: "Qualified", color: "#eab308", position: 1 }, // yellow
-  { name: "Proposal Sent", color: "#f97316", position: 2 }, // orange
-  { name: "Negotiation", color: "#8b5cf6", position: 3 }, // purple
-  { name: "Won", color: "#22c55e", position: 4 }, // green
-];
-
 export function PipelinesTab() {
-  const supabase = createClient();
-
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>("");
   const [stages, setStages] = useState<PipelineStage[]>([]);
@@ -60,70 +48,74 @@ export function PipelinesTab() {
   // Guard against double-seeding (React StrictMode double-effect in dev).
   const seedAttempted = useRef(false);
 
+  async function fetchJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+    const res = await fetch(input, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || "Request failed");
+    }
+    return data as T;
+  }
+
   const loadPipelines = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("pipelines")
-      .select("*")
-      .order("created_at");
-    if (error) {
-      console.error("Failed to load pipelines:", error.message);
+    try {
+      const data = await fetchJson<{ data: Pipeline[] }>("/api/whatsapp/pipelines");
+      return data.data ?? [];
+    } catch (error) {
+      console.error("Failed to load pipelines:", error);
+      toast.error("Failed to load pipelines");
       return [];
     }
-    return data ?? [];
-  }, [supabase]);
+  }, []);
 
   const loadStages = useCallback(
     async (pipelineId: string) => {
-      const { data } = await supabase
-        .from("pipeline_stages")
-        .select("*")
-        .eq("pipeline_id", pipelineId)
-        .order("position");
-      return data ?? [];
+      try {
+        const data = await fetchJson<{ data: PipelineStage[] }>(
+          `/api/whatsapp/pipelines/${pipelineId}/stages`,
+        );
+        return data.data ?? [];
+      } catch (error) {
+        console.error("Failed to load stages:", error);
+        toast.error("Failed to load stages");
+        return [];
+      }
     },
-    [supabase],
+    [],
   );
 
   const loadDeals = useCallback(
     async (pipelineId: string) => {
-      const { data } = await supabase
-        .from("deals")
-        .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(*)")
-        .eq("pipeline_id", pipelineId)
-        .order("created_at", { ascending: false });
-      return (data ?? []) as Deal[];
+      try {
+        const data = await fetchJson<{ data: Deal[] }>(
+          `/api/whatsapp/pipelines/${pipelineId}/deals`,
+        );
+        return (data.data ?? []) as Deal[];
+      } catch (error) {
+        console.error("Failed to load deals:", error);
+        toast.error("Failed to load deals");
+        return [];
+      }
     },
-    [supabase],
+    [],
   );
 
   const seedDefaultPipeline = useCallback(async (): Promise<Pipeline | null> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) return null;
-
-    const { data: pipeline, error } = await supabase
-      .from("pipelines")
-      .insert({ user_id: user.id, name: "Sales Pipeline" })
-      .select()
-      .single();
-
-    if (error || !pipeline) {
-      console.error("Failed to seed pipeline:", error?.message);
+    try {
+      const data = await fetchJson<{ data: Pipeline }>("/api/whatsapp/pipelines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Sales Pipeline",
+          seed_default_stages: true,
+        }),
+      });
+      return data.data ?? null;
+    } catch (error) {
+      console.error("Failed to seed pipeline:", error);
       return null;
     }
-
-    const stagesPayload = SPEC_DEFAULT_STAGES.map((s) => ({
-      pipeline_id: pipeline.id,
-      name: s.name,
-      color: s.color,
-      position: s.position,
-    }));
-    await supabase.from("pipeline_stages").insert(stagesPayload);
-
-    return pipeline as Pipeline;
-  }, [supabase]);
+  }, []);
 
   // Initial load + seed-if-empty
   useEffect(() => {
@@ -204,16 +196,18 @@ export function PipelinesTab() {
       setDeals((prev) =>
         prev.map((d) => (d.id === dealId ? { ...d, stage_id: newStageId } : d)),
       );
-      const { error } = await supabase
-        .from("deals")
-        .update({ stage_id: newStageId })
-        .eq("id", dealId);
-      if (error) {
+      try {
+        await fetchJson(`/api/whatsapp/deals/${dealId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stage_id: newStageId }),
+        });
+      } catch {
         toast.error("Failed to move deal");
         refreshDeals();
       }
     },
-    [supabase, refreshDeals],
+    [refreshDeals],
   );
 
   const handleAddDeal = useCallback(
@@ -235,42 +229,27 @@ export function PipelinesTab() {
     const name = newPipelineName.trim();
     if (!name) return;
     setCreating(true);
+    try {
+      const data = await fetchJson<{ data: Pipeline }>("/api/whatsapp/pipelines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          seed_default_stages: true,
+        }),
+      });
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
-    if (!user) {
-      setCreating(false);
-      return;
-    }
-
-    const { data: pipeline, error } = await supabase
-      .from("pipelines")
-      .insert({ user_id: user.id, name })
-      .select()
-      .single();
-
-    if (error || !pipeline) {
+      setNewPipelineName("");
+      setNewPipelineOpen(false);
+      setSelectedPipelineId(data.data?.id ?? "");
+      await refreshPipelines();
+      toast.success("Pipeline created");
+    } catch (error) {
+      console.error("Failed to create pipeline:", error);
       toast.error("Failed to create pipeline");
+    } finally {
       setCreating(false);
-      return;
     }
-
-    const stagesPayload = SPEC_DEFAULT_STAGES.map((s) => ({
-      pipeline_id: pipeline.id,
-      name: s.name,
-      color: s.color,
-      position: s.position,
-    }));
-    await supabase.from("pipeline_stages").insert(stagesPayload);
-
-    setNewPipelineName("");
-    setNewPipelineOpen(false);
-    setSelectedPipelineId(pipeline.id);
-    await refreshPipelines();
-    setCreating(false);
-    toast.success("Pipeline created");
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);

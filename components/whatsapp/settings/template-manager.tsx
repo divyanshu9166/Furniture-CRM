@@ -195,9 +195,9 @@ export function TemplateManager() {
       }
       toast.success(
         `Synced ${data.total} template${data.total === 1 ? '' : 's'} from Meta` +
-          (data.inserted || data.updated
-            ? ` (${data.inserted} new, ${data.updated} updated)`
-            : ''),
+        (data.inserted || data.updated
+          ? ` (${data.inserted} new, ${data.updated} updated)`
+          : ''),
       );
       if (Array.isArray(data.errors) && data.errors.length > 0) {
         // Surface per-template failures so users don't trust a green

@@ -3,6 +3,110 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth-helpers'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 
+function serializeContact(contact: {
+  id: string
+  user_id: string
+  phone: string
+  name: string | null
+  email: string | null
+  company: string | null
+  avatar_url: string | null
+  created_at: Date
+  updated_at: Date
+  contact_tags?: Array<{ tag: { id: string; name: string; color: string } }>
+}) {
+  return {
+    id: contact.id,
+    user_id: contact.user_id,
+    phone: contact.phone,
+    name: contact.name,
+    email: contact.email,
+    company: contact.company,
+    avatar_url: contact.avatar_url,
+    created_at: contact.created_at.toISOString(),
+    updated_at: contact.updated_at.toISOString(),
+    tags: contact.contact_tags?.map((ct) => ct.tag) ?? [],
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    const session = await getSession()
+    if (!session?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const { searchParams } = new URL(request.url)
+    const search = (searchParams.get('search') ?? '').trim()
+    const all = ['1', 'true', 'yes'].includes(
+      String(searchParams.get('all') ?? '').toLowerCase(),
+    )
+    const fields = (searchParams.get('fields') ?? '').trim().toLowerCase()
+
+    const page = Math.max(0, Number.parseInt(searchParams.get('page') ?? '0', 10) || 0)
+    const pageSizeRaw = Number.parseInt(searchParams.get('pageSize') ?? '25', 10) || 25
+    const pageSize = Math.min(Math.max(pageSizeRaw, 1), 250)
+
+    const userId = String(session.user.id)
+
+    const where: {
+      user_id: string
+      OR?: Array<{ name?: object; phone?: object; email?: object }>
+    } = { user_id: userId }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+
+    const listArgs: Record<string, unknown> = {
+      where,
+      orderBy: { created_at: 'desc' },
+    }
+
+    if (!all) {
+      listArgs.skip = page * pageSize
+      listArgs.take = pageSize
+    }
+
+    if (fields === 'basic') {
+      listArgs.select = {
+        id: true,
+        user_id: true,
+        name: true,
+        phone: true,
+        created_at: true,
+        updated_at: true,
+      }
+    } else {
+      listArgs.include = { contact_tags: { include: { tag: true } } }
+    }
+
+    const [count, contacts] = await Promise.all([
+      prisma.waContact.count({ where }),
+      prisma.waContact.findMany(listArgs as any),
+    ])
+
+    if (fields === 'basic') {
+      return NextResponse.json({
+        data: contacts,
+        count,
+      })
+    }
+
+    return NextResponse.json({
+      data: (contacts as Array<Parameters<typeof serializeContact>[0]>).map(serializeContact),
+      count,
+    })
+  } catch (error) {
+    console.error('Error loading WA contacts:', error)
+    return NextResponse.json({ error: 'Failed to load contacts' }, { status: 500 })
+  }
+}
+
 function normalizeForMatch(value: string): string {
   return normalizePhone(value ?? '')
 }
