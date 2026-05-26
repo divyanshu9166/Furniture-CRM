@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/session'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
 import { insertSteps, type BuilderStepInput } from '@/lib/automations/steps-tree'
@@ -9,19 +10,23 @@ import {
 } from '@/lib/automations/validate'
 
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSession()
+  if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data, error } = await supabase
-    .from('automations')
-    .select('*')
-    .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ automations: data ?? [] })
+  const userId = String(session.id)
+
+  try {
+    const automations = await prisma.waAutomation.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+    })
+    return NextResponse.json({ automations })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch automations'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
 }
+
 
 export async function POST(request: Request) {
   const supabase = await createClient()
