@@ -69,9 +69,10 @@ function LoginContent() {
       if (!res.ok) {
         setError(result.error || 'Invalid email or password');
       } else {
-        // Full page reload so AuthProvider re-mounts and fetches the fresh session
-        // (router.push + refresh doesn't unmount client components, leaving the role stale)
-        window.location.href = callbackUrl;
+        // Full page reload so AuthProvider re-mounts and fetches the fresh session.
+        // Always redirect admin login to '/' (dashboard), never follow callbackUrl,
+        // which could be '/staff-portal' from a previous staff session.
+        window.location.href = '/';
       }
     } catch {
       setError('Something went wrong. Please try again.');
