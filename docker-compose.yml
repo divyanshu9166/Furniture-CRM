@@ -53,6 +53,7 @@ services:
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
       # Images stored on VPS local volume — no cloud storage needed
       UPLOAD_DIR: "/app/uploads"
     depends_on:
