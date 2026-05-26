@@ -18,18 +18,36 @@ import {
   Webhook,
   BookOpen,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 
 const MASKED_TOKEN = '••••••••••••••••';
 const DRAFT_STORAGE_KEY = 'wa-config-draft';
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
+
+type StoredConfig = {
+  id: string;
+  phone_number_id: string;
+  waba_id?: string | null;
+  status: 'connected' | 'disconnected';
+  connected_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  has_access_token: boolean;
+};
+
+type ConfigResponse = {
+  connected: boolean;
+  config: StoredConfig | null;
+  reason?: string;
+  message?: string;
+  needs_reset?: boolean;
+  phone_info?: { verified_name?: string };
+};
 
 /* ─── Collapsible Section ────────────────────────────────────── */
 function Section({
@@ -113,7 +131,6 @@ function SetupStep({
 /* ─── Main Component ─────────────────────────────────────────── */
 
 export function WhatsAppConfig() {
-  const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -121,7 +138,7 @@ export function WhatsAppConfig() {
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [showToken, setShowToken] = useState(false);
-  const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
+  const [config, setConfig] = useState<StoredConfig | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
@@ -169,28 +186,35 @@ export function WhatsAppConfig() {
       ? `${window.location.origin}/api/whatsapp/webhook`
       : '';
 
-  const fetchConfig = useCallback(async (userId: string) => {
+  const fetchConfig = useCallback(async () => {
     setLoading(true);
     try {
-      // Load form values from Supabase (shows what's in DB)
-      const { data, error } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('user_id', userId)
-        .maybeSingle();
+      const res = await fetch('/api/whatsapp/config', {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      const payload = (await res.json()) as ConfigResponse;
 
-      if (error) {
-        console.error('Failed to load config row:', error);
+      if (!res.ok) {
+        if (res.status !== 401) {
+          toast.error(payload?.message || 'Failed to load WhatsApp configuration');
+        }
+        setConfig(null);
+        setConnectionStatus('disconnected');
+        setResetReason(null);
+        setStatusMessage('');
+        return;
       }
 
       const shouldHydrate = !isDirtyRef.current;
+      const nextConfig = payload.config ?? null;
 
-      if (data) {
-        setConfig(data);
+      if (nextConfig) {
+        setConfig(nextConfig);
         if (shouldHydrate) {
-          setPhoneNumberId(data.phone_number_id || '');
-          setWabaId(data.waba_id || '');
-          setAccessToken(MASKED_TOKEN);
+          setPhoneNumberId(nextConfig.phone_number_id || '');
+          setWabaId(nextConfig.waba_id || '');
+          setAccessToken(nextConfig.has_access_token ? MASKED_TOKEN : '');
           setVerifyToken('');
           setTokenEdited(false);
         }
@@ -205,29 +229,20 @@ export function WhatsAppConfig() {
         }
       }
 
-      // Then verify health via the API (decrypts token + pings Meta)
-      if (data) {
-        try {
-          const res = await fetch('/api/whatsapp/config', { method: 'GET' });
-          const payload = await res.json();
-
-          if (payload.connected) {
-            setConnectionStatus('connected');
-            setResetReason(null);
-            setStatusMessage('');
-          } else {
-            setConnectionStatus('disconnected');
-            setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
-            setStatusMessage(payload.message || '');
-          }
-        } catch (err) {
-          console.error('Health check failed:', err);
-          setConnectionStatus('disconnected');
-        }
-      } else {
-        setConnectionStatus('disconnected');
+      if (payload.connected) {
+        setConnectionStatus('connected');
         setResetReason(null);
         setStatusMessage('');
+      } else {
+        setConnectionStatus('disconnected');
+        setResetReason(
+          payload.needs_reset
+            ? 'token_corrupted'
+            : payload.reason === 'meta_api_error'
+              ? 'meta_api_error'
+              : null
+        );
+        setStatusMessage(payload.message || '');
       }
     } catch (err) {
       console.error('fetchConfig error:', err);
@@ -235,7 +250,7 @@ export function WhatsAppConfig() {
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -295,7 +310,7 @@ export function WhatsAppConfig() {
       setLoading(false);
       return;
     }
-    fetchConfig(user.id);
+    fetchConfig();
   }, [authLoading, user, fetchConfig, draftReady]);
 
   async function handleSave() {
@@ -357,7 +372,7 @@ export function WhatsAppConfig() {
       isDirtyRef.current = false;
       setIsDirty(false);
 
-      if (user) await fetchConfig(user.id);
+      if (user) await fetchConfig();
       notifyConfigUpdated();
     } catch (err) {
       console.error('Save error:', err);

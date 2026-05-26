@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, X, Loader2 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +29,6 @@ const PRESET_COLORS = [
 ];
 
 export function TagManager() {
-  const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -43,25 +41,24 @@ export function TagManager() {
   const [newTagName, setNewTagName] = useState('');
   const [selectedColor, setSelectedColor] = useState(PRESET_COLORS[3].value);
 
-  const fetchTags = useCallback(async (userId: string) => {
+  const fetchTags = useCallback(async () => {
     try {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from('tags')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: true });
+      const res = await fetch('/api/whatsapp/tags', { cache: 'no-store' });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload?.error || 'Failed to load tags');
+      }
 
-      if (error) throw error;
-      setTags(data || []);
+      setTags(payload.data || []);
     } catch (err) {
       console.error('Failed to fetch tags:', err);
       toast.error('Failed to load tags');
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -70,7 +67,7 @@ export function TagManager() {
       setLoading(false);
       return;
     }
-    fetchTags(user.id);
+    fetchTags();
   }, [authLoading, user, fetchTags]);
 
   async function handleCreate() {
@@ -86,21 +83,24 @@ export function TagManager() {
         return;
       }
 
-      const { error } = await supabase
-        .from('tags')
-        .insert({
-          user_id: user.id,
+      const res = await fetch('/api/whatsapp/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           name: newTagName.trim(),
           color: selectedColor,
-        });
-
-      if (error) throw error;
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to create tag');
+      }
 
       toast.success('Tag created successfully');
       setDialogOpen(false);
       setNewTagName('');
       setSelectedColor(PRESET_COLORS[3].value);
-      if (user) await fetchTags(user.id);
+      if (user) await fetchTags();
     } catch (err) {
       console.error('Create error:', err);
       toast.error('Failed to create tag');
@@ -119,12 +119,13 @@ export function TagManager() {
 
     try {
       setDeleting(true);
-      const { error } = await supabase
-        .from('tags')
-        .delete()
-        .eq('id', tagToDelete.id);
-
-      if (error) throw error;
+      const res = await fetch(`/api/whatsapp/tags/${tagToDelete.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to delete tag');
+      }
 
       toast.success('Tag deleted');
       setTags((prev) => prev.filter((t) => t.id !== tagToDelete.id));

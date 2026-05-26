@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/session'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
 /**
@@ -85,25 +86,19 @@ function normalizeStatus(
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
+    const session = await getSession()
+    if (!session?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // whatsapp_config holds waba_id + encrypted access_token.
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    const userId = String(session.id)
 
-    if (configError || !config) {
+    // whatsapp_config holds waba_id + encrypted access_token.
+    const config = await prisma.waWhatsappConfig.findUnique({
+      where: { user_id: userId },
+    })
+
+    if (!config) {
       return NextResponse.json(
         {
           error:
@@ -173,7 +168,7 @@ export async function POST() {
       const footer = (t.components ?? []).find((c) => c.type === 'FOOTER')
 
       const row = {
-        user_id: user.id,
+        user_id: userId,
         name: t.name,
         category: normalizeCategory(t.category),
         language: t.language,
@@ -182,53 +177,34 @@ export async function POST() {
         body_text: body?.text ?? '',
         footer_text: footer?.text ?? null,
         status: normalizeStatus(t.status),
-        updated_at: new Date().toISOString(),
       }
 
-      const { data: existing, error: lookupErr } = await supabase
-        .from('message_templates')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('name', t.name)
-        .eq('language', t.language)
-        .maybeSingle()
+      try {
+        const existing = await prisma.waMessageTemplate.findFirst({
+          where: {
+            user_id: userId,
+            name: t.name,
+            language: t.language,
+          },
+          select: { id: true },
+        })
 
-      if (lookupErr) {
+        if (existing?.id) {
+          await prisma.waMessageTemplate.update({
+            where: { id: existing.id },
+            data: row,
+          })
+          updated++
+        } else {
+          await prisma.waMessageTemplate.create({ data: row })
+          inserted++
+        }
+      } catch (err) {
         errors.push({
           name: t.name,
           language: t.language,
-          message: lookupErr.message,
+          message: err instanceof Error ? err.message : 'Unknown error',
         })
-        continue
-      }
-
-      if (existing?.id) {
-        const { error: updErr } = await supabase
-          .from('message_templates')
-          .update(row)
-          .eq('id', existing.id)
-        if (updErr) {
-          errors.push({
-            name: t.name,
-            language: t.language,
-            message: updErr.message,
-          })
-        } else {
-          updated++
-        }
-      } else {
-        const { error: insErr } = await supabase
-          .from('message_templates')
-          .insert(row)
-        if (insErr) {
-          errors.push({
-            name: t.name,
-            language: t.language,
-            message: insErr.message,
-          })
-        } else {
-          inserted++
-        }
       }
     }
 

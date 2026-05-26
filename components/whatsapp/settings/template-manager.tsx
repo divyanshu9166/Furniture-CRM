@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, Trash2, Loader2, RefreshCw } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -90,7 +89,6 @@ const COMMON_LANGUAGE_CODES = [
 ];
 
 export function TemplateManager() {
-  const supabase = createClient();
   const { user, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -100,25 +98,24 @@ export function TemplateManager() {
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
 
-  const fetchTemplates = useCallback(async (userId: string) => {
+  const fetchTemplates = useCallback(async () => {
     try {
       setLoading(true);
 
-      const { data, error } = await supabase
-        .from('message_templates')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
+      const res = await fetch('/api/whatsapp/templates', { cache: 'no-store' });
+      const payload = await res.json();
+      if (!res.ok) {
+        throw new Error(payload?.error || 'Failed to load templates');
+      }
 
-      if (error) throw error;
-      setTemplates(data || []);
+      setTemplates(payload.data || []);
     } catch (err) {
       console.error('Failed to fetch templates:', err);
       toast.error('Failed to load templates');
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -127,7 +124,7 @@ export function TemplateManager() {
       setLoading(false);
       return;
     }
-    fetchTemplates(user.id);
+    fetchTemplates();
   }, [authLoading, user, fetchTemplates]);
 
   async function handleSave() {
@@ -148,7 +145,6 @@ export function TemplateManager() {
       }
 
       const payload = {
-        user_id: user.id,
         name: form.name.trim(),
         category: form.category,
         language: form.language.trim() || 'en_US',
@@ -158,16 +154,20 @@ export function TemplateManager() {
         status: 'Draft' as const,
       };
 
-      const { error } = await supabase
-        .from('message_templates')
-        .insert(payload);
-
-      if (error) throw error;
+      const res = await fetch('/api/whatsapp/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to create template');
+      }
 
       toast.success('Template created successfully');
       setDialogOpen(false);
       setForm(emptyForm);
-      if (user) await fetchTemplates(user.id);
+      if (user) await fetchTemplates();
     } catch (err) {
       console.error('Save error:', err);
       toast.error('Failed to create template');
@@ -215,7 +215,7 @@ export function TemplateManager() {
           'Hit Meta pagination cap — more templates may exist. Contact support if this persists.',
         );
       }
-      await fetchTemplates(user.id);
+      await fetchTemplates();
     } catch (err) {
       console.error('Template sync error:', err);
       toast.error(
@@ -228,12 +228,13 @@ export function TemplateManager() {
 
   async function handleDelete(id: string) {
     try {
-      const { error } = await supabase
-        .from('message_templates')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      const res = await fetch(`/api/whatsapp/templates/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to delete template');
+      }
       toast.success('Template deleted');
       setTemplates((prev) => prev.filter((t) => t.id !== id));
     } catch (err) {
