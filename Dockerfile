@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 # ─── Stage 1: Dependencies ─────────────────────────────
 FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat
@@ -6,7 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 COPY prisma.config.ts ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --progress=false
 
 # ─── Stage 2: Builder ─────────────────────────────────
 FROM node:22-alpine AS builder
@@ -16,7 +18,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Generate Prisma client
-RUN npx prisma generate
+RUN --mount=type=cache,target=/root/.npm npx prisma generate
 
 # Build Next.js (standalone output)
 ENV NEXT_TELEMETRY_DISABLED=1

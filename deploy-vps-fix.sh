@@ -51,12 +51,9 @@ ENVEOF
 
 echo "✓ .env file created"
 echo ""
-echo "=== Stopping old containers ==="
-docker compose down || true
-
 echo ""
 echo "=== Building and starting services ==="
-docker compose up -d --build
+docker compose up -d --build --remove-orphans
 
 echo ""
 echo "=== Waiting for services (40s) ==="

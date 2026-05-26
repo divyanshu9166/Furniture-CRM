@@ -3,6 +3,15 @@ node_modules
 .git
 .gitignore
 *.md
+.venv
+.vscode
+.idea
+uploads
+wacrm-temp
+coverage
+*.log
+*.tmp
+*.cache
 .env
 .env.*
 docker-compose.yml
