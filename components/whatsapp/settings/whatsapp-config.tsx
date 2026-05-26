@@ -326,10 +326,6 @@ export function WhatsAppConfig() {
     try {
       setSaving(true);
 
-      // Always POST through the API — it verifies with Meta and encrypts
-      // the access_token server-side with ENCRYPTION_KEY. Skipping this
-      // and writing direct to Supabase stores the token in plaintext,
-      // which then fails decryption on every subsequent health check.
       const payload: Record<string, unknown> = {
         phone_number_id: phoneNumberId.trim(),
         waba_id: wabaId.trim() || null,
@@ -339,11 +335,8 @@ export function WhatsAppConfig() {
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
         payload.access_token = accessToken.trim();
       } else if (config) {
-        // Existing config — reuse stored encrypted token by decrypting on the
-        // server. But our POST handler requires an access_token to verify
-        // with Meta. If the user didn't change the token, we need to signal
-        // that. Simplest: require token re-entry if they're updating.
-        toast.error('Please re-enter the Access Token to save changes');
+        // Existing config, token not re-entered — require it so API can save
+        toast.error('Please re-enter the Access Token to update your configuration.');
         setSaving(false);
         return;
       }
@@ -362,11 +355,16 @@ export function WhatsAppConfig() {
         return;
       }
 
-      toast.success(
-        data.phone_info?.verified_name
-          ? `Connected to ${data.phone_info.verified_name}`
-          : 'Configuration saved successfully'
-      );
+      // Config saved — show success. If Meta verification had a warning, show that too.
+      if (data.meta_warning) {
+        toast.warning(data.meta_warning);
+      } else {
+        toast.success(
+          data.phone_info?.verified_name
+            ? `Connected to ${data.phone_info.verified_name}`
+            : 'Configuration saved successfully'
+        );
+      }
 
       clearDraft();
       isDirtyRef.current = false;

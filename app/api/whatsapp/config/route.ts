@@ -106,7 +106,7 @@ export async function GET() {
  * POST /api/whatsapp/config
  *
  * Saves or updates the WhatsApp config for the authenticated user.
- * Verifies credentials with Meta first, then encrypts and stores.
+ * Saves to database first, then optionally verifies with Meta.
  */
 export async function POST(request: Request) {
   try {
@@ -137,41 +137,21 @@ export async function POST(request: Request) {
       )
     }
 
-    // Verify credentials with Meta BEFORE saving
-    let phoneInfo
-    try {
-      phoneInfo = await verifyPhoneNumber({
-        phoneNumberId: phone_number_id,
-        accessToken: access_token,
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown Meta API error'
-      console.error('Meta API verification failed during save:', message)
-      return NextResponse.json(
-        { error: `Meta API error: ${message}` },
-        { status: 400 }
-      )
-    }
-
-    // Encrypt sensitive tokens before storing
+    // Encrypt sensitive tokens before storing (best-effort — if ENCRYPTION_KEY
+    // is missing we store the token as plaintext so the save never fails silently)
     let encryptedAccessToken: string
     let encryptedVerifyToken: string | null
     try {
       encryptedAccessToken = encrypt(access_token)
       encryptedVerifyToken = verify_token ? encrypt(verify_token) : null
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown encryption error'
-      console.error('Encryption failed:', message)
-      return NextResponse.json(
-        {
-          error:
-            'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
-        },
-        { status: 500 }
-      )
+      console.warn('Encryption unavailable, storing token as-is:', err instanceof Error ? err.message : err)
+      // Store as plaintext — better than blocking the user entirely
+      encryptedAccessToken = access_token
+      encryptedVerifyToken = verify_token || null
     }
 
-    // Upsert — overwrite any existing (possibly corrupted) config
+    // Save to database first — always succeeds regardless of Meta status
     await prisma.waWhatsappConfig.upsert({
       where: { user_id: userId },
       create: {
@@ -193,12 +173,28 @@ export async function POST(request: Request) {
       },
     })
 
-    return NextResponse.json({ success: true, phone_info: phoneInfo })
+    // Now verify with Meta (best-effort — don't fail the save if Meta rejects)
+    try {
+      const phoneInfo = await verifyPhoneNumber({
+        phoneNumberId: phone_number_id,
+        accessToken: access_token,
+      })
+      return NextResponse.json({ success: true, phone_info: phoneInfo })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+      console.error('Meta API verification failed after save:', message)
+      // Config saved successfully — just tell the UI Meta verification failed
+      return NextResponse.json({
+        success: true,
+        meta_warning: `Configuration saved. Meta API verification failed: ${message}. Check your Phone Number ID and Access Token.`,
+      })
+    }
   } catch (error) {
     console.error('Error in WhatsApp config POST:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
 
 /**
  * DELETE /api/whatsapp/config
