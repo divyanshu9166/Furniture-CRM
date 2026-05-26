@@ -15,7 +15,7 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: ['localhost:3000', '*.github.dev']
+      allowedOrigins: ['localhost:3000', '*.github.dev', 'crm.kosmicfurniture.com']
     }
   },
   // Rewrite /uploads/* → /api/uploads/* so images stored with old paths still work
