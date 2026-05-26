@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db'
+import { getSession } from '@/lib/session'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -50,23 +51,35 @@ interface NewRecipient {
   params?: string[]
 }
 
+export async function GET() {
+  const session = await getSession()
+  if (!session?.id) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const userId = String(session.id)
+
+  try {
+    const broadcasts = await prisma.waBroadcast.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+    })
+    return NextResponse.json({ broadcasts })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch broadcasts'
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
+    const session = await getSession()
+    if (!session?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+    const userId = String(session.id)
 
-    // Per-user broadcast budget. Note: this limits how often a user
-    // can *start* a campaign, not how many messages go out inside
-    // one — the fan-out loop below runs without additional gating.
-    const limit = checkRateLimit(`broadcast:${user.id}`, RATE_LIMITS.broadcast)
+    // Per-user broadcast budget.
+    const limit = checkRateLimit(`broadcast:${userId}`, RATE_LIMITS.broadcast)
     if (!limit.success) {
       return rateLimitResponse(limit)
     }
@@ -109,18 +122,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('user_id', user.id)
-      .single()
+    const config = await prisma.waWhatsappConfig.findUnique({
+      where: { user_id: userId },
+    })
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
-        {
-          error:
-            'WhatsApp not configured. Please set up your WhatsApp integration first.',
-        },
+        { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
         { status: 400 }
       )
     }

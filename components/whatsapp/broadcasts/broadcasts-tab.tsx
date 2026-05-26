@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Broadcast } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -65,18 +64,17 @@ export function BroadcastsTab() {
 
   async function fetchBroadcasts() {
     try {
-      const supabase = createClient();
-      const { data, error: fetchError } = await supabase
-        .from('broadcasts')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setBroadcasts(data ?? []);
+      const res = await fetch('/api/whatsapp/broadcast', { cache: 'no-store' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body?.error ?? 'Failed to load broadcasts')
+      }
+      const body = await res.json()
+      setBroadcasts(body.broadcasts ?? [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load broadcasts');
+      setError(err instanceof Error ? err.message : 'Failed to load broadcasts')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
