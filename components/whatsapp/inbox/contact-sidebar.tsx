@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
@@ -34,41 +33,30 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
 
-    const supabase = createClient();
-
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
-      supabase
-        .from("deals")
-        .select("*, stage:pipeline_stages(*)")
-        .eq("contact_id", contact.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("contact_notes")
-        .select("*")
-        .eq("contact_id", contact.id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("contact_tags")
-        .select("id, tag_id, tags(*)")
-        .eq("contact_id", contact.id),
+    // Fetch deals, notes, and contact details (with tags) in parallel
+    const [dealsRes, notesRes, contactRes] = await Promise.all([
+      fetch(`/api/whatsapp/contacts/${contact.id}/deals`, { cache: 'no-store' }),
+      fetch(`/api/whatsapp/contacts/${contact.id}/notes`, { cache: 'no-store' }),
+      fetch(`/api/whatsapp/contacts/${contact.id}`, { cache: 'no-store' }),
     ]);
 
-    if (dealsRes.data) setDeals(dealsRes.data);
-    if (notesRes.data) setNotes(notesRes.data);
-    if (tagsRes.data) {
-      const mapped = tagsRes.data
-        .filter((ct: Record<string, unknown>) => ct.tags)
-        .map((ct: Record<string, unknown>) => ({
-          ...(ct.tags as Tag),
-          contact_tag_id: ct.id as string,
-        }));
-      setTags(mapped);
+    if (dealsRes.ok) {
+      const body = await dealsRes.json();
+      setDeals(body.deals ?? []);
+    }
+    if (notesRes.ok) {
+      const body = await notesRes.json();
+      setNotes(body.notes ?? []);
+    }
+    if (contactRes.ok) {
+      const body = await contactRes.json();
+      // Tags come back as contact.tags from the contact detail endpoint
+      const rawTags = body.contact?.tags ?? [];
+      setTags(rawTags);
     }
   }, [contact]);
 
-  // Load on contact change. setContactData/setTags run inside async
-  // Supabase callbacks, not synchronously in the effect body.
+  // Load on contact change.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContactData();
@@ -88,25 +76,18 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     if (!contact || !newNote.trim()) return;
     setAddingNote(true);
 
-    const supabase = createClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const user = session?.user;
+    const res = await fetch(`/api/whatsapp/contacts/${contact.id}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note_text: newNote.trim() }),
+    });
 
-    const { data, error } = await supabase
-      .from("contact_notes")
-      .insert({
-        contact_id: contact.id,
-        user_id: user?.id,
-        note_text: newNote.trim(),
-      })
-      .select()
-      .single();
-
-    if (!error && data) {
-      setNotes((prev) => [data, ...prev]);
-      setNewNote("");
+    if (res.ok) {
+      const body = await res.json();
+      if (body.note) {
+        setNotes((prev) => [body.note, ...prev]);
+        setNewNote('');
+      }
     }
     setAddingNote(false);
   }, [contact, newNote]);
