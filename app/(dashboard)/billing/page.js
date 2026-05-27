@@ -373,7 +373,9 @@ export default function BillingPage() {
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
 
-  const filteredProducts = products.filter(p =>
+  const saleProducts = products.filter(p => p.category !== 'Raw Material');
+
+  const filteredProducts = saleProducts.filter(p =>
     p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
     (p.sku || '').toLowerCase().includes(productSearch.toLowerCase()) ||
     (p.category || '').toLowerCase().includes(productSearch.toLowerCase())
@@ -1462,11 +1464,11 @@ export default function BillingPage() {
                     <ShoppingBag className="w-4 h-4 text-accent" /> Quick Select
                   </h3>
                   <span className="text-[10px] uppercase tracking-wider text-muted font-semibold">
-                    {products.filter(p => p.stock > 0).length} products available
+                    {saleProducts.filter(p => p.stock > 0).length} products available
                   </span>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
-                  {products.filter(p => p.stock > 0).slice(0, 18).map(p => {
+                  {saleProducts.filter(p => p.stock > 0).slice(0, 18).map(p => {
                     const inCart = posItems.find(i => i.id === p.id);
                     return (
                       <button key={p.id} onClick={() => addToPOS(p)}
@@ -1495,7 +1497,7 @@ export default function BillingPage() {
                     );
                   })}
                 </div>
-                {products.filter(p => p.stock > 0).length === 0 && (
+                {saleProducts.filter(p => p.stock > 0).length === 0 && (
                   <div className="text-center py-10 text-muted">
                     <Package className="w-10 h-10 mx-auto mb-2 opacity-20" />
                     <p className="text-sm">No products in stock</p>

@@ -213,6 +213,9 @@ export default function ManufacturingPage() {
     templateId: '',
   })
   const [bomItemSearch, setBomItemSearch] = useState({})
+  const [activeBomItemPicker, setActiveBomItemPicker] = useState(null)
+  const [finishedProductSearch, setFinishedProductSearch] = useState('')
+  const [showFinishedProductPicker, setShowFinishedProductPicker] = useState(false)
 
   // Production form
   const [prodForm, setProdForm] = useState({
@@ -236,6 +239,32 @@ export default function ManufacturingPage() {
 
   // Template form
   const [templateForm, setTemplateForm] = useState({ name: '', description: '', steps: [] })
+
+  const finishedProducts = useMemo(() => {
+    return products.filter(p => p.category !== 'Raw Material')
+  }, [products])
+
+  const selectedFinishedProduct = useMemo(() => {
+    return finishedProducts.find(p => String(p.id) === String(bomForm.finishedProductId)) || null
+  }, [finishedProducts, bomForm.finishedProductId])
+
+  const filteredFinishedProducts = useMemo(() => {
+    const search = finishedProductSearch.toLowerCase().trim()
+    if (!search) return finishedProducts.slice(0, 30)
+    return finishedProducts
+      .filter(p => p.name.toLowerCase().includes(search) || (p.sku || '').toLowerCase().includes(search))
+      .slice(0, 30)
+  }, [finishedProducts, finishedProductSearch])
+
+  const rawMaterialOptions = useMemo(() => {
+    return products.filter(p => p.category === 'Raw Material')
+  }, [products])
+
+  const getPrimaryImage = useCallback((image) => {
+    if (!image) return null
+    const first = String(image).split(',')[0]?.trim()
+    return first && first.includes('/') ? first : null
+  }, [])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -2238,10 +2267,55 @@ export default function ManufacturingPage() {
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Finished Product *</label>
-              <select value={bomForm.finishedProductId} onChange={e => setBomForm(p => ({ ...p, finishedProductId: e.target.value }))} className={SEL}>
-                <option value="">Select Product</option>
-                {products.filter(p => p.category !== 'Raw Material').map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
-              </select>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={showFinishedProductPicker ? finishedProductSearch : (selectedFinishedProduct ? `${selectedFinishedProduct.name} (${selectedFinishedProduct.sku})` : '')}
+                  onFocus={() => {
+                    setShowFinishedProductPicker(true)
+                    setFinishedProductSearch('')
+                  }}
+                  onChange={e => {
+                    setShowFinishedProductPicker(true)
+                    setFinishedProductSearch(e.target.value)
+                  }}
+                  onBlur={() => setTimeout(() => setShowFinishedProductPicker(false), 150)}
+                  className={INP}
+                  placeholder="Search finished products by name or SKU..."
+                />
+                {showFinishedProductPicker && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-50 max-h-56 overflow-y-auto">
+                    {filteredFinishedProducts.length > 0 ? filteredFinishedProducts.map(p => (
+                      <button
+                        key={p.id}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setBomForm(prev => ({ ...prev, finishedProductId: String(p.id) }))
+                          setShowFinishedProductPicker(false)
+                          setFinishedProductSearch('')
+                        }}
+                        className="w-full text-left px-3 py-2 hover:bg-accent/10 border-b border-border/30 last:border-0"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-md bg-surface-hover overflow-hidden flex items-center justify-center flex-shrink-0">
+                            {getPrimaryImage(p.image) ? (
+                              <img src={getPrimaryImage(p.image)} alt={p.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Package className="w-4 h-4 text-muted/40" />
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium text-foreground truncate">{p.name}</div>
+                            <div className="text-[10px] text-muted">SKU: {p.sku}</div>
+                          </div>
+                        </div>
+                      </button>
+                    )) : (
+                      <div className="px-3 py-2 text-xs text-muted">No finished products found</div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted mb-1 block">Version</label>
@@ -2275,21 +2349,26 @@ export default function ManufacturingPage() {
                           type="text"
                           placeholder="Type material name or SKU..."
                           value={bomItemSearch[i] || ''}
-                          onChange={e => setBomItemSearch(s => ({ ...s, [i]: e.target.value }))}
+                          onFocus={() => setActiveBomItemPicker(i)}
+                          onBlur={() => setTimeout(() => setActiveBomItemPicker(prev => (prev === i ? null : prev)), 150)}
+                          onChange={e => {
+                            setActiveBomItemPicker(i)
+                            setBomItemSearch(s => ({ ...s, [i]: e.target.value }))
+                          }}
                           className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                         />
-                        {(bomItemSearch[i] || '').length > 0 && (
+                        {activeBomItemPicker === i && (
                           <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
                             {(() => {
                               const search = (bomItemSearch[i] || '').toLowerCase()
-                              const filtered = products.filter(p => 
-                                p.category === 'Raw Material' && 
+                              const filtered = rawMaterialOptions.filter(p => 
                                 (p.name.toLowerCase().includes(search) || p.sku.toLowerCase().includes(search))
                               )
                               return filtered.length > 0 ? (
                                 filtered.map(p => (
                                   <button
                                     key={p.id}
+                                    onMouseDown={(e) => e.preventDefault()}
                                     onClick={() => {
                                       const v = [...bomForm.items]
                                       v[i].rawMaterialId = p.id
@@ -2297,10 +2376,22 @@ export default function ManufacturingPage() {
                                       if (p.costPrice) v[i].unitCost = p.costPrice
                                       setBomForm(f => ({ ...f, items: v }))
                                       setBomItemSearch(s => ({ ...s, [i]: '' }))
+                                      setActiveBomItemPicker(null)
                                     }}
                                     className="w-full text-left px-3 py-2 text-xs text-foreground hover:bg-accent/10 border-b border-border/30 last:border-0">
-                                    <div className="font-medium">{p.name}</div>
-                                    <div className="text-muted text-[10px]">SKU: {p.sku} • UOM: {p.unitOfMeasure}</div>
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-8 h-8 rounded-md bg-surface-hover overflow-hidden flex items-center justify-center flex-shrink-0">
+                                        {getPrimaryImage(p.image) ? (
+                                          <img src={getPrimaryImage(p.image)} alt={p.name} className="w-full h-full object-cover" />
+                                        ) : (
+                                          <Package className="w-4 h-4 text-muted/40" />
+                                        )}
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="font-medium truncate">{p.name}</div>
+                                        <div className="text-muted text-[10px]">SKU: {p.sku} • UOM: {p.unitOfMeasure}</div>
+                                      </div>
+                                    </div>
                                   </button>
                                 ))
                               ) : (
@@ -2309,11 +2400,21 @@ export default function ManufacturingPage() {
                             })()}
                           </div>
                         )}
-                        {item.rawMaterialId && !bomItemSearch[i] && (
-                          <div className="text-xs text-muted mt-1">
-                            Selected: {products.find(p => String(p.id) === String(item.rawMaterialId))?.name} ({products.find(p => String(p.id) === String(item.rawMaterialId))?.sku})
-                          </div>
-                        )}
+                        {item.rawMaterialId && !bomItemSearch[i] && (() => {
+                          const selectedMaterial = rawMaterialOptions.find(p => String(p.id) === String(item.rawMaterialId))
+                          return selectedMaterial ? (
+                            <div className="mt-1 flex items-center gap-2 text-xs text-muted">
+                              <div className="w-6 h-6 rounded bg-surface-hover overflow-hidden flex items-center justify-center flex-shrink-0">
+                                {getPrimaryImage(selectedMaterial.image) ? (
+                                  <img src={getPrimaryImage(selectedMaterial.image)} alt={selectedMaterial.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Package className="w-3.5 h-3.5 text-muted/40" />
+                                )}
+                              </div>
+                              <span>Selected: {selectedMaterial.name} ({selectedMaterial.sku})</span>
+                            </div>
+                          ) : null
+                        })()}
                       </div>
                     </div>
                     <button onClick={() => {

@@ -318,7 +318,54 @@ export default function CallsPage() {
       </div>
 
       {/* Call Logs Table */}
-      <div className="glass-card overflow-hidden">
+      {/* Mobile-friendly card list (visible on small screens) */}
+      <div className="space-y-3 md:hidden">
+        {filteredLogs.map((call) => (
+          <div key={call.id} className="glass-card p-4" onClick={() => setSelectedCall(call)}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  {getDirectionIcon(call.direction)}
+                  <p className="text-sm font-semibold text-foreground truncate">{call.customer}</p>
+                </div>
+                <p className="text-xs text-muted truncate mt-0.5">{call.phone}</p>
+              </div>
+              {getStatusBadge(call.status)}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+              <span>{call.date}</span>
+              <span>•</span>
+              <span>{call.time}</span>
+              <span>•</span>
+              <span>{call.duration}</span>
+            </div>
+            <p className="text-xs text-muted mt-2 line-clamp-2">{call.purpose}</p>
+            <div className="mt-3 flex items-center justify-between">
+              {getOutcomeBadge(call.outcome)}
+              <div className="flex items-center gap-1">
+                {call.recording && (
+                  <button
+                    className="p-1.5 rounded-lg bg-surface-hover text-muted hover:text-accent transition-colors"
+                    title="Play recording"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  className="p-1.5 rounded-lg bg-surface-hover text-muted hover:text-emerald-700 transition-colors"
+                  title="Call back"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden md:block glass-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="crm-table">
             <thead>
@@ -1175,14 +1222,14 @@ export default function CallsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Page Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Call Center</h1>
           <p className="text-sm text-muted mt-1">
             Manage inbound & outbound calls, transcripts, and appointments
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
           <button
             onClick={refreshLogs}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-muted hover:text-foreground transition-colors"
@@ -1205,8 +1252,9 @@ export default function CallsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-surface rounded-xl border border-border w-fit">
-        {TABS.map((tab) => {
+      <div className="bg-surface rounded-xl border border-border p-1 w-full overflow-x-auto">
+        <div className="flex items-center gap-1 min-w-max">
+          {TABS.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
@@ -1338,9 +1386,10 @@ export default function CallsPage() {
                 <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
                   <Play className="w-4 h-4" />
                   Play Recording
-                </button>
-              )}
-              <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
+                  </button>
+              })}
+            </div>
+          </div>
                 <Phone className="w-4 h-4" />
                 Call Again
               </button>
