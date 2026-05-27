@@ -154,7 +154,7 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             resultsByPhone.set(r.phone, r);
           }
 
-          const updates = [];
+          const updates: any[] = [];
 
           for (const recipient of apiRecipients) {
             const phone = recipient.phone;

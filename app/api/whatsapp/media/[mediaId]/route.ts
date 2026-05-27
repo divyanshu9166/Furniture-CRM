@@ -23,7 +23,7 @@ export async function GET(
 
     // Fetch WhatsApp config from Prisma (replaces supabase.from('whatsapp_config'))
     const config = await prisma.waWhatsappConfig.findUnique({
-      where: { user_id: session.id },
+      where: { user_id: session.user.id },
     })
 
     if (!config) {

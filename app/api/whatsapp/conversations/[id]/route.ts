@@ -71,9 +71,11 @@ export async function PATCH(
 
         if (updatedConv) {
             import('@/lib/redis').then(({ publishEvent }) => {
-                publishEvent('inbox-realtime', 'conversation_update', {
+                publishEvent('inbox-realtime', {
+                    type: 'conversation_update',
+                    userId: updatedConv.user_id,
                     conversationId,
-                    ...updatedConv
+                    payload: updatedConv
                 }).catch(() => {})
             })
         }

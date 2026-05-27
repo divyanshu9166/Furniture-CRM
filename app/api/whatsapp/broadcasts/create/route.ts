@@ -128,7 +128,7 @@ export async function POST(request: Request) {
     // Group custom values by contact
     const customValueIndex = customValues.reduce((acc, curr) => {
       if (!acc[curr.contact_id]) acc[curr.contact_id] = {}
-      acc[curr.contact_id][curr.custom_field_id] = curr.value
+      acc[curr.contact_id][curr.custom_field_id] = curr.value || ''
       return acc
     }, {} as Record<string, Record<string, string>>)
 

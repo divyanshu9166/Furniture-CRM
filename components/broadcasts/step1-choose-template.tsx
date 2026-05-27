@@ -30,7 +30,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         if (!res.ok) throw new Error('Failed to load templates');
         const data = await res.json();
         const allTemplates: MessageTemplate[] = data?.data ?? [];
-        setTemplates(allTemplates.filter(t => t.status === 'Approved' || t.status === 'APPROVED'));
+        setTemplates(allTemplates.filter(t => t.status === 'Approved'));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load templates');
       } finally {

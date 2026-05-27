@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     }
 
     if (body?.buttons !== undefined) {
-        templateData.buttons = body.buttons
+        templateData.buttons = body.buttons as any
     }
 
     const created = await prisma.waMessageTemplate.create({

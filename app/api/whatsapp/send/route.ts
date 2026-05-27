@@ -262,10 +262,17 @@ export async function POST(request: Request) {
     })
 
     import('@/lib/redis').then(({ publishEvent }) => {
-      publishEvent('inbox-realtime', 'new_message', { message: messageRecord }).catch(() => {})
-      publishEvent('inbox-realtime', 'conversation_update', {
+      publishEvent('inbox-realtime', {
+        type: 'new_message',
+        userId,
         conversationId: conversation_id,
-        ...updatedConversation,
+        payload: { message: messageRecord }
+      }).catch(() => {})
+      publishEvent('inbox-realtime', {
+        type: 'conversation_update',
+        userId,
+        conversationId: conversation_id,
+        payload: updatedConversation
       }).catch(() => {})
     })
 

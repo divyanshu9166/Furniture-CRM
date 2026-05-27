@@ -482,7 +482,7 @@ async function processMessage(
   })
   const isFirstInboundMessage = priorCustomerMsgCount === 0
 
-  let createdMessage: { id: string; conversation_id: string; sender_type: string; content_type: string; content_text: string | null; media_url: string | null; message_id: string; status: string; created_at: Date; reply_to_message_id: string | null } | null = null
+  let createdMessage: any = null
 
   try {
     createdMessage = await prisma.waMessage.create({
@@ -504,7 +504,7 @@ async function processMessage(
   }
 
   // Update conversation and capture the result for the publish event
-  let updatedConversation: { id: string; last_message_text: string | null; last_message_at: Date; unread_count: number } | null = null
+  let updatedConversation: any = null
   try {
     updatedConversation = await prisma.waConversation.update({
       where: { id: conversation.id },
