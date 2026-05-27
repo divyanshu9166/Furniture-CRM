@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getSession } from '@/lib/session'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import type { AutomationTriggerType } from '@/types'
 
@@ -9,9 +9,9 @@ import type { AutomationTriggerType } from '@/types'
  * so RLS-safe data remains per-user.
  */
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSession()
+  if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const userId = String(session.id)
 
   const body = await request.json().catch(() => null)
   if (!body?.trigger_type) {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
   }
 
   await runAutomationsForTrigger({
-    userId: user.id,
+    userId,
     triggerType: body.trigger_type as AutomationTriggerType,
     contactId: body.contact_id ?? null,
     context: body.context ?? {},

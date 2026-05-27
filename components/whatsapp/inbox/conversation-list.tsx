@@ -93,11 +93,9 @@ export function ConversationList({
     };
 
     fetchConversations();
-    const interval = setInterval(fetchConversations, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
   }, []);
 

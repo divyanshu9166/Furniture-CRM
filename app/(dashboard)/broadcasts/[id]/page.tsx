@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 import { Broadcast, BroadcastRecipient, RecipientStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -153,25 +152,13 @@ export default function BroadcastDetailPage() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const supabase = createClient();
-
-        const { data: bc, error: bcError } = await supabase
-          .from('broadcasts')
-          .select('*')
-          .eq('id', broadcastId)
-          .single();
-
-        if (bcError) throw bcError;
-        setBroadcast(bc);
-
-        const { data: recs, error: recsError } = await supabase
-          .from('broadcast_recipients')
-          .select('*, contact:contacts(*)')
-          .eq('broadcast_id', broadcastId)
-          .order('created_at', { ascending: false });
-
-        if (recsError) throw recsError;
-        setRecipients(recs ?? []);
+        const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}`);
+        if (!res.ok) {
+          throw new Error('Failed to load broadcast');
+        }
+        const data = await res.json();
+        setBroadcast(data.broadcast);
+        setRecipients(data.recipients ?? []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load broadcast');
       } finally {
@@ -219,21 +206,20 @@ export default function BroadcastDetailPage() {
 
   async function handleDelete() {
     setDeleting(true);
-    const supabase = createClient();
-    // broadcast_recipients cascades on broadcasts.id (migration 001), so a
-    // single delete is sufficient. The aggregate trigger in migration 003
-    // fires on broadcast_recipients row changes, not on a cascaded drop.
-    const { error: delErr } = await supabase
-      .from('broadcasts')
-      .delete()
-      .eq('id', broadcastId);
-    setDeleting(false);
-    if (delErr) {
-      toast.error(`Failed to delete: ${delErr.message}`);
-      return;
+    try {
+      const res = await fetch(`/api/whatsapp/broadcasts/${broadcastId}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        throw new Error('Failed to delete broadcast');
+      }
+      toast.success('Broadcast deleted');
+      router.push('/broadcasts');
+    } catch (err: any) {
+      toast.error(`Failed to delete: ${err.message}`);
+    } finally {
+      setDeleting(false);
     }
-    toast.success('Broadcast deleted');
-    router.push('/broadcasts');
   }
 
   if (loading) {

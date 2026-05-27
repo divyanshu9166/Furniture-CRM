@@ -46,7 +46,9 @@ function createRedisClient(): Redis {
     retryStrategy: (times) => Math.min(times * 200, 30_000),
   })
 
-  client.on('error', (err) => {
+  client.on('error', (err: any) => {
+    // Suppress ECONNREFUSED logs during build to keep output clean
+    if (err?.code === 'ECONNREFUSED') return
     // Log but never throw — a Redis hiccup must not crash the Next.js process.
     console.error('[redis] client error:', err.message)
   })

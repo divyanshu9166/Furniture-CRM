@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './admin-client'
+import { prisma } from '@/lib/db'
 
 // ------------------------------------------------------------
 // Builder payload → flat rows for automation_steps.
@@ -37,13 +37,14 @@ export async function replaceSteps(
   automationId: string,
   input: BuilderStepInput[],
 ): Promise<string | null> {
-  const admin = supabaseAdmin()
-  const { error: delErr } = await admin
-    .from('automation_steps')
-    .delete()
-    .eq('automation_id', automationId)
-  if (delErr) return delErr.message
-  return insertSteps(automationId, input)
+  try {
+    await prisma.waAutomationStep.deleteMany({
+      where: { automation_id: automationId }
+    })
+    return await insertSteps(automationId, input)
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Unknown error during replaceSteps'
+  }
 }
 
 export async function insertSteps(
@@ -83,8 +84,14 @@ export async function insertSteps(
   walk(tree, null, null)
 
   if (rows.length === 0) return null
-  const { error } = await supabaseAdmin().from('automation_steps').insert(rows)
-  return error?.message ?? null
+  try {
+    await prisma.waAutomationStep.createMany({
+      data: rows
+    })
+    return null
+  } catch (error) {
+    return error instanceof Error ? error.message : 'Unknown error during insertSteps'
+  }
 }
 
 function seedsToTree(seeds: BuilderStepInput[]): BuilderStepInput[] {
@@ -116,31 +123,18 @@ export interface BuilderStepNode extends BuilderStepInput {
   branches: { yes: BuilderStepNode[]; no: BuilderStepNode[] }
 }
 
-interface DbStep {
-  id: string
-  parent_step_id: string | null
-  branch: 'yes' | 'no' | null
-  step_type: string
-  step_config: Record<string, unknown>
-  position: number
-}
-
 export async function loadStepsTree(automationId: string): Promise<BuilderStepNode[]> {
-  const { data, error } = await supabaseAdmin()
-    .from('automation_steps')
-    .select('*')
-    .eq('automation_id', automationId)
-    .order('position', { ascending: true })
-
-  if (error) throw new Error(error.message)
-  const rows = (data ?? []) as DbStep[]
+  const rows = await prisma.waAutomationStep.findMany({
+    where: { automation_id: automationId },
+    orderBy: { position: 'asc' }
+  })
 
   const byId = new Map<string, BuilderStepNode>()
   for (const row of rows) {
     byId.set(row.id, {
       id: row.id,
       step_type: row.step_type,
-      step_config: row.step_config ?? {},
+      step_config: (row.step_config as Record<string, unknown>) ?? {},
       branches: { yes: [], no: [] },
     })
   }

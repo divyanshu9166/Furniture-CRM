@@ -8,7 +8,6 @@ import {
     useState,
     type ReactNode,
 } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 interface AuthUser {
     id: string;
@@ -43,105 +42,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [profile, setProfile] = useState<Profile | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const fetchProfile = useCallback(async (userId: string) => {
-        const supabase = createClient();
+    const fetchProfile = useCallback(async () => {
         try {
-            const { data, error } = await supabase
-                .from("profiles")
-                .select("id, user_id, full_name, email, avatar_url, role")
-                .eq("user_id", userId)
-                .maybeSingle();
-
-            if (error) {
-                console.error("[useAuth] fetchProfile error:", {
-                    message: error.message,
-                    details: error.details,
-                    hint: error.hint,
-                    code: error.code,
-                });
-                return;
+            const res = await fetch("/api/auth/me");
+            if (res.ok) {
+                const data = await res.json();
+                setUser(data.user ?? null);
+                setProfile(data.profile ?? null);
+            } else {
+                setUser(null);
+                setProfile(null);
             }
-
-            if (data) setProfile(data as Profile);
         } catch (err) {
             console.error("[useAuth] fetchProfile threw:", err);
+            setUser(null);
+            setProfile(null);
+        } finally {
+            setLoading(false);
         }
     }, []);
 
     useEffect(() => {
-        const supabase = createClient();
         let mounted = true;
 
-        const safetyTimer = setTimeout(() => {
-            if (mounted) {
-                console.warn("[useAuth] getSession() timed out after 3s");
-                setLoading(false);
-            }
-        }, 3000);
-
         const init = async () => {
-            try {
-                const {
-                    data: { session },
-                    error,
-                } = await supabase.auth.getSession();
-
-                if (error) console.error("[useAuth] getSession error:", error.message);
-
-                if (!mounted) return;
-                const currentUser = (session?.user ?? null) as AuthUser | null;
-                setUser(currentUser);
-
-                if (currentUser) {
-                    fetchProfile(currentUser.id);
-                } else {
-                    setProfile(null);
-                }
-            } catch (err) {
-                console.error("[useAuth] init threw:", err);
-            } finally {
-                if (mounted) setLoading(false);
-                clearTimeout(safetyTimer);
-            }
+            await fetchProfile();
         };
 
         init();
 
-        const {
-            data: { subscription },
-        } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (!mounted) return;
-            const currentUser = (session?.user ?? null) as AuthUser | null;
-            setUser(currentUser);
-
-            if (currentUser) {
-                fetchProfile(currentUser.id);
-            } else {
-                setProfile(null);
-            }
-
-            setLoading(false);
-        });
-
         return () => {
             mounted = false;
-            clearTimeout(safetyTimer);
-            subscription.unsubscribe();
         };
     }, [fetchProfile]);
 
     const signOut = useCallback(async () => {
-        const supabase = createClient();
-        await supabase.auth.signOut();
+        await fetch("/api/auth/logout", { method: "POST" });
         setUser(null);
         setProfile(null);
         window.location.href = "/login";
     }, []);
 
     const refreshProfile = useCallback(async () => {
-        if (!user?.id) return;
-        await fetchProfile(user.id);
-    }, [user?.id, fetchProfile]);
+        await fetchProfile();
+    }, [fetchProfile]);
 
     return (
         <AuthContext.Provider

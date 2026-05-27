@@ -253,12 +253,20 @@ export async function POST(request: Request) {
     })
 
     // Update conversation
-    await prisma.waConversation.update({
+    const updatedConversation = await prisma.waConversation.update({
       where: { id: conversation_id },
       data: {
         last_message_text: content_text || `[${message_type}]`,
         last_message_at: new Date(),
       },
+    })
+
+    import('@/lib/redis').then(({ publishEvent }) => {
+      publishEvent('inbox-realtime', 'new_message', { message: messageRecord }).catch(() => {})
+      publishEvent('inbox-realtime', 'conversation_update', {
+        conversationId: conversation_id,
+        ...updatedConversation,
+      }).catch(() => {})
     })
 
     return NextResponse.json({

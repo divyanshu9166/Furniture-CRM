@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Contact, CustomField, MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,38 +66,37 @@ export function Step3Personalize({
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const supabase = createClient();
-      const [fieldsRes, contactRes] = await Promise.all([
-        supabase.from('custom_fields').select('*').order('field_name'),
-        supabase
-          .from('contacts')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-      ]);
-      if (cancelled) return;
+      try {
+        const [fieldsRes, contactRes] = await Promise.all([
+          fetch('/api/whatsapp/custom-fields'),
+          fetch('/api/whatsapp/contacts/preview')
+        ]);
+        
+        if (cancelled) return;
 
-      setCustomFields(fieldsRes.data ?? []);
-      setLoadingFields(false);
-
-      const contact = contactRes.data ?? null;
-      setFirstContact(contact);
-
-      if (contact) {
-        const { data: customVals } = await supabase
-          .from('contact_custom_values')
-          .select('custom_field_id, value')
-          .eq('contact_id', contact.id);
-        if (!cancelled) {
-          const map = new Map<string, string>();
-          for (const row of customVals ?? []) {
-            map.set(row.custom_field_id, row.value ?? '');
-          }
-          setFirstContactCustomValues(map);
+        if (fieldsRes.ok) {
+          const { customFields } = await fieldsRes.json();
+          setCustomFields(customFields ?? []);
         }
+        setLoadingFields(false);
+
+        if (contactRes.ok) {
+          const { contact, customValues } = await contactRes.json();
+          setFirstContact(contact ?? null);
+
+          if (contact && customValues) {
+            const map = new Map<string, string>();
+            for (const row of customValues) {
+              map.set(row.custom_field_id, row.value ?? '');
+            }
+            setFirstContactCustomValues(map);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load preview data:', err);
+      } finally {
+        setLoadingPreview(false);
       }
-      setLoadingPreview(false);
     })();
     return () => {
       cancelled = true;

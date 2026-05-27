@@ -64,6 +64,20 @@ export async function PATCH(
             return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
         }
 
+        // Fetch the updated conversation to broadcast the correct state
+        const updatedConv = await prisma.waConversation.findUnique({
+            where: { id: conversationId },
+        })
+
+        if (updatedConv) {
+            import('@/lib/redis').then(({ publishEvent }) => {
+                publishEvent('inbox-realtime', 'conversation_update', {
+                    conversationId,
+                    ...updatedConv
+                }).catch(() => {})
+            })
+        }
+
         return NextResponse.json({ success: true })
     } catch (error) {
         console.error('Error updating conversation:', error)

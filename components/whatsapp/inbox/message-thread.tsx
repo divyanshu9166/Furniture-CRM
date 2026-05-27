@@ -261,11 +261,9 @@ export function MessageThread({
     };
 
     fetchMessages();
-    const interval = setInterval(fetchMessages, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
   }, [conversationId]);
 
@@ -304,11 +302,9 @@ export function MessageThread({
     };
 
     fetchReactions();
-    const interval = setInterval(fetchReactions, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
     };
   }, [conversationId]);
 

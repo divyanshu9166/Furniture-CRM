@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
 import { insertSteps, type BuilderStepInput } from '@/lib/automations/steps-tree'
 import {
@@ -29,11 +28,9 @@ export async function GET() {
 
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await getSession()
+  if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const userId = String(session.id)
 
   const body = await request.json().catch(() => null)
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -64,10 +61,6 @@ export async function POST(request: Request) {
     )
   }
 
-  // Block activation of a clearly broken automation up-front instead of
-  // letting every trigger silently produce a failed log row. Drafts
-  // (is_active=false) are allowed to be incomplete so users can save
-  // progress mid-build.
   if (is_active) {
     const issues = [
       ...validateTriggerForActivation(effectiveTriggerType, effectiveTriggerConfig ?? {}),
@@ -83,31 +76,26 @@ export async function POST(request: Request) {
     }
   }
 
-  const admin = supabaseAdmin()
-  const { data: automation, error: insertErr } = await admin
-    .from('automations')
-    .insert({
-      user_id: user.id,
-      name: effectiveName,
-      description: effectiveDescription ?? null,
-      trigger_type: effectiveTriggerType,
-      trigger_config: effectiveTriggerConfig ?? {},
-      is_active: !!is_active,
+  try {
+    const automation = await prisma.waAutomation.create({
+      data: {
+        user_id: userId,
+        name: effectiveName,
+        description: effectiveDescription ?? null,
+        trigger_type: effectiveTriggerType,
+        trigger_config: effectiveTriggerConfig ?? {},
+        is_active: !!is_active,
+      }
     })
-    .select()
-    .single()
 
-  if (insertErr || !automation) {
-    return NextResponse.json(
-      { error: insertErr?.message ?? 'insert failed' },
-      { status: 500 },
-    )
+    if (effectiveSteps && effectiveSteps.length > 0) {
+      const err = await insertSteps(automation.id, effectiveSteps)
+      if (err) return NextResponse.json({ error: err }, { status: 500 })
+    }
+
+    return NextResponse.json({ automation }, { status: 201 })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'insert failed'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
-
-  if (effectiveSteps && effectiveSteps.length > 0) {
-    const err = await insertSteps(automation.id, effectiveSteps)
-    if (err) return NextResponse.json({ error: err }, { status: 500 })
-  }
-
-  return NextResponse.json({ automation }, { status: 201 })
 }
