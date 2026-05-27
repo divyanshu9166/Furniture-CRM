@@ -6,7 +6,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
-import { automationQueue } from '@/lib/queues/jobs'
+import { getAutomationQueue } from '@/lib/queues/jobs'
 
 interface WhatsAppMessage {
   id: string
@@ -584,7 +584,7 @@ async function processMessage(
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
 
   for (const triggerType of automationTriggers) {
-    automationQueue
+    getAutomationQueue()
       .add(
         triggerType,
         {

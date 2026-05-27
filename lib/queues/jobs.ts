@@ -84,43 +84,60 @@ export interface MessageDeliveryJobData {
   metaMessageId?: string // Meta's wa_id for status lookups
 }
 
-// ── Queue instances ────────────────────────────────────────────────────────
+// ── Queue instances (Lazy Loaded) ──────────────────────────────────────────
+let _automationQueue: Queue<AutomationJobData> | undefined
+export function getAutomationQueue() {
+  if (!_automationQueue) {
+    _automationQueue = new Queue<AutomationJobData>(QUEUE_AUTOMATION, {
+      connection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5_000 },
+        removeOnComplete: { count: 100 },
+        removeOnFail: { count: 500 },
+      },
+    })
+  }
+  return _automationQueue
+}
 
-export const automationQueue = new Queue<AutomationJobData>(QUEUE_AUTOMATION, {
-  connection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 5_000 },
-    removeOnComplete: { count: 100 },
-    removeOnFail: { count: 500 },
-  },
-})
+let _broadcastStatusQueue: Queue<BroadcastStatusJobData> | undefined
+export function getBroadcastStatusQueue() {
+  if (!_broadcastStatusQueue) {
+    _broadcastStatusQueue = new Queue<BroadcastStatusJobData>(
+      QUEUE_BROADCAST_STATUS,
+      {
+        connection,
+        defaultJobOptions: {
+          attempts: 5,
+          backoff: { type: 'exponential', delay: 2_000 },
+          removeOnComplete: { count: 200 },
+          removeOnFail: { count: 500 },
+        },
+      },
+    )
+  }
+  return _broadcastStatusQueue
+}
 
-export const broadcastStatusQueue = new Queue<BroadcastStatusJobData>(
-  QUEUE_BROADCAST_STATUS,
-  {
-    connection,
-    defaultJobOptions: {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 2_000 },
-      removeOnComplete: { count: 200 },
-      removeOnFail: { count: 500 },
-    },
-  },
-)
-
-export const messageDeliveryQueue = new Queue<MessageDeliveryJobData>(
-  QUEUE_MESSAGE_DELIVERY,
-  {
-    connection,
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: { type: 'fixed', delay: 10_000 },
-      removeOnComplete: { count: 100 },
-      removeOnFail: { count: 500 },
-    },
-  },
-)
+let _messageDeliveryQueue: Queue<MessageDeliveryJobData> | undefined
+export function getMessageDeliveryQueue() {
+  if (!_messageDeliveryQueue) {
+    _messageDeliveryQueue = new Queue<MessageDeliveryJobData>(
+      QUEUE_MESSAGE_DELIVERY,
+      {
+        connection,
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'fixed', delay: 10_000 },
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 500 },
+        },
+      },
+    )
+  }
+  return _messageDeliveryQueue
+}
 
 // ── Worker factory ─────────────────────────────────────────────────────────
 // Workers are created lazily so importing this module in the Next.js
