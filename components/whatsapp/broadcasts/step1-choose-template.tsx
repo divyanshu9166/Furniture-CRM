@@ -1,9 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate } from '@/types';
-import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Loader2, FileText, ArrowRight, RefreshCw } from 'lucide-react';
 
@@ -21,8 +19,6 @@ interface Step1Props {
 }
 
 export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack }: Step1Props) {
-  const supabase = createClient();
-  const { user, loading: authLoading } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,18 +26,14 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   const [syncError, setSyncError] = useState<string | null>(null);
   const syncAttemptedRef = useRef(false);
 
-  const fetchApprovedTemplates = useCallback(async () => {
-    if (!user) return [] as MessageTemplate[];
-    const { data, error: fetchError } = await supabase
-      .from('message_templates')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('status', 'Approved')
-      .order('created_at', { ascending: false });
-
-    if (fetchError) throw fetchError;
-    return (data ?? []) as MessageTemplate[];
-  }, [supabase, user]);
+  const fetchApprovedTemplates = useCallback(async (): Promise<MessageTemplate[]> => {
+    const res = await fetch('/api/whatsapp/templates', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Failed to load templates (HTTP ${res.status})`);
+    const body = await res.json();
+    const all: MessageTemplate[] = body.data ?? [];
+    // Filter to Approved only — same logic as the old Supabase query
+    return all.filter((t) => t.status === 'Approved');
+  }, []);
 
   const syncFromMeta = useCallback(async () => {
     setSyncing(true);
@@ -49,9 +41,7 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     try {
       const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
-      }
+      if (!res.ok) throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
       return true;
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Failed to sync templates');
@@ -62,13 +52,6 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
   }, []);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!user) {
-      setLoading(false);
-      setError('Not authenticated');
-      return;
-    }
-
     let cancelled = false;
     const loadTemplates = async () => {
       setLoading(true);
@@ -98,10 +81,8 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
     };
 
     loadTemplates();
-    return () => {
-      cancelled = true;
-    };
-  }, [authLoading, user, fetchApprovedTemplates, syncFromMeta]);
+    return () => { cancelled = true; };
+  }, [fetchApprovedTemplates, syncFromMeta]);
 
   const handleSync = async () => {
     const synced = await syncFromMeta();

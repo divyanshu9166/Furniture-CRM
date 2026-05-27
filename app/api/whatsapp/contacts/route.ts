@@ -38,21 +38,20 @@ export async function GET(request: Request) {
 
     const { searchParams } = new URL(request.url)
     const search = (searchParams.get('search') ?? '').trim()
-    const all = ['1', 'true', 'yes'].includes(
-      String(searchParams.get('all') ?? '').toLowerCase(),
-    )
+    const all = ['1', 'true', 'yes'].includes(String(searchParams.get('all') ?? '').toLowerCase())
     const fields = (searchParams.get('fields') ?? '').trim().toLowerCase()
+    const countOnly = ['1', 'true', 'yes'].includes(String(searchParams.get('count_only') ?? '').toLowerCase())
 
+    // Support both `pageSize` and `page_size` spellings
     const page = Math.max(0, Number.parseInt(searchParams.get('page') ?? '0', 10) || 0)
-    const pageSizeRaw = Number.parseInt(searchParams.get('pageSize') ?? '25', 10) || 25
+    const pageSizeRaw =
+      Number.parseInt(searchParams.get('pageSize') ?? searchParams.get('page_size') ?? '25', 10) || 25
     const pageSize = Math.min(Math.max(pageSizeRaw, 1), 250)
 
     const userId = String(session.user.id)
 
-    const where: {
-      user_id: string
-      OR?: Array<{ name?: object; phone?: object; email?: object }>
-    } = { user_id: userId }
+    // ── Build where clause ────────────────────────────────────────────────
+    const where: Record<string, unknown> = { user_id: userId }
 
     if (search) {
       where.OR = [
@@ -60,6 +59,42 @@ export async function GET(request: Request) {
         { phone: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
       ]
+    }
+
+    // Tag-include filter (used by step2/step4 broadcast audience)
+    const tagIds = searchParams.get('tag_ids')?.split(',').filter(Boolean) ?? []
+    if (tagIds.length > 0) {
+      where.contact_tags = { some: { tag_id: { in: tagIds } } }
+    }
+
+    // Tag-exclude filter
+    const excludeTagIds = searchParams.get('exclude_tag_ids')?.split(',').filter(Boolean) ?? []
+    if (excludeTagIds.length > 0) {
+      where.contact_tags = {
+        ...(where.contact_tags as object ?? {}),
+        none: { tag_id: { in: excludeTagIds } },
+      }
+    }
+
+    // Custom field filter
+    const cfId = searchParams.get('custom_field_id')
+    const cfOp = searchParams.get('custom_field_op') ?? 'is'
+    const cfVal = searchParams.get('custom_field_value')
+    if (cfId && cfVal) {
+      let valueFilter: Record<string, unknown>
+      if (cfOp === 'is') valueFilter = { equals: cfVal }
+      else if (cfOp === 'is_not') valueFilter = { not: cfVal }
+      else valueFilter = { contains: cfVal, mode: 'insensitive' }
+
+      where.contact_custom_values = {
+        some: { custom_field_id: cfId, value: valueFilter },
+      }
+    }
+
+    // ── count_only: just return the count ─────────────────────────────────
+    if (countOnly) {
+      const total = await prisma.waContact.count({ where })
+      return NextResponse.json({ total, count: total })
     }
 
     const listArgs: Record<string, unknown> = {
@@ -73,39 +108,31 @@ export async function GET(request: Request) {
     }
 
     if (fields === 'basic') {
-      listArgs.select = {
-        id: true,
-        user_id: true,
-        name: true,
-        phone: true,
-        created_at: true,
-        updated_at: true,
-      }
+      listArgs.select = { id: true, user_id: true, name: true, phone: true, created_at: true, updated_at: true }
     } else {
       listArgs.include = { contact_tags: { include: { tag: true } } }
     }
 
-    const [count, contacts] = await Promise.all([
+    const [total, contacts] = await Promise.all([
       prisma.waContact.count({ where }),
       prisma.waContact.findMany(listArgs as any),
     ])
 
     if (fields === 'basic') {
-      return NextResponse.json({
-        data: contacts,
-        count,
-      })
+      return NextResponse.json({ data: contacts, total, count: total })
     }
 
     return NextResponse.json({
       data: (contacts as Array<Parameters<typeof serializeContact>[0]>).map(serializeContact),
-      count,
+      total,
+      count: total,
     })
   } catch (error) {
     console.error('Error loading WA contacts:', error)
     return NextResponse.json({ error: 'Failed to load contacts' }, { status: 500 })
   }
 }
+
 
 function normalizeForMatch(value: string): string {
   return normalizePhone(value ?? '')
