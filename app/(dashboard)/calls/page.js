@@ -1275,6 +1275,7 @@ export default function CallsPage() {
           );
         })}
       </div>
+      </div>
 
       {/* Tab Content */}
       {activeTab === 'ai-caller' && renderAICaller()}
@@ -1386,10 +1387,9 @@ export default function CallsPage() {
                 <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
                   <Play className="w-4 h-4" />
                   Play Recording
-                  </button>
-              })}
-            </div>
-          </div>
+                </button>
+              )}
+              <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent text-white rounded-xl text-sm font-medium hover:bg-accent-hover transition-colors">
                 <Phone className="w-4 h-4" />
                 Call Again
               </button>
