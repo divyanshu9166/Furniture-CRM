@@ -27,7 +27,7 @@ async function ensureContact(userId: string, contactId: string) {
 
 export async function GET(
     _request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     try {
         const session = await getSession()
@@ -35,7 +35,7 @@ export async function GET(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const contactId = String(params?.id ?? '').trim()
+        const contactId = String((await params).id ?? '').trim()
         if (!contactId) {
             return NextResponse.json({ error: 'Contact id is required' }, { status: 400 })
         }
@@ -60,7 +60,7 @@ export async function GET(
 
 export async function POST(
     request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     try {
         const session = await getSession()
@@ -68,7 +68,7 @@ export async function POST(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const contactId = String(params?.id ?? '').trim()
+        const contactId = String((await params).id ?? '').trim()
         if (!contactId) {
             return NextResponse.json({ error: 'Contact id is required' }, { status: 400 })
         }

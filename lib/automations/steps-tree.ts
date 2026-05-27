@@ -86,7 +86,7 @@ export async function insertSteps(
   if (rows.length === 0) return null
   try {
     await prisma.waAutomationStep.createMany({
-      data: rows
+      data: rows as any
     })
     return null
   } catch (error) {

@@ -112,7 +112,7 @@ export async function POST(request: Request) {
         header_content: string | null
         body_text: string
         footer_text: string | null
-        buttons?: unknown
+        buttons?: any
         status: string
     } = {
         user_id: userId,

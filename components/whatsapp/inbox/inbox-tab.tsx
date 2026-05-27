@@ -93,7 +93,10 @@ export function InboxTab() {
       if (!conv) return;
 
       if (event.eventType === "INSERT") {
-        setConversations((prev) => [conv, ...prev]);
+        setConversations((prev) => {
+          if (prev.some((c) => c.id === conv.id)) return prev;
+          return [conv, ...prev];
+        });
       }
 
       if (event.eventType === "UPDATE") {

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { recalculateBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
+
+const BROADCAST_STATUSES = new Set(['draft', 'scheduled', 'sending', 'sent', 'failed'])
 
 export async function POST(
   request: Request,
@@ -12,7 +15,11 @@ export async function POST(
     const userId = String(session.id)
     
     const { id } = await params
-    const { status, failed_count } = await request.json()
+    const { status } = await request.json()
+
+    if (!BROADCAST_STATUSES.has(status)) {
+      return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    }
 
     const broadcast = await prisma.waBroadcast.findFirst({
       where: { id, user_id: userId }
@@ -22,17 +29,14 @@ export async function POST(
       return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
     }
 
-    const updateData: any = { status }
-    if (typeof failed_count === 'number') {
-      updateData.failed_count = failed_count
-    }
-
     await prisma.waBroadcast.update({
       where: { id },
-      data: updateData
+      data: { status }
     })
 
-    return NextResponse.json({ ok: true })
+    const stats = await recalculateBroadcastStats(id)
+
+    return NextResponse.json({ ok: true, stats })
   } catch (error) {
     console.error('Error updating broadcast status:', error)
     return NextResponse.json({ error: 'Failed to update broadcast status' }, { status: 500 })

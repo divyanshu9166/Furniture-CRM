@@ -4,7 +4,7 @@ import { getSession } from '@/lib/auth-helpers'
 
 export async function GET(
     _request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     try {
         const session = await getSession()
@@ -12,7 +12,7 @@ export async function GET(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const pipelineId = String(params?.id ?? '').trim()
+        const pipelineId = String((await params).id ?? '').trim()
         if (!pipelineId) {
             return NextResponse.json({ error: 'Pipeline id is required' }, { status: 400 })
         }

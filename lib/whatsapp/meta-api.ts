@@ -9,7 +9,7 @@
  * instead of a runtime rejection from Meta.
  */
 
-const META_API_VERSION = 'v21.0'
+const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 export interface MetaSendResult {
@@ -154,19 +154,40 @@ export async function sendTextMessage(
   return { messageId: data.messages[0].id }
 }
 
+export interface TemplateComponentParams {
+  /** Variables for the HEADER component (e.g. {{1}} in the header) */
+  header?: string[]
+  /** Variables for the BODY component (e.g. {{1}}, {{2}} in the body) — most common */
+  body?: string[]
+  /** Variables for BUTTON components (e.g. dynamic URL suffixes) */
+  buttons?: Array<{ index: number; sub_type: 'url' | 'quick_reply'; value: string }>
+}
+
 export interface SendTemplateMessageArgs {
   phoneNumberId: string
   accessToken: string
   to: string
   templateName: string
   language?: string
+  /**
+   * Legacy flat params array — assumed to be BODY parameters only.
+   * Prefer `componentParams` for full control over header/body/button variables.
+   */
   params?: string[]
+  /** Fine-grained component params. Takes precedence over `params` if both provided. */
+  componentParams?: TemplateComponentParams
   contextMessageId?: string
 }
 
 /**
  * Send a pre-approved WhatsApp message template. Required outside
  * the 24-hour window and for any first-touch messaging.
+ *
+ * IMPORTANT: If your template has variables in the HEADER or dynamic
+ * URL BUTTONS (not just the body), use `componentParams` instead of
+ * the legacy `params` array. Sending only body params when the template
+ * expects header params causes Meta to accept the API call (200 OK) but
+ * silently fail to render/deliver the message to the recipient.
  */
 export async function sendTemplateMessage(
   args: SendTemplateMessageArgs
@@ -178,6 +199,7 @@ export async function sendTemplateMessage(
     templateName,
     language = 'en_US',
     params,
+    componentParams,
     contextMessageId,
   } = args
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
@@ -187,13 +209,47 @@ export async function sendTemplateMessage(
     language: { code: language },
   }
 
-  if (params && params.length > 0) {
-    template.components = [
-      {
+  // Build components array from fine-grained componentParams (preferred)
+  // or fall back to the legacy flat `params` array (body-only).
+  const components: Record<string, unknown>[] = []
+
+  if (componentParams) {
+    if (componentParams.header && componentParams.header.length > 0) {
+      components.push({
+        type: 'header',
+        parameters: componentParams.header.map((p) => ({ type: 'text', text: String(p) })),
+      })
+    }
+    if (componentParams.body && componentParams.body.length > 0) {
+      components.push({
         type: 'body',
-        parameters: params.map((p) => ({ type: 'text', text: String(p) })),
-      },
-    ]
+        parameters: componentParams.body.map((p) => ({ type: 'text', text: String(p) })),
+      })
+    }
+    if (componentParams.buttons && componentParams.buttons.length > 0) {
+      for (const btn of componentParams.buttons) {
+        components.push({
+          type: 'button',
+          sub_type: btn.sub_type,
+          index: String(btn.index),
+          parameters: [
+            btn.sub_type === 'url'
+              ? { type: 'text', text: btn.value }
+              : { type: 'payload', payload: btn.value },
+          ],
+        })
+      }
+    }
+  } else if (params && params.length > 0) {
+    // Legacy path: treat all params as body variables
+    components.push({
+      type: 'body',
+      parameters: params.map((p) => ({ type: 'text', text: String(p) })),
+    })
+  }
+
+  if (components.length > 0) {
+    template.components = components
   }
 
   const body: Record<string, unknown> = {

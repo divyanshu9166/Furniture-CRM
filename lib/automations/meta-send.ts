@@ -51,7 +51,7 @@ type SendInput =
 
 async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
   // Scope the contact lookup by user_id.
-  const contact = await prisma.waContact.findUnique({
+  const contact = await prisma.waContact.findFirst({
     where: { id: input.contactId, user_id: input.userId },
     select: { id: true, phone: true }
   })
@@ -65,7 +65,7 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const config = await prisma.waConfig.findUnique({
+  const config = await prisma.waWhatsappConfig.findUnique({
     where: { user_id: input.userId }
   })
   

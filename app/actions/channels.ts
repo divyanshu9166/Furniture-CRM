@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
+import type { Contact } from '@prisma/client'
 
 // ─── GET ALL CHANNEL CONFIGS ────────────────────────
 
@@ -123,7 +124,7 @@ export async function createOrUpdateConversation(data: {
   }
 
   // Find or create contact
-  let contact = null
+  let contact: Contact | null = null
   if (customerPhone) {
     contact = await prisma.contact.findFirst({ where: { phone: customerPhone } })
     if (!contact) {

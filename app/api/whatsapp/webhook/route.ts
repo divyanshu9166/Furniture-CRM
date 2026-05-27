@@ -7,6 +7,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
 import { getAutomationQueue } from '@/lib/queues/jobs'
+import { recalculateBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
 
 interface WhatsAppMessage {
   id: string
@@ -214,6 +215,14 @@ const RECIPIENT_STATUS_LADDER = [
   'replied',
 ] as const
 
+const SUCCESS_STATUS_VALUES = new Set(['sent', 'delivered', 'read'])
+const MESSAGE_STATUS_VALUES = new Set(['sent', 'delivered', 'read', 'failed'])
+
+function normalizeMetaStatus(status: string): string | null {
+  if (status === 'played') return 'read'
+  return MESSAGE_STATUS_VALUES.has(status) ? status : null
+}
+
 function ladderLevel(s: string): number {
   const idx = (RECIPIENT_STATUS_LADDER as readonly string[]).indexOf(s)
   return idx < 0 ? -1 : idx
@@ -245,29 +254,69 @@ async function handleStatusUpdate(status: {
   timestamp: string
   recipient_id: string
 }) {
+  const normalizedStatus = normalizeMetaStatus(status.status)
+  if (!normalizedStatus) {
+    console.warn('[webhook] ignoring unknown message status:', status.status)
+    return
+  }
+
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status.
   try {
+    const messages = await prisma.waMessage.findMany({
+      where: { message_id: status.id },
+      select: {
+        id: true,
+        conversation_id: true,
+        conversation: { select: { user_id: true } }
+      }
+    });
+
     await prisma.waMessage.updateMany({
       where: { message_id: status.id },
-      data: { status: status.status },
+      data: { status: normalizedStatus },
     })
+
+    // Emit real-time event for the inbox
+    for (const msg of messages) {
+      publishEvent('chat_events', {
+        type: 'message_status',
+        userId: msg.conversation.user_id,
+        conversationId: msg.conversation_id,
+        payload: {
+          messageId: msg.id,
+          status: normalizedStatus,
+          timestamp: status.timestamp
+        }
+      }).catch(console.error);
+    }
   } catch (error) {
     console.error('Error updating message status:', error)
   }
 
   // 2) Mirror onto broadcast_recipients via whatsapp_message_id
-  //    (added in migration 003). The aggregate trigger on
-  //    broadcast_recipients re-derives the parent broadcast's
-  //    sent/delivered/read/failed counts automatically.
   const tsDate = new Date(parseInt(status.timestamp) * 1000)
 
-  let recipient: { id: string; status: string } | null = null
+  let recipient: {
+    id: string
+    status: string
+    broadcast_id: string
+    sent_at: Date | null
+    delivered_at: Date | null
+    read_at: Date | null
+  } | null = null
 
   try {
     recipient = await prisma.waBroadcastRecipient.findFirst({
       where: { whatsapp_message_id: status.id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        broadcast_id: true,
+        sent_at: true,
+        delivered_at: true,
+        read_at: true,
+      },
     })
   } catch (error) {
     console.error('Error fetching broadcast recipient:', error)
@@ -278,18 +327,27 @@ async function handleStatusUpdate(status: {
 
   // Guard transitions — forward-only on the success ladder, and
   // `failed` only from pre-delivered states.
-  if (!isValidStatusTransition(recipient.status, status.status)) return
+  if (!isValidStatusTransition(recipient.status, normalizedStatus)) return
 
-  const update: Record<string, unknown> = { status: status.status }
-  if (status.status === 'sent') update.sent_at = tsDate
-  if (status.status === 'delivered') update.delivered_at = tsDate
-  if (status.status === 'read') update.read_at = tsDate
+  const update: Record<string, unknown> = { status: normalizedStatus }
+  if (SUCCESS_STATUS_VALUES.has(normalizedStatus) && !recipient.sent_at) {
+    update.sent_at = tsDate
+  }
+  if (
+    (normalizedStatus === 'delivered' || normalizedStatus === 'read') &&
+    !recipient.delivered_at
+  ) {
+    update.delivered_at = tsDate
+  }
+  if (normalizedStatus === 'read' && !recipient.read_at) update.read_at = tsDate
 
   try {
     await prisma.waBroadcastRecipient.update({
       where: { id: recipient.id },
       data: update,
     })
+
+    await recalculateBroadcastStats(recipient.broadcast_id)
   } catch (error) {
     console.error('Error updating broadcast recipient status:', error)
   }
@@ -313,7 +371,7 @@ async function flagBroadcastReplyIfAny(userId: string, contactId: string) {
         broadcast: { user_id: userId },
       },
       orderBy: { created_at: 'desc' },
-      select: { id: true },
+      select: { id: true, broadcast_id: true },
     })
 
     if (!row) return
@@ -322,6 +380,7 @@ async function flagBroadcastReplyIfAny(userId: string, contactId: string) {
       where: { id: row.id },
       data: { status: 'replied', replied_at: new Date() },
     })
+    await recalculateBroadcastStats(row.broadcast_id)
   } catch (err) {
     console.error('flagBroadcastReplyIfAny failed:', err)
   }
@@ -422,11 +481,12 @@ async function processMessage(
   const contactRecord = contactOutcome.contact
 
   // Find or create conversation
-  const conversation = await findOrCreateConversation(
+  const conversationOutcome = await findOrCreateConversation(
     userId,
     contactRecord.id
   )
-  if (!conversation) return
+  if (!conversationOutcome) return
+  const conversation = conversationOutcome.conversation
 
   if (message.type === 'reaction') {
     await handleReaction(message, conversation.id, contactRecord.id)
@@ -513,12 +573,7 @@ async function processMessage(
         last_message_at: new Date(),
         unread_count: { increment: 1 },
       },
-      select: {
-        id: true,
-        last_message_text: true,
-        last_message_at: true,
-        unread_count: true,
-      },
+      include: { contact: true },
     })
   } catch (error) {
     console.error('Error updating conversation:', error)
@@ -551,10 +606,12 @@ async function processMessage(
 
   if (updatedConversation) {
     await publishEvent('chat_events', {
-      type: 'conversation_update',
+      type: conversationOutcome.wasCreated
+        ? 'new_conversation'
+        : 'conversation_update',
       userId,
       conversationId: conversation.id,
-      payload: {
+      payload: conversationOutcome.wasCreated ? { conversation: updatedConversation } : {
         // Send absolute values (not deltas) — the frontend merges them
         // directly into the conversation object.
         last_message_text: updatedConversation.last_message_text,
@@ -797,16 +854,17 @@ async function findOrCreateConversation(userId: string, contactId: string) {
       where: { user_id: userId, contact_id: contactId },
     })
 
-    if (existing) return existing
+    if (existing) return { conversation: existing, wasCreated: false }
   } catch (error) {
     console.error('Error fetching conversation:', error)
   }
 
   // Create new conversation
   try {
-    return await prisma.waConversation.create({
+    const conversation = await prisma.waConversation.create({
       data: { user_id: userId, contact_id: contactId },
     })
+    return { conversation, wasCreated: true }
   } catch (error) {
     console.error('Error creating conversation:', error)
     return null

@@ -137,7 +137,12 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              recipients: apiRecipients.map(r => ({ phone: r.phone, params: r.params })),
+              broadcast_id: broadcastId,
+              recipients: apiRecipients.map(r => ({
+                phone: r.phone,
+                contact_id: r.contact_id,
+                params: r.params,
+              })),
               template_name: payload.template.name,
               template_language: payload.template.language ?? 'en_US',
             }),

@@ -4,7 +4,7 @@ import { getSession } from '@/lib/auth-helpers'
 
 export async function DELETE(
     _request: Request,
-    { params }: { params: { id: string; noteId: string } },
+    { params }: { params: Promise<{ id: string; noteId: string }> },
 ) {
     try {
         const session = await getSession()
@@ -12,8 +12,9 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const contactId = String(params?.id ?? '').trim()
-        const noteId = String(params?.noteId ?? '').trim()
+        const resolvedParams = await params
+        const contactId = String(resolvedParams.id ?? '').trim()
+        const noteId = String(resolvedParams.noteId ?? '').trim()
         if (!contactId || !noteId) {
             return NextResponse.json({ error: 'Contact id and note id are required' }, { status: 400 })
         }

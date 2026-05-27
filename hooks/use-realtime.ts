@@ -179,6 +179,20 @@ export function useRealtime({
       // Fired when Meta delivers a status update (sent → delivered → read).
       // Maps to an UPDATE on the message so the tick icons refresh.
       socket.on(
+        "new_conversation",
+        (data: { conversation?: Conversation } & Partial<Conversation>) => {
+          const conversation = data.conversation ?? data;
+          if (!conversation?.id) return;
+
+          onConversationRef.current?.({
+            eventType: "INSERT",
+            new: conversation as Conversation,
+            old: {},
+          });
+        }
+      );
+
+      socket.on(
         "message_status",
         (data: { messageId?: string; status?: string; conversationId?: string }) => {
           if (!data.messageId) return;

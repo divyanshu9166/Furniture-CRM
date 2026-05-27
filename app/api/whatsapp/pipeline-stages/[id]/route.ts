@@ -4,7 +4,7 @@ import { getSession } from '@/lib/auth-helpers'
 
 export async function DELETE(
     _request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     try {
         const session = await getSession()
@@ -12,7 +12,7 @@ export async function DELETE(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const stageId = String(params?.id ?? '').trim()
+        const stageId = String((await params).id ?? '').trim()
         if (!stageId) {
             return NextResponse.json({ error: 'Stage id is required' }, { status: 400 })
         }

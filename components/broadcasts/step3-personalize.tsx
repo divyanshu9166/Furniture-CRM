@@ -75,8 +75,8 @@ export function Step3Personalize({
         if (cancelled) return;
 
         if (fieldsRes.ok) {
-          const { customFields } = await fieldsRes.json();
-          setCustomFields(customFields ?? []);
+          const { data } = await fieldsRes.json();
+          setCustomFields(data ?? []);
         }
         setLoadingFields(false);
 

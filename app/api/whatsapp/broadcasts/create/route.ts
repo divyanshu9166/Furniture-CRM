@@ -86,6 +86,8 @@ export async function POST(request: Request) {
       contacts = contacts.filter(c => !excludedIds.has(c.id))
     }
 
+    contacts = [...new Map(contacts.map((contact) => [contact.id, contact])).values()]
+
     if (contacts.length === 0) {
       return NextResponse.json({ error: 'No contacts found for this audience.' }, { status: 400 })
     }

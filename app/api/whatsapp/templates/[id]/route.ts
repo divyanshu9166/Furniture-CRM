@@ -4,14 +4,14 @@ import { getSession } from '@/lib/session'
 
 export async function DELETE(
     _request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     const session = await getSession()
     if (!session?.id) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const id = String(params?.id ?? '').trim()
+    const id = String((await params).id ?? '').trim()
     if (!id) {
         return NextResponse.json({ error: 'Template id is required' }, { status: 400 })
     }

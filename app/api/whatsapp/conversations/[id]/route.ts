@@ -4,7 +4,7 @@ import { getSession } from '@/lib/auth-helpers'
 
 export async function PATCH(
     request: Request,
-    { params }: { params: { id: string } },
+    { params }: { params: Promise<{ id: string }> },
 ) {
     try {
         const session = await getSession()
@@ -12,7 +12,7 @@ export async function PATCH(
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
         }
 
-        const conversationId = String(params?.id ?? '').trim()
+        const conversationId = String((await params).id ?? '').trim()
         if (!conversationId) {
             return NextResponse.json({ error: 'Conversation id is required' }, { status: 400 })
         }
@@ -71,7 +71,7 @@ export async function PATCH(
 
         if (updatedConv) {
             import('@/lib/redis').then(({ publishEvent }) => {
-                publishEvent('inbox-realtime', {
+                publishEvent('chat_events', {
                     type: 'conversation_update',
                     userId: updatedConv.user_id,
                     conversationId,

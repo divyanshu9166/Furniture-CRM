@@ -4,6 +4,10 @@ import { getSession } from '@/lib/session'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
+  recordOutboundTemplateMessage,
+  renderTemplatePreview,
+} from '@/lib/whatsapp/outbound-message-log'
+import {
   normalizePhoneForMetaIndia,
   isValidE164,
   phoneVariants,
@@ -16,6 +20,10 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import {
+  getBroadcastStatsByIds,
+  recalculateBroadcastStats,
+} from '@/lib/whatsapp/broadcast-stats'
 
 interface BroadcastResult {
   phone: string
@@ -48,6 +56,7 @@ interface BroadcastResult {
  */
 interface NewRecipient {
   phone: string
+  contact_id?: string
   params?: string[]
 }
 
@@ -63,7 +72,12 @@ export async function GET() {
       where: { user_id: userId },
       orderBy: { created_at: 'desc' },
     })
-    return NextResponse.json({ broadcasts })
+    const statsById = await getBroadcastStatsByIds(broadcasts.map((b) => b.id))
+    const enhancedBroadcasts = broadcasts.map((broadcast) => ({
+      ...broadcast,
+      ...(statsById.get(broadcast.id) ?? {}),
+    }))
+    return NextResponse.json({ broadcasts: enhancedBroadcasts })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to fetch broadcasts'
     return NextResponse.json({ error: message }, { status: 500 })
@@ -88,6 +102,7 @@ export async function POST(request: Request) {
     const {
       recipients: newRecipients,
       phone_numbers,
+      broadcast_id,
       template_name,
       template_language,
       template_params,
@@ -134,10 +149,20 @@ export async function POST(request: Request) {
     }
 
     const accessToken = decrypt(config.access_token)
+    const templateLanguage = template_language || 'en_US'
+    let writableBroadcastId: string | null = null
+    if (broadcast_id) {
+      const broadcast = await prisma.waBroadcast.findFirst({
+        where: { id: String(broadcast_id), user_id: userId },
+        select: { id: true },
+      })
+      writableBroadcastId = broadcast?.id ?? null
+    }
 
     const results: BroadcastResult[] = []
     let sentCount = 0
     let failedCount = 0
+    let touchedBroadcastRecipients = false
 
     for (const recipient of recipients) {
       const sanitized = normalizePhoneForMetaIndia(recipient.phone)
@@ -166,7 +191,7 @@ export async function POST(request: Request) {
             accessToken,
             to: variant,
             templateName: template_name,
-            language: template_language || 'en_US',
+            language: templateLanguage,
             params: recipient.params ?? [],
           })
           sentMessageId = result.messageId
@@ -192,6 +217,47 @@ export async function POST(request: Request) {
       }
 
       if (sentMessageId) {
+        if (recipient.contact_id) {
+          try {
+            const renderedText = await renderTemplatePreview({
+              userId,
+              templateName: template_name,
+              language: templateLanguage,
+              params: recipient.params ?? [],
+            })
+
+            await recordOutboundTemplateMessage({
+              userId,
+              contactId: recipient.contact_id,
+              senderId: userId,
+              templateName: template_name,
+              renderedText,
+              whatsappMessageId: sentMessageId,
+            })
+          } catch (error) {
+            console.error(
+              `Sent broadcast to ${recipient.phone}, but failed to mirror it into inbox:`,
+              error
+            )
+          }
+        }
+
+        if (writableBroadcastId && recipient.contact_id) {
+          await prisma.waBroadcastRecipient.updateMany({
+            where: {
+              broadcast_id: writableBroadcastId,
+              contact_id: recipient.contact_id,
+            },
+            data: {
+              status: 'sent',
+              whatsapp_message_id: sentMessageId,
+              error_message: null,
+              sent_at: new Date(),
+            },
+          })
+          touchedBroadcastRecipients = true
+        }
+
         results.push({
           phone: recipient.phone,
           status: 'sent',
@@ -209,8 +275,25 @@ export async function POST(request: Request) {
           status: 'failed',
           error: friendlyError,
         })
+        if (writableBroadcastId && recipient.contact_id) {
+          await prisma.waBroadcastRecipient.updateMany({
+            where: {
+              broadcast_id: writableBroadcastId,
+              contact_id: recipient.contact_id,
+            },
+            data: {
+              status: 'failed',
+              error_message: friendlyError,
+            },
+          })
+          touchedBroadcastRecipients = true
+        }
         failedCount++
       }
+    }
+
+    if (writableBroadcastId && touchedBroadcastRecipients) {
+      await recalculateBroadcastStats(writableBroadcastId)
     }
 
     return NextResponse.json({

@@ -49,7 +49,11 @@ export async function POST(request: Request) {
       })
       baseIds = new Set(validContacts.map(c => c.id))
     } else if (audience.type === 'manual' && audience.selectedContactIds?.length > 0) {
-      baseIds = new Set(audience.selectedContactIds)
+      const validContacts = await prisma.waContact.findMany({
+        where: { id: { in: audience.selectedContactIds }, user_id: userId },
+        select: { id: true }
+      })
+      baseIds = new Set(validContacts.map(c => c.id))
     } else if (audience.type === 'csv' && audience.csvContacts?.length > 0) {
       return NextResponse.json({ count: audience.csvContacts.length })
     } else {
