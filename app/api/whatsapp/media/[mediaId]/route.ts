@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
-import { prisma } from '@/lib/prisma'
+import { getSession } from '@/lib/auth-helpers'
+import { prisma } from '@/lib/db'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
