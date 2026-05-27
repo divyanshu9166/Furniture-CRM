@@ -5,6 +5,8 @@ import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { prisma } from '@/lib/db'
+import { publishEvent } from '@/lib/redis'
+import { automationQueue } from '@/lib/queues/jobs'
 
 interface WhatsAppMessage {
   id: string
@@ -513,16 +515,47 @@ async function processMessage(
     console.error('Error updating conversation:', error)
   }
 
+  // ── Real-time: publish UI events to Redis Pub/Sub ────────────────────────
+  // These are fire-and-forget: a dropped event only means the browser
+  // doesn't update until the next poll — the message is already in DB.
+  const savedMessage = {
+    conversation_id: conversation.id,
+    sender_type: 'customer',
+    content_type: contentType,
+    content_text: contentText,
+    media_url: mediaUrl,
+    message_id: message.id,
+    status: 'delivered',
+    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+  }
+
+  await publishEvent('chat_events', {
+    type: 'new_message',
+    userId,
+    conversationId: conversation.id,
+    payload: { message: savedMessage },
+  })
+
+  await publishEvent('chat_events', {
+    type: 'conversation_update',
+    userId,
+    conversationId: conversation.id,
+    payload: {
+      last_message_text: contentText || `[${message.type}]`,
+      last_message_at: new Date().toISOString(),
+      unread_count_increment: 1,
+    },
+  })
+
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(userId, contactRecord.id)
 
-  // Fire any automations that react to this webhook event. All dispatches
-  // run here (not earlier) so the contact, conversation, and inbound
-  // message all exist before any step — including send_message — runs.
-  // Fire-and-forget: a slow or failing automation must not block the
-  // webhook's 200 OK response to Meta.
+  // ── BullMQ: enqueue automation triggers (durable, retryable) ───────────
+  // Using BullMQ instead of fire-and-forget so a transient failure (e.g.
+  // automation engine timeout) doesn't silently drop triggers. BullMQ
+  // persists jobs in Redis and retries with exponential backoff.
   const inboundText = contentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
@@ -530,24 +563,31 @@ async function processMessage(
     | 'new_message_received'
     | 'keyword_match'
   )[] = ['new_message_received', 'keyword_match']
-  // new_contact_created fires only when the webhook just auto-created the
-  // contact row. first_inbound_message fires whenever this is the contact's
-  // first-ever customer-sent message — a superset that also catches
-  // manually-imported contacts sending for the first time. We dispatch both
-  // so users can pick whichever semantic they want; an automation that
-  // listens to only one trigger runs only when that trigger matches.
   if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
+
   for (const triggerType of automationTriggers) {
-    runAutomationsForTrigger({
-      userId,
-      triggerType,
-      contactId: contactRecord.id,
-      context: {
-        message_text: inboundText,
-        conversation_id: conversation.id,
-      },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    automationQueue
+      .add(
+        triggerType,
+        {
+          userId,
+          triggerType,
+          contactId: contactRecord.id,
+          context: {
+            message_text: inboundText,
+            conversation_id: conversation.id,
+          },
+        },
+        // Unique job key per (contact × trigger × message) prevents duplicate
+        // processing if Meta re-delivers the same webhook event.
+        {
+          jobId: `${triggerType}:${contactRecord.id}:${message.id}`,
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 500 },
+        },
+      )
+      .catch((err) => console.error('[queues] automationQueue.add failed:', err))
   }
 }
 

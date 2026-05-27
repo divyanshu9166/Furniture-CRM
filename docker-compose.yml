@@ -27,6 +27,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    restart: always
+    # appendonly yes: persist queue data to disk so BullMQ jobs survive
+    # a container restart. The volume below keeps the dump across deploys.
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # Run migrations on start (exits after completion)
   migrate:
     build:
@@ -54,6 +68,9 @@ services:
       CRM_API_SECRET: "${CRM_API_SECRET}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
       ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
+      REDIS_URL: "redis://redis:6379"
+      # Socket.io gateway URL — consumed by socket.io-client in the browser
+      NEXT_PUBLIC_WS_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}:3001"
       # Images stored on VPS local volume — no cloud storage needed
       UPLOAD_DIR: "/app/uploads"
     depends_on:
@@ -61,6 +78,8 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     volumes:
       - uploads:/app/uploads
     healthcheck:
@@ -69,6 +88,31 @@ services:
       timeout: 10s
       retries: 3
 
+  # Lightweight WebSocket gateway: subscribes to Redis Pub/Sub and
+  # pushes events to authenticated browser clients via socket.io.
+  ws-server:
+    build:
+      context: ./ws-server
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      REDIS_URL: "redis://redis:6379"
+      SESSION_SECRET: "${SESSION_SECRET}"
+      # Allowlist the CRM origin so socket.io CORS doesn't block connections.
+      CORS_ORIGIN: "https://${DOMAIN:-my-crm-project.duckdns.org}"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   pgdata:
+  redisdata:
   uploads:
