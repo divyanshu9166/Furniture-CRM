@@ -15,13 +15,39 @@
  * (Node.js server — not the edge runtime or the browser).
  */
 
-import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq'
-import { redis } from '@/lib/redis'
+import { Queue, Worker, type Job } from 'bullmq'
+import type { RedisOptions } from 'ioredis'
 
-// BullMQ requires a raw ioredis connection (not the shared publishEvent
-// one) so we pass the options object. ioredis duplicates the connection
-// internally as needed.
-const connection: ConnectionOptions = redis as unknown as ConnectionOptions
+// BullMQ manages its own internal Redis connections using these options.
+// We do NOT share the main redis singleton here — BullMQ needs to control
+// its own connection lifecycle (blocking commands, health checks, etc.).
+const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379'
+
+function parseRedisUrl(url: string): RedisOptions {
+  try {
+    const parsed = new URL(url)
+    return {
+      host: parsed.hostname || 'localhost',
+      port: parsed.port ? parseInt(parsed.port, 10) : 6379,
+      password: parsed.password || undefined,
+      db: parsed.pathname ? parseInt(parsed.pathname.slice(1), 10) || 0 : 0,
+      maxRetriesPerRequest: null, // Required for BullMQ
+      enableReadyCheck: false,
+      retryStrategy: (times: number) => Math.min(times * 200, 30_000),
+    }
+  } catch {
+    // Fallback to localhost if URL parsing fails
+    return {
+      host: 'localhost',
+      port: 6379,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      retryStrategy: (times: number) => Math.min(times * 200, 30_000),
+    }
+  }
+}
+
+const connection: RedisOptions = parseRedisUrl(REDIS_URL)
 
 // ── Queue names ────────────────────────────────────────────────────────────
 export const QUEUE_AUTOMATION = 'automation-queue'

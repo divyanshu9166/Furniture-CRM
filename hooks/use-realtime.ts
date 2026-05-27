@@ -101,8 +101,23 @@ export function useRealtime({
       if (cancelled) return;
 
       // 2. Open socket with the JWT in the handshake.
+      // `auth` is a callback (not a static object) so socket.io re-calls it
+      // on every reconnect attempt — this means a fresh token is fetched
+      // automatically, preventing auth failures when the 1h JWT expires.
       const socket = io(WS_URL, {
-        auth: { token },
+        auth: async (cb: (data: Record<string, unknown>) => void) => {
+          let freshToken = token; // use the already-fetched token on first connect
+          try {
+            const res = await fetch("/api/auth/ws-token", { cache: "no-store" });
+            if (res.ok) {
+              const body = await res.json();
+              freshToken = body.token as string;
+            }
+          } catch {
+            // keep using the current token if refresh fails
+          }
+          cb({ token: freshToken });
+        },
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionDelay: 1_000,

@@ -482,8 +482,10 @@ async function processMessage(
   })
   const isFirstInboundMessage = priorCustomerMsgCount === 0
 
+  let createdMessage: { id: string; conversation_id: string; sender_type: string; content_type: string; content_text: string | null; media_url: string | null; message_id: string; status: string; created_at: Date; reply_to_message_id: string | null } | null = null
+
   try {
-    await prisma.waMessage.create({
+    createdMessage = await prisma.waMessage.create({
       data: {
         conversation_id: conversation.id,
         sender_type: 'customer',
@@ -501,14 +503,21 @@ async function processMessage(
     return
   }
 
-  // Update conversation
+  // Update conversation and capture the result for the publish event
+  let updatedConversation: { id: string; last_message_text: string | null; last_message_at: Date; unread_count: number } | null = null
   try {
-    await prisma.waConversation.update({
+    updatedConversation = await prisma.waConversation.update({
       where: { id: conversation.id },
       data: {
         last_message_text: contentText || `[${message.type}]`,
         last_message_at: new Date(),
         unread_count: { increment: 1 },
+      },
+      select: {
+        id: true,
+        last_message_text: true,
+        last_message_at: true,
+        unread_count: true,
       },
     })
   } catch (error) {
@@ -518,34 +527,42 @@ async function processMessage(
   // ── Real-time: publish UI events to Redis Pub/Sub ────────────────────────
   // These are fire-and-forget: a dropped event only means the browser
   // doesn't update until the next poll — the message is already in DB.
-  const savedMessage = {
-    conversation_id: conversation.id,
-    sender_type: 'customer',
-    content_type: contentType,
-    content_text: contentText,
-    media_url: mediaUrl,
-    message_id: message.id,
-    status: 'delivered',
-    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+  if (createdMessage) {
+    await publishEvent('chat_events', {
+      type: 'new_message',
+      userId,
+      conversationId: conversation.id,
+      payload: {
+        message: {
+          id: createdMessage.id,
+          conversation_id: createdMessage.conversation_id,
+          sender_type: createdMessage.sender_type,
+          content_type: createdMessage.content_type,
+          content_text: createdMessage.content_text,
+          media_url: createdMessage.media_url,
+          message_id: createdMessage.message_id,
+          status: createdMessage.status,
+          created_at: createdMessage.created_at.toISOString(),
+          reply_to_message_id: createdMessage.reply_to_message_id,
+        },
+      },
+    })
   }
 
-  await publishEvent('chat_events', {
-    type: 'new_message',
-    userId,
-    conversationId: conversation.id,
-    payload: { message: savedMessage },
-  })
-
-  await publishEvent('chat_events', {
-    type: 'conversation_update',
-    userId,
-    conversationId: conversation.id,
-    payload: {
-      last_message_text: contentText || `[${message.type}]`,
-      last_message_at: new Date().toISOString(),
-      unread_count_increment: 1,
-    },
-  })
+  if (updatedConversation) {
+    await publishEvent('chat_events', {
+      type: 'conversation_update',
+      userId,
+      conversationId: conversation.id,
+      payload: {
+        // Send absolute values (not deltas) — the frontend merges them
+        // directly into the conversation object.
+        last_message_text: updatedConversation.last_message_text,
+        last_message_at: updatedConversation.last_message_at.toISOString(),
+        unread_count: updatedConversation.unread_count,
+      },
+    })
+  }
 
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate

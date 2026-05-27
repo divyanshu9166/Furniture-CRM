@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
+import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/whatsapp/inbox/conversation-list";
 import { MessageThread } from "@/components/whatsapp/inbox/message-thread";
 import { ContactSidebar } from "@/components/whatsapp/inbox/contact-sidebar";
@@ -40,6 +41,80 @@ export function InboxTab() {
       .then((data) => setWhatsappConnected(data?.connected === true))
       .catch(() => setWhatsappConnected(false));
   }, []);
+
+  // ── Realtime event handlers ────────────────────────────────────────────
+
+  const handleMessageEvent = useCallback(
+    (event: { eventType: string; new: Message; old: Partial<Message> }) => {
+      const newMsg = event.new;
+      if (!newMsg) return;
+
+      if (event.eventType === "INSERT") {
+        // Add to messages if it belongs to the currently active conversation
+        if (activeConversation && newMsg.conversation_id === activeConversation.id) {
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            // Replace optimistic bubble if one exists
+            const withoutOptimistic = prev.filter((m) => !m.id.startsWith("temp-"));
+            return [...withoutOptimistic, newMsg];
+          });
+        }
+
+        // Always update the conversation list preview for any conversation
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.id === newMsg.conversation_id
+              ? {
+                  ...c,
+                  last_message_text: newMsg.content_text ?? "",
+                  last_message_at: newMsg.created_at,
+                  unread_count:
+                    activeConversation?.id === newMsg.conversation_id
+                      ? 0
+                      : (c.unread_count ?? 0) + 1,
+                }
+              : c
+          )
+        );
+      }
+
+      if (event.eventType === "UPDATE") {
+        setMessages((prev) =>
+          prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
+        );
+      }
+    },
+    [activeConversation]
+  );
+
+  const handleConversationEvent = useCallback(
+    (event: { eventType: string; new: Conversation; old: Partial<Conversation> }) => {
+      const conv = event.new;
+      if (!conv) return;
+
+      if (event.eventType === "INSERT") {
+        setConversations((prev) => [conv, ...prev]);
+      }
+
+      if (event.eventType === "UPDATE") {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
+        );
+        if (activeConversation && conv.id === activeConversation.id) {
+          setActiveConversation((prev) => (prev ? { ...prev, ...conv } : prev));
+        }
+      }
+    },
+    [activeConversation]
+  );
+
+  // Wire up the WebSocket gateway
+  useRealtime({
+    channelName: "inbox-realtime",
+    onMessageEvent: handleMessageEvent,
+    onConversationEvent: handleConversationEvent,
+    enabled: true,
+  });
 
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
