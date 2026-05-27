@@ -192,7 +192,7 @@ export default function CallsPage() {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-8 w-48 bg-surface rounded-lg" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[1,2,3,4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
         <div className="h-64 bg-surface rounded-2xl" />
       </div>
     );
@@ -290,11 +290,10 @@ export default function CallsPage() {
             <button
               key={f}
               onClick={() => setDirectionFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                directionFilter === f
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${directionFilter === f
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-surface border border-border text-muted hover:text-foreground'
-              }`}
+                }`}
             >
               {f}
             </button>
@@ -305,11 +304,10 @@ export default function CallsPage() {
             <button
               key={f}
               onClick={() => setStatusFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                statusFilter === f
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${statusFilter === f
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-surface border border-border text-muted hover:text-foreground'
-              }`}
+                }`}
             >
               {f}
             </button>
@@ -449,11 +447,10 @@ export default function CallsPage() {
             <button
               key={f}
               onClick={() => setTagFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                tagFilter === f
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${tagFilter === f
                   ? 'bg-accent/20 text-accent border border-accent/30'
                   : 'bg-surface border border-border text-muted hover:text-foreground'
-              }`}
+                }`}
             >
               {f}
             </button>
@@ -566,11 +563,10 @@ export default function CallsPage() {
                       className={`flex ${msg.from === 'agent' ? 'justify-start' : 'justify-end'}`}
                     >
                       <div
-                        className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${
-                          msg.from === 'agent'
+                        className={`max-w-[70%] rounded-2xl px-4 py-2.5 ${msg.from === 'agent'
                             ? 'bg-accent/10 border border-accent/20 text-foreground'
                             : 'bg-surface border border-border text-foreground'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
@@ -1055,13 +1051,12 @@ export default function CallsPage() {
 
             <div className="flex flex-col items-center py-6">
               {/* Call visualization */}
-              <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-4 transition-all ${
-                browserCallState === 'connected'
+              <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-4 transition-all ${browserCallState === 'connected'
                   ? 'bg-emerald-500/20 border-2 border-emerald-500/40 animate-pulse'
                   : browserCallState === 'connecting'
-                  ? 'bg-amber-500/20 border-2 border-amber-500/40 animate-pulse'
-                  : 'bg-surface border-2 border-border'
-              }`}>
+                    ? 'bg-amber-500/20 border-2 border-amber-500/40 animate-pulse'
+                    : 'bg-surface border-2 border-border'
+                }`}>
                 {browserCallState === 'connected' ? (
                   <Volume2 className="w-10 h-10 text-emerald-600" />
                 ) : browserCallState === 'connecting' ? (
@@ -1075,8 +1070,8 @@ export default function CallsPage() {
                 {browserCallState === 'connected'
                   ? 'Connected — Speak now'
                   : browserCallState === 'connecting'
-                  ? 'Connecting to AI Agent...'
-                  : 'Ready to call'}
+                    ? 'Connecting to AI Agent...'
+                    : 'Ready to call'}
               </p>
               <p className="text-xs text-muted mb-6">
                 {browserCallState === 'connected'
@@ -1086,13 +1081,12 @@ export default function CallsPage() {
 
               <button
                 onClick={handleBrowserCall}
-                className={`flex items-center gap-2 px-8 py-3 rounded-2xl text-sm font-semibold transition-all ${
-                  browserCallState === 'connected'
+                className={`flex items-center gap-2 px-8 py-3 rounded-2xl text-sm font-semibold transition-all ${browserCallState === 'connected'
                     ? 'bg-red-500 text-white hover:bg-red-600'
                     : browserCallState === 'connecting'
-                    ? 'bg-amber-500/20 text-amber-700 cursor-wait'
-                    : 'bg-teal-600 text-white hover:bg-teal-700'
-                }`}
+                      ? 'bg-amber-500/20 text-amber-700 cursor-wait'
+                      : 'bg-teal-600 text-white hover:bg-teal-700'
+                  }`}
                 disabled={browserCallState === 'connecting'}
               >
                 {browserCallState === 'connected' ? (
@@ -1238,11 +1232,10 @@ export default function CallsPage() {
             <TrendingUp className="w-3.5 h-3.5" />
             Refresh
           </button>
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${
-            agentStatus?.configured
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl ${agentStatus?.configured
               ? 'bg-emerald-500/10 border border-emerald-500/20'
               : 'bg-zinc-500/10 border border-zinc-500/20'
-          }`}>
+            }`}>
             <div className={`w-2 h-2 rounded-full ${agentStatus?.configured ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-400'}`} />
             <span className={`text-xs font-medium ${agentStatus?.configured ? 'text-emerald-700' : 'text-muted'}`}>
               {agentStatus?.configured ? 'AI Agent Online' : 'AI Agent Offline'}
@@ -1255,26 +1248,25 @@ export default function CallsPage() {
       <div className="bg-surface rounded-xl border border-border p-1 w-full overflow-x-auto">
         <div className="flex items-center gap-1 min-w-max">
           {TABS.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setActiveTab(tab.id);
-                setSearchQuery('');
-              }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-accent/20 text-accent shadow-sm'
-                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
-              }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setSearchQuery('');
+                }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id
+                    ? 'bg-accent/20 text-accent shadow-sm'
+                    : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                  }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Tab Content */}
@@ -1363,11 +1355,10 @@ export default function CallsPage() {
                 <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
                   {(selectedCall.transcript.messages || []).map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.from === 'agent' ? 'justify-start' : 'justify-end'}`}>
-                      <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${
-                        msg.from === 'agent'
+                      <div className={`max-w-[75%] rounded-2xl px-3 py-2 ${msg.from === 'agent'
                           ? 'bg-accent/10 border border-accent/20'
                           : 'bg-surface border border-border'
-                      }`}>
+                        }`}>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-[10px] font-semibold uppercase tracking-wider text-muted">
                             {msg.from === 'agent' ? 'Anushka (AI)' : 'Customer'}

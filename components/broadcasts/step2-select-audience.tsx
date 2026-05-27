@@ -210,8 +210,8 @@ export function Step2SelectAudience({
       try {
         const res = await fetch('/api/whatsapp/tags');
         if (res.ok) {
-          const { tags } = await res.json();
-          setTags(tags ?? []);
+          const { data } = await res.json();
+          setTags(data ?? []);
         }
       } finally {
         setLoadingTags(false);
@@ -227,8 +227,8 @@ export function Step2SelectAudience({
       try {
         const res = await fetch('/api/whatsapp/custom-fields');
         if (res.ok) {
-          const { customFields } = await res.json();
-          setCustomFields(customFields ?? []);
+          const { data } = await res.json();
+          setCustomFields(data ?? []);
         }
       } finally {
         setLoadingFields(false);
@@ -250,8 +250,8 @@ export function Step2SelectAudience({
       }
       const res = await fetch(`/api/whatsapp/contacts?${params.toString()}`);
       if (res.ok) {
-        const { contacts, total } = await res.json();
-        setManualContacts(contacts ?? []);
+        const { data, total } = await res.json();
+        setManualContacts(data ?? []);
         setManualTotal(total ?? 0);
       }
     } catch {

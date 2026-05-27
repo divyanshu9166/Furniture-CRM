@@ -568,12 +568,12 @@ export default function ManufacturingPage() {
     if (!files || files.length === 0) return ''
     const formData = new FormData()
     formData.set('folder', 'products')
-    
+
     // Compress each file before upload
     const compressedFiles = await Promise.all(
       Array.from(files).map(file => compressImage(file))
     );
-    
+
     compressedFiles.forEach(file => formData.append('files', file))
     const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData })
     const uploadData = await uploadRes.json()
@@ -652,58 +652,58 @@ export default function ManufacturingPage() {
     setRmImportError('')
 
     try {
-        const parseRequiredNumber = (value) => {
-          const text = String(value ?? '').trim()
-          if (!text) return Number.NaN
-          const parsed = Number(text)
-          return Number.isFinite(parsed) ? parsed : Number.NaN
+      const parseRequiredNumber = (value) => {
+        const text = String(value ?? '').trim()
+        if (!text) return Number.NaN
+        const parsed = Number(text)
+        return Number.isFinite(parsed) ? parsed : Number.NaN
+      }
+
+      const parseNumberWithDefault = (value, defaultValue = 1) => {
+        const text = String(value ?? '').trim()
+        if (!text) return defaultValue
+        const parsed = Number(text)
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue
+      }
+
+      const parsed = rmImportRows
+        .map(row => ({
+          name: String(row[rmImportColMap.name] ?? '').trim(),
+          brand: rmImportColMap.brand !== undefined ? String(row[rmImportColMap.brand] ?? '').trim() : '',
+          sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
+          costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
+          instock: rmImportColMap.instock !== undefined ? parseRequiredNumber(row[rmImportColMap.instock]) : Number.NaN,
+          size: rmImportColMap.size !== undefined ? String(row[rmImportColMap.size] ?? '').trim() : '',
+          unitSize: rmImportColMap.size !== undefined ? parseNumberWithDefault(row[rmImportColMap.size], 1) : 1,
+          unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
+          reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
+          description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
+          image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
+        }))
+
+      // Debug: check which rows fail and why
+      const failures = []
+      parsed.forEach((row, idx) => {
+        const reasons = []
+        if (!row.name) reasons.push('missing name')
+        if (!Number.isFinite(row.instock)) reasons.push(`invalid instock: "${rmImportRows[idx][rmImportColMap.instock]}"`)
+        if (reasons.length > 0) {
+          failures.push(`Row ${idx + 1} (${row.name || 'unnamed'}): ${reasons.join(', ')}`)
         }
+      })
 
-        const parseNumberWithDefault = (value, defaultValue = 1) => {
-          const text = String(value ?? '').trim()
-          if (!text) return defaultValue
-          const parsed = Number(text)
-          return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue
-        }
+      if (failures.length > 0) {
+        console.warn('Skipped rows:', failures)
+      }
 
-        const parsed = rmImportRows
-          .map(row => ({
-            name: String(row[rmImportColMap.name] ?? '').trim(),
-            brand: rmImportColMap.brand !== undefined ? String(row[rmImportColMap.brand] ?? '').trim() : '',
-            sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
-            costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
-            instock: rmImportColMap.instock !== undefined ? parseRequiredNumber(row[rmImportColMap.instock]) : Number.NaN,
-            size: rmImportColMap.size !== undefined ? String(row[rmImportColMap.size] ?? '').trim() : '',
-            unitSize: rmImportColMap.size !== undefined ? parseNumberWithDefault(row[rmImportColMap.size], 1) : 1,
-            unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
-            reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
-            description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
-            image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
-          }))
-      
-        // Debug: check which rows fail and why
-        const failures = []
-        parsed.forEach((row, idx) => {
-          const reasons = []
-          if (!row.name) reasons.push('missing name')
-          if (!Number.isFinite(row.instock)) reasons.push(`invalid instock: "${rmImportRows[idx][rmImportColMap.instock]}"`)
-          if (reasons.length > 0) {
-            failures.push(`Row ${idx + 1} (${row.name || 'unnamed'}): ${reasons.join(', ')}`)
-          }
-        })
+      const payload = parsed
+        .filter(row => row.name && Number.isFinite(row.instock))
 
-        if (failures.length > 0) {
-          console.warn('Skipped rows:', failures)
-        }
-
-        const payload = parsed
-          .filter(row => row.name && Number.isFinite(row.instock))
-
-        if (payload.length === 0) {
-          setRmImportError(`All rows were invalid. Issues:\n${failures.join('\n')}`)
-          setRmImportLoading(false)
-          return
-        }
+      if (payload.length === 0) {
+        setRmImportError(`All rows were invalid. Issues:\n${failures.join('\n')}`)
+        setRmImportLoading(false)
+        return
+      }
 
       const res = await bulkImportRawMaterials(payload)
       if (res.success) {
@@ -714,8 +714,8 @@ export default function ManufacturingPage() {
       } else {
         setRmImportError(res.error || 'Import failed')
       }
-      } catch (err) {
-        setRmImportError(`Import failed: ${err.message}`)
+    } catch (err) {
+      setRmImportError(`Import failed: ${err.message}`)
     }
 
     setRmImportLoading(false)
@@ -843,14 +843,14 @@ export default function ManufacturingPage() {
     setShowBulkDeleteModal(false)
     setSelectedRmIds(new Set())
     loadData()
-    
+
     let message = `Deleted ${deleted} raw material${deleted !== 1 ? 's' : ''}.`
     if (failed > 0) {
       message += `\n\nFailed to delete ${failed} item${failed !== 1 ? 's' : ''}:`
       message += '\n' + errors.slice(0, 5).join('\n')
       if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
     }
-    
+
     alert(message)
     setBulkDeleting(false)
   }
@@ -1840,223 +1840,223 @@ export default function ManufacturingPage() {
           <div className="glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[1000px]">
-              <thead>
-                <tr className="border-b border-border bg-surface-hover">
-                  <th className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">
-                    <input
-                      type="checkbox"
-                      checked={selectedRmIds.size > 0 && selectedRmIds.size === rawMaterials.length}
-                      onChange={e => {
-                        if (e.target.checked) {
-                          setSelectedRmIds(new Set(rawMaterials.map(rm => rm.id)))
-                        } else {
-                          setSelectedRmIds(new Set())
-                        }
-                      }}
-                      className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
-                  </th>
-                  {['Material Name', 'Image', 'Size', 'SKU Code', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Status', 'Actions'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rawMaterials.length === 0 && (
-                  <tr>
-                    <td colSpan={13} className="text-center py-12 text-muted">
-                      {rmSearch ? 'No materials match your search' : 'No raw materials yet. Add one above to get started.'}
-                    </td>
+                <thead>
+                  <tr className="border-b border-border bg-surface-hover">
+                    <th className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">
+                      <input
+                        type="checkbox"
+                        checked={selectedRmIds.size > 0 && selectedRmIds.size === rawMaterials.length}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            setSelectedRmIds(new Set(rawMaterials.map(rm => rm.id)))
+                          } else {
+                            setSelectedRmIds(new Set())
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
+                    </th>
+                    {['Material Name', 'Image', 'Size', 'SKU Code', 'Cost Price (₹)', 'Stock Qty', 'UoM', 'Min. Alert', 'Measure/Qty', 'Status', 'Actions'].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-xs text-muted font-semibold uppercase tracking-wide">{h}</th>
+                    ))}
                   </tr>
-                )}
-                {rawMaterials.map(rm => (
-                  <tr key={rm.id} className={`border-b border-border/50 hover:bg-surface-hover/50 ${selectedRmIds.has(rm.id) ? 'bg-accent/10' : ''}`}>
-                    {editingRmId === rm.id ? (
-                      <>
-                        <td className="px-4 py-3"></td>
-                        <td className="px-4 py-3">
-                          <div className="space-y-1">
-                            <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
-                              className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
-                            <input value={rmEditForm.brand || ''} onChange={e => setRmEditForm(f => ({ ...f, brand: e.target.value }))}
-                              className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Brand" />
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="file"
-                            accept="image/*"
-                            onChange={e => {
-                              const file = e.target.files?.[0]
-                              if (file) setRmEditImages([file])
-                              e.target.value = ''
-                            }}
-                            className="w-36 text-[10px] text-muted" />
-                          {rmEditImages.length > 0 && (
-                            <p className="text-[10px] text-muted mt-1">{rmEditImages[0].name}</p>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <input value={rmEditForm.description || ''} onChange={e => setRmEditForm(f => ({ ...f, description: e.target.value }))}
-                            className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="e.g. 1 inch (square)" />
-                        </td>
-                        <td className="px-4 py-3 text-muted font-mono text-xs">{rm.sku}</td>
-                        <td className="px-4 py-3 text-muted text-xs">₹{rm.costPrice}</td>
-                        <td className="px-4 py-3">
+                </thead>
+                <tbody>
+                  {rawMaterials.length === 0 && (
+                    <tr>
+                      <td colSpan={13} className="text-center py-12 text-muted">
+                        {rmSearch ? 'No materials match your search' : 'No raw materials yet. Add one above to get started.'}
+                      </td>
+                    </tr>
+                  )}
+                  {rawMaterials.map(rm => (
+                    <tr key={rm.id} className={`border-b border-border/50 hover:bg-surface-hover/50 ${selectedRmIds.has(rm.id) ? 'bg-accent/10' : ''}`}>
+                      {editingRmId === rm.id ? (
+                        <>
+                          <td className="px-4 py-3"></td>
+                          <td className="px-4 py-3">
+                            <div className="space-y-1">
+                              <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
+                                className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                              <input value={rmEditForm.brand || ''} onChange={e => setRmEditForm(f => ({ ...f, brand: e.target.value }))}
+                                className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Brand" />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) setRmEditImages([file])
+                                e.target.value = ''
+                              }}
+                              className="w-36 text-[10px] text-muted" />
+                            {rmEditImages.length > 0 && (
+                              <p className="text-[10px] text-muted mt-1">{rmEditImages[0].name}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <input value={rmEditForm.description || ''} onChange={e => setRmEditForm(f => ({ ...f, description: e.target.value }))}
+                              className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="e.g. 1 inch (square)" />
+                          </td>
+                          <td className="px-4 py-3 text-muted font-mono text-xs">{rm.sku}</td>
+                          <td className="px-4 py-3 text-muted text-xs">₹{rm.costPrice}</td>
+                          <td className="px-4 py-3">
+                            {(() => {
+                              const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
+                              const currentQty = (Number(rm.stock) || 0) / unitSize
+                              const currentQtyLabel = Number.isInteger(currentQty) ? String(currentQty) : currentQty.toFixed(2)
+                              return (
+                                <div className="space-y-1">
+                                  <p className="text-[10px] text-muted">Current: {currentQtyLabel}</p>
+                                  <select
+                                    value={rmEditForm.stockAction || 'SET'}
+                                    onChange={e => setRmEditForm(f => ({ ...f, stockAction: e.target.value }))}
+                                    className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-[10px] text-foreground">
+                                    <option value="SET">Set Stock</option>
+                                    <option value="ADD">Add Stock</option>
+                                  </select>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={rmEditForm.stockQuantity}
+                                    onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value, currentStockQuantity: currentQty }))}
+                                    className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground"
+                                    placeholder={rmEditForm.stockAction === 'ADD' ? 'Add Qty' : 'Stock Qty'} />
+                                </div>
+                              )
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 text-muted text-xs">
+                            <select
+                              value={rmEditForm.unitOfMeasure || rm.unitOfMeasure || 'PCS'}
+                              onChange={e => setRmEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
+                              className="w-20 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground">
+                              <option value="PCS">PCS</option>
+                              <option value="BOX">BOX</option>
+                              <option value="KG">KG</option>
+                              <option value="G">G</option>
+                              <option value="MTR">MTR</option>
+                              <option value="FT">FT</option>
+                              <option value="INCH">INCH</option>
+                            </select>
+                          </td>
+                          <td className="px-4 py-3">
+                            <input type="number" min="0" value={rmEditForm.reorderLevel} onChange={e => setRmEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
+                              className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                          </td>
+                          <td className="px-4 py-3 text-muted text-xs">
+                            <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
+                              className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
+                          </td>
+                          <td className="px-4 py-3"></td>
+                          <td className="px-4 py-3">
+                            <div className="flex gap-1.5">
+                              <button onClick={() => handleUpdateRawMaterial(rm.id)} disabled={submitting}
+                                className="px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center gap-1">
+                                <Save className="w-3 h-3" /> Save
+                              </button>
+                              <button onClick={() => { setEditingRmId(null); setRmEditImages([]) }}
+                                className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted">
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedRmIds.has(rm.id)}
+                              onChange={e => {
+                                const newSet = new Set(selectedRmIds)
+                                if (e.target.checked) {
+                                  newSet.add(rm.id)
+                                } else {
+                                  newSet.delete(rm.id)
+                                }
+                                setSelectedRmIds(newSet)
+                              }}
+                              className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
+                          </td>
                           {(() => {
                             const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
-                            const currentQty = (Number(rm.stock) || 0) / unitSize
-                            const currentQtyLabel = Number.isInteger(currentQty) ? String(currentQty) : currentQty.toFixed(2)
+                            const stockQty = (Number(rm.stock) || 0) / unitSize
+                            const isLow = stockQty <= (Number(rm.reorderLevel) || 0)
+                            const stockQtyLabel = Number.isInteger(stockQty) ? String(stockQty) : stockQty.toFixed(2)
+                            const stockMeasureLabel = Number.isInteger(Number(rm.stock) || 0) ? String(Number(rm.stock) || 0) : Number(rm.stock || 0).toFixed(2)
                             return (
-                              <div className="space-y-1">
-                                <p className="text-[10px] text-muted">Current: {currentQtyLabel}</p>
-                                <select
-                                  value={rmEditForm.stockAction || 'SET'}
-                                  onChange={e => setRmEditForm(f => ({ ...f, stockAction: e.target.value }))}
-                                  className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-[10px] text-foreground">
-                                  <option value="SET">Set Stock</option>
-                                  <option value="ADD">Add Stock</option>
-                                </select>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={rmEditForm.stockQuantity}
-                                  onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value, currentStockQuantity: currentQty }))}
-                                  className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground"
-                                  placeholder={rmEditForm.stockAction === 'ADD' ? 'Add Qty' : 'Stock Qty'} />
-                              </div>
+                              <>
+                                <td className="px-4 py-3 text-foreground font-medium">
+                                  <div>{rm.name}</div>
+                                  {rm.brand && <p className="text-[10px] text-muted mt-0.5">Brand: {rm.brand}</p>}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {rm.image ? (
+                                    <img src={rm.image} alt={rm.name} className="w-8 h-8 rounded object-cover border border-border" />
+                                  ) : (
+                                    <span className="text-muted text-xs">None</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-muted text-xs">
+                                  {rm.description || '—'}
+                                </td>
+                                <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
+                                <td className="px-4 py-3 text-foreground">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</td>
+                                <td className="px-4 py-3">
+                                  <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+                                    {stockQtyLabel}
+                                  </span>
+                                  <p className="text-[10px] text-muted">{stockMeasureLabel} {rm.unitOfMeasure}</p>
+                                </td>
+                                <td className="px-4 py-3 text-muted">{rm.unitOfMeasure}</td>
+                                <td className="px-4 py-3 text-muted">{rm.reorderLevel}</td>
+                                <td className="px-4 py-3 text-muted text-xs">{unitSize}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                                    {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex gap-1.5">
+                                    <button
+                                      onClick={() => {
+                                        setEditingRmId(rm.id)
+                                        setRmEditForm({
+                                          name: rm.name,
+                                          brand: rm.brand || '',
+                                          stockQuantity: ((Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1)).toFixed(2),
+                                          currentStockQuantity: (Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1),
+                                          stockAction: 'SET',
+                                          unitSize: Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1,
+                                          unitOfMeasure: rm.unitOfMeasure || 'PCS',
+                                          reorderLevel: rm.reorderLevel,
+                                          description: rm.description || '',
+                                          image: rm.image || '',
+                                        })
+                                        setRmEditImages([])
+                                      }}
+                                      className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted hover:text-accent hover:border-accent/50 transition-colors flex items-center gap-1">
+                                      <Edit2 className="w-3 h-3" /> Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteRawMaterial(rm.id, rm.name)}
+                                      disabled={submitting}
+                                      className="px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-1 disabled:opacity-50">
+                                      <Trash2 className="w-3 h-3" /> Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </>
                             )
                           })()}
-                        </td>
-                        <td className="px-4 py-3 text-muted text-xs">
-                          <select
-                            value={rmEditForm.unitOfMeasure || rm.unitOfMeasure || 'PCS'}
-                            onChange={e => setRmEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
-                            className="w-20 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground">
-                            <option value="PCS">PCS</option>
-                            <option value="BOX">BOX</option>
-                            <option value="KG">KG</option>
-                            <option value="G">G</option>
-                            <option value="MTR">MTR</option>
-                            <option value="FT">FT</option>
-                            <option value="INCH">INCH</option>
-                          </select>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input type="number" min="0" value={rmEditForm.reorderLevel} onChange={e => setRmEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
-                            className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
-                        </td>
-                        <td className="px-4 py-3 text-muted text-xs">
-                          <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
-                            className="w-16 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
-                        </td>
-                        <td className="px-4 py-3"></td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-1.5">
-                            <button onClick={() => handleUpdateRawMaterial(rm.id)} disabled={submitting}
-                              className="px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center gap-1">
-                              <Save className="w-3 h-3" /> Save
-                            </button>
-                            <button onClick={() => { setEditingRmId(null); setRmEditImages([]) }}
-                              className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted">
-                              Cancel
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selectedRmIds.has(rm.id)}
-                            onChange={e => {
-                              const newSet = new Set(selectedRmIds)
-                              if (e.target.checked) {
-                                newSet.add(rm.id)
-                              } else {
-                                newSet.delete(rm.id)
-                              }
-                              setSelectedRmIds(newSet)
-                            }}
-                            className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer" />
-                        </td>
-                        {(() => {
-                          const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
-                          const stockQty = (Number(rm.stock) || 0) / unitSize
-                          const isLow = stockQty <= (Number(rm.reorderLevel) || 0)
-                          const stockQtyLabel = Number.isInteger(stockQty) ? String(stockQty) : stockQty.toFixed(2)
-                          const stockMeasureLabel = Number.isInteger(Number(rm.stock) || 0) ? String(Number(rm.stock) || 0) : Number(rm.stock || 0).toFixed(2)
-                          return (
-                            <>
-                        <td className="px-4 py-3 text-foreground font-medium">
-                          <div>{rm.name}</div>
-                          {rm.brand && <p className="text-[10px] text-muted mt-0.5">Brand: {rm.brand}</p>}
-                        </td>
-                        <td className="px-4 py-3">
-                          {rm.image ? (
-                            <img src={rm.image} alt={rm.name} className="w-8 h-8 rounded object-cover border border-border" />
-                          ) : (
-                            <span className="text-muted text-xs">None</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-muted text-xs">
-                          {rm.description || '—'}
-                        </td>
-                        <td className="px-4 py-3 text-accent font-mono text-xs font-semibold">{rm.sku}</td>
-                        <td className="px-4 py-3 text-foreground">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</td>
-                        <td className="px-4 py-3">
-                          <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>
-                            {stockQtyLabel}
-                          </span>
-                          <p className="text-[10px] text-muted">{stockMeasureLabel} {rm.unitOfMeasure}</p>
-                        </td>
-                        <td className="px-4 py-3 text-muted">{rm.unitOfMeasure}</td>
-                        <td className="px-4 py-3 text-muted">{rm.reorderLevel}</td>
-                        <td className="px-4 py-3 text-muted text-xs">{unitSize}</td>
-                        <td className="px-4 py-3">
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
-                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex gap-1.5">
-                            <button
-                              onClick={() => {
-                                setEditingRmId(rm.id)
-                                setRmEditForm({
-                                  name: rm.name,
-                                  brand: rm.brand || '',
-                                  stockQuantity: ((Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1)).toFixed(2),
-                                  currentStockQuantity: (Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1),
-                                  stockAction: 'SET',
-                                  unitSize: Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1,
-                                  unitOfMeasure: rm.unitOfMeasure || 'PCS',
-                                  reorderLevel: rm.reorderLevel,
-                                  description: rm.description || '',
-                                  image: rm.image || '',
-                                })
-                                setRmEditImages([])
-                              }}
-                              className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted hover:text-accent hover:border-accent/50 transition-colors flex items-center gap-1">
-                              <Edit2 className="w-3 h-3" /> Edit
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRawMaterial(rm.id, rm.name)}
-                              disabled={submitting}
-                              className="px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/20 text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center gap-1 disabled:opacity-50">
-                              <Trash2 className="w-3 h-3" /> Delete
-                            </button>
-                          </div>
-                        </td>
-                            </>
-                          )
-                        })()}
-                      </>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -2361,7 +2361,7 @@ export default function ManufacturingPage() {
                           <div className="absolute top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg z-50 max-h-48 overflow-y-auto">
                             {(() => {
                               const search = (bomItemSearch[i] || '').toLowerCase()
-                              const filtered = rawMaterialOptions.filter(p => 
+                              const filtered = rawMaterialOptions.filter(p =>
                                 (p.name.toLowerCase().includes(search) || p.sku.toLowerCase().includes(search))
                               )
                               return filtered.length > 0 ? (
@@ -2774,11 +2774,10 @@ export default function ManufacturingPage() {
                   const returnedQty = Math.max(0, issuedQty - totalConsumed)
                   const isOverConsumed = totalConsumed > issuedQty + 0.001
                   const overConsumption = isOverConsumed ? totalConsumed - issuedQty : 0
-                  
+
                   return (
-                    <div key={i} className={`p-3 rounded-lg border transition-colors ${
-                      isOverConsumed ? 'bg-red-500/10 border-red-500/30' : 'bg-surface-hover border-border'
-                    }`}>
+                    <div key={i} className={`p-3 rounded-lg border transition-colors ${isOverConsumed ? 'bg-red-500/10 border-red-500/30' : 'bg-surface-hover border-border'
+                      }`}>
                       <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         <span className="text-sm font-medium text-foreground">{prod?.name || `Material #${c.rawMaterialId}`}</span>
                         {isOverConsumed && <span className="text-xs font-semibold text-red-400 bg-red-500/20 px-2 py-1 rounded">⚠ Over-consumed by {overConsumption.toFixed(2)}</span>}
@@ -2802,9 +2801,8 @@ export default function ManufacturingPage() {
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2 mt-2">
-                        <div className={`text-center px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 ${
-                          isOverConsumed ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
-                        }`}>
+                        <div className={`text-center px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 ${isOverConsumed ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/10 text-emerald-400'
+                          }`}>
                           {isOverConsumed ? `Over: ${overConsumption.toFixed(2)}` : `Return: ${returnedQty.toFixed(2)}`}
                         </div>
                         <input value={c.scrapReason || ''} onChange={e => { const v = [...completeForm.consumptions]; v[i].scrapReason = e.target.value; setCompleteForm(f => ({ ...f, consumptions: v })) }} placeholder="Scrap reason..." className="flex-1 min-w-[140px] px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />

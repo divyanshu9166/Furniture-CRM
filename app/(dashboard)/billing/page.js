@@ -490,10 +490,10 @@ export default function BillingPage() {
       const paymentsData = isHeld
         ? [{ amount: 0, method: 'Cash' }]
         : posPayments.filter(p => p.amount > 0).map(p => ({
-            amount: Number(p.amount),
-            method: p.method,
-            reference: p.reference || undefined,
-          }));
+          amount: Number(p.amount),
+          method: p.method,
+          reference: p.reference || undefined,
+        }));
 
       if (!isHeld && !isEditing && paymentsData.length === 0) {
         alert('Please enter at least one payment amount');
@@ -768,7 +768,7 @@ export default function BillingPage() {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
     script.setAttribute('data-html2pdf', '1');
-    script.onload  = () => resolve(window.html2pdf);
+    script.onload = () => resolve(window.html2pdf);
     script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
     document.head.appendChild(script);
   });
@@ -835,8 +835,8 @@ export default function BillingPage() {
         <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
         ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
         ${isInterstate
-          ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-          : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+        ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+        : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
              <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
         ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
         <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
@@ -928,8 +928,8 @@ export default function BillingPage() {
           <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
           ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
           ${isInterstate
-            ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-            : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+        ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+        : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
                <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
           ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
           <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
@@ -1038,8 +1038,8 @@ export default function BillingPage() {
             <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
             ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
             ${(inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0))
-              ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-              : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
+          ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
+          : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
                  <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
             ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
             <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
@@ -1053,7 +1053,7 @@ export default function BillingPage() {
         </div>
         </body></html>
       `;
-      
+
       const opt = {
         margin: 0.2,
         filename: 'Invoice_${inv.id}.pdf',
@@ -1061,7 +1061,7 @@ export default function BillingPage() {
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
       };
-      
+
       html2pdf().set(opt).from(element).outputPdf('blob').then(async (pdfBlob) => {
         const file = new File([pdfBlob], 'Invoice_${inv.id}.pdf', { type: 'application/pdf' });
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1542,59 +1542,59 @@ export default function BillingPage() {
                   {posItems.map(item => {
                     const hsnMatch = hsnCodes.find(h => h.code === item.hsnCode);
                     return (
-                    <div key={item.id} className="grid grid-cols-12 gap-3 items-center bg-surface rounded-xl p-3">
-                      <div className="col-span-5 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
-                        <p className="text-[10px] text-muted font-mono mt-0.5">{item.sku} · {item.category}</p>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="text-[9px] uppercase tracking-wider text-muted">HSN</span>
-                          <input
-                            type="text"
-                            placeholder="HSN code"
-                            value={item.hsnCode || ''}
-                            onChange={e => updateItemHsn(item.id, e.target.value)}
-                            list="hsn-codes"
-                            className="w-28 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
-                          />
-                          <span className="text-[9px] uppercase tracking-wider text-muted">GST %</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={Number.isFinite(item.gstRate) ? item.gstRate : gstRate}
-                            onChange={e => updateItemGstRate(item.id, e.target.value)}
-                            className="w-16 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
-                          />
-                          {hsnMatch?.description && (
-                            <span className="text-[10px] text-muted truncate max-w-[220px]">{hsnMatch.description}</span>
-                          )}
+                      <div key={item.id} className="grid grid-cols-12 gap-3 items-center bg-surface rounded-xl p-3">
+                        <div className="col-span-5 min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
+                          <p className="text-[10px] text-muted font-mono mt-0.5">{item.sku} · {item.category}</p>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <span className="text-[9px] uppercase tracking-wider text-muted">HSN</span>
+                            <input
+                              type="text"
+                              placeholder="HSN code"
+                              value={item.hsnCode || ''}
+                              onChange={e => updateItemHsn(item.id, e.target.value)}
+                              list="hsn-codes"
+                              className="w-28 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
+                            />
+                            <span className="text-[9px] uppercase tracking-wider text-muted">GST %</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={Number.isFinite(item.gstRate) ? item.gstRate : gstRate}
+                              onChange={e => updateItemGstRate(item.id, e.target.value)}
+                              className="w-16 px-2 py-1 text-[10px] bg-transparent border border-border rounded-md focus:outline-none focus:border-accent/50"
+                            />
+                            {hsnMatch?.description && (
+                              <span className="text-[10px] text-muted truncate max-w-[220px]">{hsnMatch.description}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="col-span-2">
+                          <input type="number" value={item.price} min="0"
+                            onChange={e => updateItemPrice(item.id, parseInt(e.target.value) || 0)}
+                            className="w-full text-center text-sm font-medium bg-transparent border border-border rounded-lg py-1.5 focus:border-accent/50 outline-none" />
+                        </div>
+                        <div className="col-span-2 flex items-center justify-center gap-1">
+                          <button onClick={() => updateQty(item.id, item.qty - 1)} className="w-7 h-7 rounded-lg bg-surface-hover border border-border flex items-center justify-center text-muted hover:text-foreground transition-colors">
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <input type="number" value={item.qty} min="1" max={item.stock}
+                            onChange={e => updateQty(item.id, parseInt(e.target.value) || 1)}
+                            className="w-10 text-center text-sm font-semibold bg-transparent border border-border rounded-lg py-1.5 focus:border-accent/50 outline-none" />
+                          <button onClick={() => updateQty(item.id, item.qty + 1)} className="w-7 h-7 rounded-lg bg-surface-hover border border-border flex items-center justify-center text-muted hover:text-foreground transition-colors">
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                        <div className="col-span-2 text-right">
+                          <p className="text-sm font-semibold text-foreground">{formatFullCurrency(item.price * item.qty)}</p>
+                        </div>
+                        <div className="col-span-1 flex justify-end">
+                          <button onClick={() => setPosItems(posItems.filter(i => i.id !== item.id))} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-600 transition-colors">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                      <div className="col-span-2">
-                        <input type="number" value={item.price} min="0"
-                          onChange={e => updateItemPrice(item.id, parseInt(e.target.value) || 0)}
-                          className="w-full text-center text-sm font-medium bg-transparent border border-border rounded-lg py-1.5 focus:border-accent/50 outline-none" />
-                      </div>
-                      <div className="col-span-2 flex items-center justify-center gap-1">
-                        <button onClick={() => updateQty(item.id, item.qty - 1)} className="w-7 h-7 rounded-lg bg-surface-hover border border-border flex items-center justify-center text-muted hover:text-foreground transition-colors">
-                          <Minus className="w-3 h-3" />
-                        </button>
-                        <input type="number" value={item.qty} min="1" max={item.stock}
-                          onChange={e => updateQty(item.id, parseInt(e.target.value) || 1)}
-                          className="w-10 text-center text-sm font-semibold bg-transparent border border-border rounded-lg py-1.5 focus:border-accent/50 outline-none" />
-                        <button onClick={() => updateQty(item.id, item.qty + 1)} className="w-7 h-7 rounded-lg bg-surface-hover border border-border flex items-center justify-center text-muted hover:text-foreground transition-colors">
-                          <Plus className="w-3 h-3" />
-                        </button>
-                      </div>
-                      <div className="col-span-2 text-right">
-                        <p className="text-sm font-semibold text-foreground">{formatFullCurrency(item.price * item.qty)}</p>
-                      </div>
-                      <div className="col-span-1 flex justify-end">
-                        <button onClick={() => setPosItems(posItems.filter(i => i.id !== item.id))} className="p-1.5 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-600 transition-colors">
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
                     );
                   })}
                   {hsnCodes.length > 0 && (
