@@ -29,7 +29,8 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
         const res = await fetch('/api/whatsapp/templates');
         if (!res.ok) throw new Error('Failed to load templates');
         const data = await res.json();
-        setTemplates(data?.templates ?? []);
+        const allTemplates: MessageTemplate[] = data?.data ?? [];
+        setTemplates(allTemplates.filter(t => t.status === 'Approved' || t.status === 'APPROVED'));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load templates');
       } finally {

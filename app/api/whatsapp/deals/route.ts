@@ -46,7 +46,7 @@ export async function POST(request: Request) {
                 user_id: userId,
                 title,
                 value: typeof body?.value === 'number' ? body.value : Number(body?.value) || 0,
-                currency: String(body?.currency ?? 'USD'),
+                currency: String(body?.currency ?? 'INR'),
                 contact_id: contactId,
                 pipeline_id: pipelineId,
                 stage_id: stageId,

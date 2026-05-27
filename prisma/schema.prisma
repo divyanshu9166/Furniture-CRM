@@ -2101,7 +2101,7 @@ model WaDeal {
   assigned_to         String?
   title               String
   value               Float    @default(0)
-  currency            String?  @default("USD")
+  currency            String?  @default("INR")
   notes               String?
   expected_close_date DateTime?
   status              String   @default("open")
