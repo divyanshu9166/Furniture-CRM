@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   MessageSquare, Radio, Bot, Settings,
   BarChart3, Wifi, WifiOff, Loader2, Megaphone,
-  Users, Kanban
+  Users, Kanban, Terminal
 } from 'lucide-react';
 import { useTotalUnread } from '@/lib/use-total-unread';
 
@@ -16,6 +16,7 @@ import { AutomationsTab } from '@/components/whatsapp/automations/automations-ta
 import { ContactsTab } from '@/components/whatsapp/contacts/contacts-tab';
 import { PipelinesTab } from '@/components/whatsapp/pipelines/pipelines-tab';
 import { SettingsTab } from '@/components/whatsapp/settings/settings-tab';
+import { ApiLogsTab } from '@/components/whatsapp/logs/api-logs-tab';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'pipelines', label: 'Pipelines', icon: Kanban },
   { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'logs', label: 'API Logs', icon: Terminal },
 ] as const;
 
 type TabId = (typeof TABS)[number]['id'];
@@ -134,6 +136,7 @@ export function WhatsAppMarketingClient() {
       {activeTab === 'contacts' && <ContactsTab />}
       {activeTab === 'pipelines' && <PipelinesTab />}
       {activeTab === 'settings' && <SettingsTab />}
+      {activeTab === 'logs' && <ApiLogsTab />}
     </div>
   );
 }

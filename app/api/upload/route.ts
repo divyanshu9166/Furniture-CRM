@@ -7,6 +7,8 @@ const ALLOWED_TYPES = [
   'image/webp',
   'image/heic', 'image/heif', // iPhone default photo format
   'image/gif',
+  'application/pdf',
+  'text/csv',
 ]
 const MAX_SIZE = 10 * 1024 * 1024 // 10MB
 
