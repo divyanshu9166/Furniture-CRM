@@ -81,64 +81,7 @@ function mapImportColumns(headers) {
 }
 
 // ─── CSV Export Helper ────────────────────────────────
-function downloadBOMCSV(bom) {
-  const rows = []
-  rows.push(['BOM Name', bom.name])
-  rows.push(['Product', bom.finishedProduct?.name ?? ''])
-  rows.push(['SKU', bom.finishedProduct?.sku ?? ''])
-  rows.push(['Version', bom.version])
-  rows.push(['Estimated Days', bom.estimatedDays ?? ''])
-  rows.push(['Standard Time (min)', bom.standardMins ?? (bom.steps?.reduce((s, step) => s + (step.durationMins || 0), 0) ?? 0)])
-  rows.push([])
-  rows.push(['=== RAW MATERIALS ==='])
-  rows.push(['Material', 'SKU', 'Quantity', 'UoM', 'Wastage%', 'Unit Cost (₹)', 'Total Cost (₹)'])
-  bom.items?.forEach(i => {
-    const uc = i.unitCost > 0 ? i.unitCost : (i.rawMaterial?.costPrice ?? 0)
-    rows.push([
-      i.rawMaterial?.name ?? '',
-      i.rawMaterial?.sku ?? '',
-      i.quantity,
-      i.unitOfMeasure,
-      i.wastagePercent + '%',
-      uc,
-      Math.round(i.quantity * (1 + (i.wastagePercent || 0) / 100) * uc),
-    ])
-  })
-  const matTotal = bom.items?.reduce((s, i) => {
-    const uc = i.unitCost > 0 ? i.unitCost : (i.rawMaterial?.costPrice ?? 0)
-    return s + Math.round(i.quantity * (1 + (i.wastagePercent || 0) / 100) * uc)
-  }, 0) ?? 0
-  rows.push(['', '', '', '', '', 'Total Material Cost', matTotal])
-  rows.push([])
-  rows.push(['=== MANUFACTURING STEPS (JOB COSTING) ==='])
-  rows.push(['Step', 'Operation', 'Work Center', 'Duration (min)', 'Labour Rate ₹/hr', 'Labour Cost/unit ₹', 'Machine Cost/unit ₹', 'Total/unit ₹'])
-  let totalStepCost = 0
-  bom.steps?.forEach(s => {
-    const lc = Math.round((s.durationMins / 60) * s.labourRatePerHour * 100) / 100
-    const mc = s.machineCostPerUnit ?? 0
-    const total = lc + mc
-    totalStepCost += total
-    rows.push([s.stepNumber, s.operationName, s.workCenter?.name ?? '', s.durationMins, s.labourRatePerHour, lc.toFixed(2), mc, total.toFixed(2)])
-  })
-  rows.push(['', '', '', '', '', '', 'Total Step Cost/unit', totalStepCost.toFixed(2)])
-  rows.push([])
-  rows.push(['=== COST SUMMARY (per unit) ==='])
-  rows.push(['Material Cost', matTotal])
-  rows.push(['Labour + Machine Cost', totalStepCost.toFixed(2)])
-  rows.push(['Estimated Total Cost', (matTotal + totalStepCost).toFixed(2)])
-  rows.push(['Selling Price', bom.finishedProduct?.price ?? 0])
-  rows.push(['Est. Margin', bom.finishedProduct?.price ? (((bom.finishedProduct.price - matTotal - totalStepCost) / bom.finishedProduct.price) * 100).toFixed(1) + '%' : 'N/A'])
-
-  const csv = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `BOM_${bom.name.replace(/\s+/g, '_')}_v${bom.version}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
+import { downloadBOMCSV, downloadBOMPDF } from '@/lib/manufacturing/downloads'
 // ─── Main Page ────────────────────────────────────────
 export default function ManufacturingPage() {
   const [tab, setTab] = useState('production')
@@ -3108,7 +3051,15 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
           })()}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button onClick={onExport} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-emerald-400" title="Export BOM as CSV"><Download className="w-4 h-4" /></button>
+          <div className="relative group z-50">
+            <button className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-emerald-400" title="Download Options"><Download className="w-4 h-4" /></button>
+            <div className="absolute right-0 mt-1 w-48 bg-surface border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col overflow-hidden">
+              <button onClick={() => downloadBOMCSV(bom, false)} className="px-4 py-2 text-left text-xs hover:bg-surface-light text-foreground border-b border-border">BOM (CSV)</button>
+              <button onClick={() => downloadBOMPDF(bom, false)} className="px-4 py-2 text-left text-xs hover:bg-surface-light text-foreground border-b border-border">BOM (PDF)</button>
+              <button onClick={() => downloadBOMCSV(bom, true)} className="px-4 py-2 text-left text-xs hover:bg-surface-light text-foreground border-b border-border">Work Sheet (CSV)</button>
+              <button onClick={() => downloadBOMPDF(bom, true)} className="px-4 py-2 text-left text-xs hover:bg-surface-light text-foreground">Work Sheet (PDF)</button>
+            </div>
+          </div>
           <button onClick={() => setExpanded(!expanded)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground">
             {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>

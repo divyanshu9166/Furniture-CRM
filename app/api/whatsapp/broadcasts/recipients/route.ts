@@ -1,38 +1,17 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
-import { recalculateBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
-
-const RECIPIENT_UPDATE_STATUSES = new Set(['sent', 'failed'])
 
 export async function POST(request: Request) {
   try {
     const session = await getSession()
     if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     
-    const userId = String(session.id)
     const { broadcastId, updates } = await request.json()
     // updates: { contact_id: string, status: 'sent' | 'failed', whatsapp_message_id?: string, error_message?: string }[]
 
-    if (!broadcastId || !Array.isArray(updates)) {
-      return NextResponse.json(
-        { error: 'broadcastId and updates[] are required' },
-        { status: 400 }
-      )
-    }
-
-    const broadcast = await prisma.waBroadcast.findFirst({
-      where: { id: broadcastId, user_id: userId },
-      select: { id: true },
-    })
-
-    if (!broadcast) {
-      return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
-    }
-    
+    // Apply each recipient update
     for (const update of updates) {
-      if (!update.contact_id) continue
-      if (!RECIPIENT_UPDATE_STATUSES.has(update.status)) continue
       await prisma.waBroadcastRecipient.updateMany({
         where: { broadcast_id: broadcastId, contact_id: update.contact_id },
         data: {
@@ -44,9 +23,40 @@ export async function POST(request: Request) {
       })
     }
 
-    const stats = await recalculateBroadcastStats(broadcastId)
+    // Re-derive aggregate counts directly from recipient rows.
+    // This is intentionally done in application code rather than relying
+    // on a Postgres trigger, so counts stay correct even if the DB
+    // migration that installs the trigger hasn't been applied.
+    const agg = await prisma.waBroadcastRecipient.groupBy({
+      by: ['status'],
+      where: { broadcast_id: broadcastId },
+      _count: { status: true },
+    })
 
-    return NextResponse.json({ ok: true, stats })
+    const countByStatus: Record<string, number> = {}
+    for (const row of agg) {
+      countByStatus[row.status] = row._count.status
+    }
+
+    // Ladder semantics (same as the DB trigger):
+    //   sent_count      = recipients at or past 'sent' (sent|delivered|read|replied)
+    //   delivered_count = recipients at or past 'delivered'
+    //   read_count      = recipients at or past 'read'
+    //   replied_count   = exactly 'replied'
+    //   failed_count    = exactly 'failed'
+    const s = (k: string) => countByStatus[k] ?? 0
+    const sent_count      = s('sent') + s('delivered') + s('read') + s('replied')
+    const delivered_count = s('delivered') + s('read') + s('replied')
+    const read_count      = s('read') + s('replied')
+    const replied_count   = s('replied')
+    const failed_count    = s('failed')
+
+    await prisma.waBroadcast.update({
+      where: { id: broadcastId },
+      data: { sent_count, delivered_count, read_count, replied_count, failed_count },
+    })
+
+    return NextResponse.json({ ok: true })
   } catch (error) {
     console.error('Error updating broadcast recipients:', error)
     return NextResponse.json({ error: 'Failed to update broadcast recipients' }, { status: 500 })

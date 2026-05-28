@@ -112,6 +112,20 @@ services:
       timeout: 10s
       retries: 3
 
+  # Python AI Agent for Call Centre
+  ai-agent:
+    build:
+      context: ./ai-agent
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:

@@ -442,7 +442,7 @@ export default function CallsPage() {
             className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
           />
         </div>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-2">
           {tagFilters.map((f) => (
             <button
               key={f}
