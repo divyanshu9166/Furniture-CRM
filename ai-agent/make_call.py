@@ -53,9 +53,9 @@ async def main():
         # We explicitly tell LiveKit to send the local agent to this room.
         # We pass the phone number in the 'metadata' field so the agent knows who to dial.
         dispatch_request = api.CreateAgentDispatchRequest(
-            agent_name="outbound-caller-local", # Must match agent.py
+            agent_name="furniture-crm-agent",
             room=room_name,
-            metadata=json.dumps({"phone_number": phone_number})
+            metadata=json.dumps({"phone_number": phone_number, "call_type": "outbound"})
         )
         
         dispatch = await lk_api.agent_dispatch.create_dispatch(dispatch_request)

@@ -1,6 +1,6 @@
 """
 Furzentic AI Calling Agent (livekit-agents v1.5.x)
-Uses LiveKit + Deepgram STT/TTS + Groq LLM + Twilio SIP
+Uses LiveKit + Deepgram STT/TTS + Groq LLM + Vobiz sip
 Handles both inbound and outbound calls for furniture businesses
 """
 
@@ -14,17 +14,27 @@ from typing import Optional
 import aiohttp
 from dotenv import load_dotenv
 from livekit import api
-from livekit.agents import (
-    AutoSubscribe,
-    JobContext,
-    JobProcess,
-    RoomInputOptions,
-    WorkerOptions,
-    cli,
-    llm,
-)
+from livekit.agents import AutoSubscribe, JobContext, JobProcess, WorkerOptions, cli, llm
 from livekit.agents.voice import Agent, AgentSession
-from livekit.plugins import deepgram, noise_cancellation, openai, silero
+from livekit.agents.voice.room_io import AudioInputOptions, AudioOutputOptions, RoomOptions
+from livekit.plugins import deepgram, noise_cancellation, openai, sarvam, silero
+
+from config import (
+    DEFAULT_TTS_VOICE,
+    GROQ_MAX_TOKENS,
+    GROQ_MODEL,
+    GROQ_TEMPERATURE,
+    GROQ_TOP_P,
+    build_outbound_greeting,
+    INBOUND_SYSTEM_PROMPT,
+    OPENAI_FALLBACK_MODEL,
+    OUTBOUND_GREETING_PROMPT,
+    OUTBOUND_SYSTEM_PROMPT,
+    SARVAM_LANGUAGE,
+    SARVAM_MODEL,
+    STT_LANGUAGE,
+    STT_MODEL,
+)
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
@@ -36,63 +46,27 @@ CRM_API_URL = os.getenv("CRM_API_URL", "http://localhost:3000")
 CRM_API_SECRET = os.getenv("CRM_API_SECRET", "")
 MAX_CALL_DURATION = int(os.getenv("MAX_CALL_DURATION_SECONDS", "600"))
 DEFAULT_TRANSFER_NUMBER = os.getenv("DEFAULT_TRANSFER_NUMBER", "")
-OUTBOUND_SIP_TRUNK_ID = os.getenv("OUTBOUND_SIP_TRUNK_ID", "")
+OUTBOUND_SIP_TRUNK_ID = os.getenv("OUTBOUND_SIP_TRUNK_ID") or os.getenv("VOBIZ_SIP_TRUNK_ID", "")
 
-# ─── System prompts ───
-INBOUND_SYSTEM_PROMPT = """\
-# Identity
-You are Aria, a warm and professional customer representative for a furniture store.
-You are handling an inbound call from a customer who called you.
 
-# Capabilities
-- Answer questions about furniture products, pricing, availability, and delivery
-- Schedule showroom visits, measurement appointments, and design consultations
-- Handle complaints and escalate urgent issues to a human agent
-- Collect customer details for follow-ups and quotations
-- Provide order status updates
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
 
-# Behaviour Rules
-1. Greet the customer warmly and ask how you can help.
-2. Confirm the customer's name early in the call.
-3. NEVER fabricate prices or delivery commitments.
-4. If asked something outside your knowledge, offer to have a team member call back.
-5. If the customer asks for a human, call the transfer_call tool immediately.
-6. When the conversation is complete, call the end_call tool.
-7. Always close warmly — thank them and wish them a lovely day.
-8. Keep responses concise — 1 to 3 sentences per turn.
-9. When scheduling an appointment: ask for each detail ONE AT A TIME — phone number, date, time. Once you have ALL details confirmed, THEN call schedule_appointment. NEVER call it with "unknown" or missing values.
-"""
 
-OUTBOUND_SYSTEM_PROMPT = """\
-# Identity
-You are Aria, a warm and professional customer representative for a furniture store.
-You are making an outbound call to a customer — you called them, so respect their time.
-
-# Capabilities
-- Follow up on previous inquiries, quotes, or showroom visits
-- Remind customers about upcoming appointments or deliveries
-- Collect feedback on recent purchases
-- Inform about new collections, sales, or promotions
-- Schedule showroom visits or design consultations
-
-# Behaviour Rules
-1. Introduce yourself immediately: name, store, reason for call.
-2. Confirm you are speaking to the right person before proceeding.
-3. NEVER fabricate prices or delivery commitments.
-4. If the customer is busy, offer to call back at a convenient time.
-5. If the customer asks for a human, call the transfer_call tool immediately.
-6. When the conversation is complete, call the end_call tool.
-7. Always close warmly — thank them and wish them a lovely day.
-8. Keep responses concise — 1 to 3 sentences per turn.
-9. When scheduling an appointment: ask for each detail ONE AT A TIME — phone number, date, time. Once you have ALL details confirmed, THEN call schedule_appointment. NEVER call it with "unknown" or missing values.
-"""
-
-OUTBOUND_GREETING_PROMPT = (
-    "The customer has just answered the phone. "
-    "Introduce yourself immediately: 'Hi, this is Aria calling from the furniture store. "
-    "I'm calling today to [state the reason briefly]. Is now a good time to chat?' "
-    "Be warm, natural, and brief. Reason for call: {reason}"
-)
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 # ─── Tools ───
@@ -111,14 +85,23 @@ class FurnitureCRMTools(llm.ToolContext):
         if not target:
             return "No transfer number configured. Apologise and offer to have someone call them back."
 
-        sip_domain = os.getenv("TWILIO_SIP_DOMAIN", "")
-        if sip_domain and not target.startswith("sip:"):
+        sip_domain = os.getenv("VOBIZ_SIP_DOMAIN") or os.getenv("TWILIO_SIP_DOMAIN", "")
+        if not target.startswith(("sip:", "tel:")):
+            clean = target.replace("tel:", "").replace("sip:", "").replace(" ", "")
+            if sip_domain:
+                target = f"sip:{clean}@{sip_domain}"
+            else:
+                target = f"tel:{clean}"
+        elif target.startswith("tel:") and sip_domain:
             clean = target.replace("tel:", "").replace("sip:", "").replace(" ", "")
             target = f"sip:{clean}@{sip_domain}"
-        elif not target.startswith(("sip:", "tel:")):
-            target = f"tel:{target}"
 
         participant_identity = f"sip_{self._phone_number}" if self._phone_number else None
+        if not participant_identity:
+            for p in self._ctx.room.remote_participants.values():
+                if p.identity.startswith("sip_"):
+                    participant_identity = p.identity
+                    break
         if not participant_identity:
             for p in self._ctx.room.remote_participants.values():
                 participant_identity = p.identity
@@ -127,6 +110,7 @@ class FurnitureCRMTools(llm.ToolContext):
         if not participant_identity:
             return "Transfer failed: could not identify the remote participant."
 
+        logger.info("Transferring call | participant=%s | target=%s", participant_identity, target)
         try:
             await self._ctx.api.sip.transfer_sip_participant(
                 api.TransferSIPParticipantRequest(
@@ -305,19 +289,53 @@ async def entrypoint(ctx: JobContext) -> None:
 
     # LLM
     groq_key = os.getenv("GROQ_API_KEY", "")
-    llm_instance = openai.LLM(
-        model="llama-3.3-70b-versatile",
-        base_url="https://api.groq.com/openai/v1",
-        api_key=groq_key,
-        temperature=0.4,  # lower = more reliable tool call JSON
-    ) if groq_key else openai.LLM(model="gpt-4o-mini")
+    if groq_key:
+        llm_instance = openai.LLM(
+            model=GROQ_MODEL,
+            base_url="https://api.groq.com/openai/v1",
+            api_key=groq_key,
+            temperature=GROQ_TEMPERATURE,
+            top_p=GROQ_TOP_P,
+            max_completion_tokens=GROQ_MAX_TOKENS,
+        )
+        logger.info("LLM configured | provider=groq | model=%s", GROQ_MODEL)
+    else:
+        llm_instance = openai.LLM(model=OPENAI_FALLBACK_MODEL)
+        logger.warning("GROQ_API_KEY missing — falling back to %s", OPENAI_FALLBACK_MODEL)
 
     # Build agent — no VAD here; session owns VAD to avoid double processing
+    tts_language = os.getenv("SARVAM_TTS_LANGUAGE", SARVAM_LANGUAGE)
+    tts_model = os.getenv("SARVAM_TTS_MODEL", SARVAM_MODEL)
+    tts_speaker = os.getenv("SARVAM_TTS_SPEAKER", DEFAULT_TTS_VOICE)
+
+    logger.info(
+        "STT configured | provider=deepgram | model=%s | language=%s",
+        STT_MODEL,
+        STT_LANGUAGE,
+    )
+    logger.info(
+        "TTS configured | provider=sarvam | model=%s | speaker=%s | language=%s",
+        tts_model,
+        tts_speaker,
+        tts_language,
+    )
+
+    tts_instance = sarvam.TTS(
+        target_language_code=tts_language,
+        model=tts_model,
+        speaker=tts_speaker,
+        speech_sample_rate=8000,
+        pace=_env_float("SARVAM_TTS_PACE", 1.0),
+        temperature=_env_float("SARVAM_TTS_TEMPERATURE", 0.6),
+        min_buffer_size=_env_int("SARVAM_TTS_MIN_BUFFER_SIZE", 50),
+        max_chunk_length=_env_int("SARVAM_TTS_MAX_CHUNK_LENGTH", 150),
+    )
+
     agent = Agent(
         instructions=system_prompt,
-        stt=deepgram.STT(model="nova-2", language="en"),
+        stt=deepgram.STT(model=STT_MODEL, language=STT_LANGUAGE),
         llm=llm_instance,
-        tts=deepgram.TTS(model="aura-asteria-en"),
+        tts=tts_instance,
         tools=list(tools_ctx.function_tools.values()),
         allow_interruptions=True,
         min_endpointing_delay=0.5,  # 500ms — comfortable pause for phone lines
@@ -359,8 +377,13 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(
         agent,
         room=ctx.room,
-        room_input_options=RoomInputOptions(
-            noise_cancellation=noise_cancellation.BVCTelephony(),
+        room_options=RoomOptions(
+            audio_input=AudioInputOptions(
+                sample_rate=8000,
+                num_channels=1,
+                noise_cancellation=noise_cancellation.BVCTelephony(),
+            ),
+            audio_output=AudioOutputOptions(sample_rate=8000, num_channels=1),
             close_on_disconnect=True,
         ),
     )
@@ -379,10 +402,12 @@ async def entrypoint(ctx: JobContext) -> None:
                     wait_until_answered=True,  # block until customer picks up
                 )
             )
-            logger.info("Call answered — generating greeting.")
-            await session.generate_reply(
-                instructions=OUTBOUND_GREETING_PROMPT.format(reason=call_reason)
+            logger.info("Call answered — sending greeting via TTS.")
+            await session.say(
+                build_outbound_greeting(call_reason),
+                allow_interruptions=False,
             )
+            logger.info("Greeting playback completed.")
         except Exception as exc:
             logger.error("Outbound call failed: %s", exc)
             ctx.shutdown()
@@ -397,7 +422,10 @@ async def entrypoint(ctx: JobContext) -> None:
         # Inbound or browser test — participant already in room
         logger.info("Inbound/browser mode — waiting for participant...")
         await ctx.wait_for_participant()
-        session.say("Hello! Thank you for calling. I'm Aria, your furniture store assistant. How can I help you today?", allow_interruptions=True)
+        await session.say(
+            "नमस्ते! कॉस्मिक फर्नीचर में आपका स्वागत है, मैं अनुष्का बोल रही हूँ — कैसे मदद करूँ?",
+            allow_interruptions=True,
+        )
 
     # Max duration guard
     async def enforce_max_duration() -> None:

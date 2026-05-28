@@ -17,6 +17,8 @@ interface ApiLogEntry {
   templateName?: string
   eventStatus?: string
   broadcastId?: string
+  broadcastName?: string
+  contactName?: string
   request?: Record<string, unknown>
   response?: Record<string, unknown>
   webhookPayload?: Record<string, unknown>
@@ -93,15 +95,17 @@ function LogRow({ log }: { log: ApiLogEntry }) {
           </span>
         )}
 
-        {/* Phone / message ID */}
+        {/* Contact name + phone */}
         <span className="text-sm text-foreground font-mono truncate flex-1">
-          {log.phone ?? log.messageId ?? '—'}
+          {log.contactName && log.contactName !== 'Unknown'
+            ? <><span className="font-semibold not-italic">{log.contactName}</span> <span className="text-muted">{log.phone}</span></>
+            : (log.phone ?? log.messageId ?? '—')}
         </span>
 
-        {/* Template name */}
-        {log.templateName && (
-          <span className="text-xs text-muted shrink-0 hidden sm:inline">
-            {log.templateName}
+        {/* Broadcast name */}
+        {log.broadcastName && (
+          <span className="text-xs text-muted shrink-0 hidden sm:inline truncate max-w-[140px]">
+            {log.broadcastName}
           </span>
         )}
 
@@ -133,10 +137,22 @@ function LogRow({ log }: { log: ApiLogEntry }) {
                 <p className="text-xs font-mono text-foreground break-all">{log.messageId}</p>
               </div>
             )}
+            {log.contactName && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Contact</p>
+                <p className="text-xs font-mono text-foreground">{log.contactName}</p>
+              </div>
+            )}
             {log.phone && (
               <div>
                 <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Phone</p>
                 <p className="text-xs font-mono text-foreground">{log.phone}</p>
+              </div>
+            )}
+            {log.broadcastName && (
+              <div>
+                <p className="text-[10px] font-semibold text-muted uppercase tracking-wider mb-1">Broadcast</p>
+                <p className="text-xs font-mono text-foreground">{log.broadcastName}</p>
               </div>
             )}
             {log.templateName && (
@@ -279,14 +295,9 @@ export function ApiLogsTab() {
             <RefreshCw className="w-4 h-4" />
           </button>
 
-          <button
-            onClick={handleClear}
-            disabled={clearing || logs.length === 0}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted hover:text-red-600 hover:border-red-200 hover:bg-red-50 disabled:opacity-40 transition-colors"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear
-          </button>
+          <span className="text-[11px] text-muted italic">
+            Live DB feed · auto-refreshes
+          </span>
         </div>
       </div>
 
@@ -315,9 +326,9 @@ export function ApiLogsTab() {
         <div className="flex items-start gap-3 p-4 rounded-xl bg-yellow-50 border border-yellow-200">
           <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-yellow-800">No webhook events received yet</p>
+            <p className="text-sm font-semibold text-yellow-800">Broadcasts sent but no Delivered/Read updates</p>
             <p className="text-xs text-yellow-700 mt-1">
-              Meta hasn't sent any status callbacks. This means either: (1) your webhook URL isn't registered in Meta Developer Console, or (2) <code className="font-mono bg-yellow-100 px-1 rounded">META_APP_SECRET</code> env var is wrong and events are being rejected. Check your server logs for <code className="font-mono bg-yellow-100 px-1 rounded">[webhook] rejected request</code>.
+              Messages were sent successfully but Meta hasn't sent any status callbacks (delivered/read). This almost always means your <strong>Webhook URL is not registered</strong> in the Meta Developer Console. Go to: Meta Developer Console → Your App → WhatsApp → Configuration → Webhook. Set your URL to <code className="font-mono bg-yellow-100 px-1 rounded">https://yourdomain.com/api/whatsapp/webhook</code> and subscribe to the <code className="font-mono bg-yellow-100 px-1 rounded">messages</code> field.
             </p>
           </div>
         </div>

@@ -10,6 +10,13 @@ export async function POST(request: Request) {
     const { broadcastId, updates } = await request.json()
     // updates: { contact_id: string, status: 'sent' | 'failed', whatsapp_message_id?: string, error_message?: string }[]
 
+    // Fetch the broadcast to get user_id (needed for conversation creation)
+    const broadcast = await prisma.waBroadcast.findUnique({
+      where: { id: broadcastId },
+      select: { id: true, user_id: true, template_name: true },
+    })
+    if (!broadcast) return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
+
     // Apply each recipient update
     for (const update of updates) {
       await prisma.waBroadcastRecipient.updateMany({
@@ -21,6 +28,40 @@ export async function POST(request: Request) {
           sent_at: update.status === 'sent' ? new Date() : undefined,
         }
       })
+
+      // For successfully sent messages, upsert a conversation row so the
+      // contact immediately appears in the Inbox and any reply they send
+      // lands in the right thread.
+      // We use upsert with the @@unique([user_id, contact_id]) compound
+      // key — this is atomic and race-condition-safe on repeated calls.
+      if (update.status === 'sent' && update.contact_id) {
+        try {
+          await prisma.waConversation.upsert({
+            where: {
+              user_id_contact_id: {
+                user_id: broadcast.user_id,
+                contact_id: update.contact_id,
+              },
+            },
+            create: {
+              user_id: broadcast.user_id,
+              contact_id: update.contact_id,
+              last_message_text: `Broadcast: ${broadcast.template_name}`,
+              last_message_at: new Date(),
+            },
+            update: {
+              // Bump last_message_at so this broadcast appears at the top
+              // of the Inbox list (sorted by recency). Don't overwrite the
+              // text if a more recent inbound message already set it.
+              last_message_at: new Date(),
+              last_message_text: `Broadcast: ${broadcast.template_name}`,
+            },
+          })
+        } catch (convErr) {
+          // Non-fatal: a missing conversation only affects the Inbox view
+          console.error('Failed to upsert conversation for broadcast recipient:', convErr)
+        }
+      }
     }
 
     // Re-derive aggregate counts directly from recipient rows.

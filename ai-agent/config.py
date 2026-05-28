@@ -127,10 +127,10 @@ SARVAM_LANGUAGE      = "hi-IN"
 # ==============================================================================
 
 DEFAULT_LLM_PROVIDER = "groq"                            # FIX: was "openai"
-DEFAULT_LLM_MODEL    = "llama-3.1-8b-instant"  # Groq model string
+DEFAULT_LLM_MODEL    = os.getenv("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")  # Groq model string
 
 # Groq inference settings
-GROQ_MODEL           = "llama-3.1-8b-instant"
+GROQ_MODEL           = DEFAULT_LLM_MODEL
 GROQ_TEMPERATURE     = 0.4        # FIX: lowered from 0.7 → more consistent, less hallucination
 GROQ_MAX_TOKENS      = 120        # Keep responses short — matches the 8–16 word rule
 GROQ_TOP_P           = 0.9

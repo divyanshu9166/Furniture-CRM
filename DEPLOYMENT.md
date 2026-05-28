@@ -112,3 +112,6 @@ docker compose up -d --build
 # View logs
 docker compose logs -f app
 ```
+
+If the AI calling UI reports "LiveKit not configured", confirm the VPS `.env` includes
+`LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`, then redeploy.

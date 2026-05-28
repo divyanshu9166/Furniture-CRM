@@ -2,96 +2,58 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 
-export async function POST(request: Request) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const session = await getSession()
     if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = String(session.id)
     
-    const { broadcastId, updates } = await request.json()
-    // updates: { contact_id: string, status: 'sent' | 'failed', whatsapp_message_id?: string, error_message?: string }[]
+    const params = await context.params
+    const id = params.id
 
-    // Fetch the broadcast to get user_id (needed for conversation creation)
-    const broadcast = await prisma.waBroadcast.findUnique({
-      where: { id: broadcastId },
-      select: { id: true, user_id: true, template_name: true },
+    // findFirst (not findUnique) because user_id is not part of a @@unique
+    // constraint — it's only @@index. Prisma rejects findUnique with a
+    // non-unique field in the where clause, throwing a runtime error that
+    // the client sees as "Failed to load broadcast".
+    const broadcast = await prisma.waBroadcast.findFirst({
+      where: { id, user_id: userId }
     })
-    if (!broadcast) return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
+    
+    if (!broadcast) {
+      return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 })
+    }
 
-    // Apply each recipient update
-    for (const update of updates) {
-      await prisma.waBroadcastRecipient.updateMany({
-        where: { broadcast_id: broadcastId, contact_id: update.contact_id },
-        data: {
-          status: update.status,
-          whatsapp_message_id: update.whatsapp_message_id || null,
-          error_message: update.error_message || null,
-          sent_at: update.status === 'sent' ? new Date() : undefined,
-        }
-      })
-
-      // For successfully sent messages, ensure a conversation exists so
-      // the contact appears in the Inbox and any reply lands in the right
-      // thread. findFirst + create (not upsert) avoids needing a DB
-      // unique constraint while still being safe on repeated calls.
-      if (update.status === 'sent' && update.contact_id) {
-        try {
-          const existing = await prisma.waConversation.findFirst({
-            where: { user_id: broadcast.user_id, contact_id: update.contact_id },
-            select: { id: true },
-          })
-          if (!existing) {
-            await prisma.waConversation.create({
-              data: {
-                user_id: broadcast.user_id,
-                contact_id: update.contact_id,
-                last_message_text: `Broadcast: ${broadcast.template_name}`,
-                last_message_at: new Date(),
-              },
-            })
-          }
-        } catch (convErr) {
-          // Non-fatal: a missing conversation only affects the Inbox view
-          console.error('Failed to create conversation for broadcast recipient:', convErr)
-        }
+    const recipients = await prisma.waBroadcastRecipient.findMany({
+      where: { broadcast_id: id },
+      orderBy: { created_at: 'desc' },
+      include: {
+        contact: true
       }
-    }
-
-    // Re-derive aggregate counts directly from recipient rows.
-    // This is intentionally done in application code rather than relying
-    // on a Postgres trigger, so counts stay correct even if the DB
-    // migration that installs the trigger hasn't been applied.
-    const agg = await prisma.waBroadcastRecipient.groupBy({
-      by: ['status'],
-      where: { broadcast_id: broadcastId },
-      _count: { status: true },
     })
 
-    const countByStatus: Record<string, number> = {}
-    for (const row of agg) {
-      countByStatus[row.status] = row._count.status
-    }
-
-    // Ladder semantics (same as the DB trigger):
-    //   sent_count      = recipients at or past 'sent' (sent|delivered|read|replied)
-    //   delivered_count = recipients at or past 'delivered'
-    //   read_count      = recipients at or past 'read'
-    //   replied_count   = exactly 'replied'
-    //   failed_count    = exactly 'failed'
-    const s = (k: string) => countByStatus[k] ?? 0
-    const sent_count      = s('sent') + s('delivered') + s('read') + s('replied')
-    const delivered_count = s('delivered') + s('read') + s('replied')
-    const read_count      = s('read') + s('replied')
-    const replied_count   = s('replied')
-    const failed_count    = s('failed')
-
-    await prisma.waBroadcast.update({
-      where: { id: broadcastId },
-      data: { sent_count, delivered_count, read_count, replied_count, failed_count },
-    })
-
-    return NextResponse.json({ ok: true })
+    return NextResponse.json({ broadcast, recipients })
   } catch (error) {
-    console.error('Error updating broadcast recipients:', error)
-    return NextResponse.json({ error: 'Failed to update broadcast recipients' }, { status: 500 })
+    console.error('Error fetching broadcast:', error)
+    return NextResponse.json({ error: 'Failed to fetch broadcast' }, { status: 500 })
+  }
+}
+
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const session = await getSession()
+    if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const userId = String(session.id)
+    
+    const params = await context.params
+    const id = params.id
+
+    await prisma.waBroadcast.delete({
+      where: { id, user_id: userId }
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error deleting broadcast:', error)
+    return NextResponse.json({ error: 'Failed to delete broadcast' }, { status: 500 })
   }
 }
