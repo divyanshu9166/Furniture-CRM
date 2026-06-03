@@ -32,7 +32,7 @@ services:
     restart: always
     # appendonly yes: persist queue data to disk so BullMQ jobs survive
     # a container restart. The volume below keeps the dump across deploys.
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
     volumes:
       - redisdata:/data
     healthcheck:

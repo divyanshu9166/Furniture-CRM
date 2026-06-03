@@ -18,6 +18,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Generate Prisma client
+ARG DATABASE_URL="postgresql://postgres:postgres@localhost:5432/furniturecrm"
+ENV DATABASE_URL=$DATABASE_URL
 RUN --mount=type=cache,target=/root/.npm npx prisma generate
 
 # Build Next.js (standalone output)
@@ -47,8 +49,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 # Copy Prisma files for migrations/seed
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/.bin ./node_modules/.bin
 
 # Copy pg adapter + dependencies (needed at runtime for PrismaPg adapter)
 COPY --from=builder /app/node_modules/pg ./node_modules/pg
