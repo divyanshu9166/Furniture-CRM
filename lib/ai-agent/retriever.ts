@@ -28,21 +28,25 @@ export async function retrieveChunks(
   topK = 3,
   minSimilarity = 0.4,
 ): Promise<RetrievedChunk[]> {
+  // MUST use $queryRawUnsafe — Prisma's tagged-template $queryRaw binds the
+  // vector literal as a text parameter ($1::text) which the pg driver cannot
+  // implicitly cast to the vector type. The literal is built server-side from
+  // a number[] so there is no SQL-injection risk.
   const vectorLiteral = `[${queryEmbedding.join(',')}]`
 
-  const rows = await prisma.$queryRaw<RetrievedChunk[]>`
+  const rows = await prisma.$queryRawUnsafe<RetrievedChunk[]>(`
     SELECT
       id,
       content,
-      1 - (embedding <=> ${vectorLiteral}::vector) AS similarity
+      1 - (embedding <=> $1::vector) AS similarity
     FROM wa_knowledge_chunks
     WHERE
-      user_id = ${userId}
+      user_id = $2
       AND embedding IS NOT NULL
-      AND 1 - (embedding <=> ${vectorLiteral}::vector) >= ${minSimilarity}
-    ORDER BY embedding <=> ${vectorLiteral}::vector
-    LIMIT ${topK}
-  `
+      AND 1 - (embedding <=> $1::vector) >= $3
+    ORDER BY embedding <=> $1::vector
+    LIMIT $4
+  `, vectorLiteral, userId, minSimilarity, topK)
 
   return rows
 }

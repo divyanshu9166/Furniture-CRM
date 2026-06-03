@@ -246,6 +246,22 @@ export function InboxTab() {
     [activeConversation]
   );
 
+  const handleNeedsHumanChange = useCallback(
+    (conversationId: string, needsHuman: boolean) => {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId ? { ...c, needs_human: needsHuman } : c
+        )
+      );
+      if (activeConversation?.id === conversationId) {
+        setActiveConversation((prev) =>
+          prev ? { ...prev, needs_human: needsHuman } : prev
+        );
+      }
+    },
+    [activeConversation]
+  );
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -302,6 +318,7 @@ export function InboxTab() {
             onNewMessage={handleNewMessage}
             onUpdateMessage={handleUpdateMessage}
             onStatusChange={handleStatusChange}
+            onNeedsHumanChange={handleNeedsHumanChange}
             onAssignChange={handleAssignChange}
             onBack={handleCloseConversation}
           />

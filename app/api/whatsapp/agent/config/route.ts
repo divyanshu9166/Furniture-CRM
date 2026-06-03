@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getSession } from '@/lib/auth-helpers'
 import { DEFAULT_SYSTEM_PROMPT } from '@/lib/ai-agent/system-prompt'
 
 /**
@@ -11,11 +11,11 @@ import { DEFAULT_SYSTEM_PROMPT } from '@/lib/ai-agent/system-prompt'
 export async function GET() {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
     const config = await prisma.waAgentConfig.findUnique({ where: { user_id: userId } })
 
     if (!config) {
@@ -58,11 +58,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
 
     let body: {
       enabled?: boolean

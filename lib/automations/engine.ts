@@ -61,6 +61,32 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
   }
 }
 
+/**
+ * Check synchronously if an inbound message matches any active keyword automations.
+ * This is used by the webhook to decide whether to skip queueing the AI agent.
+ */
+export async function hasMatchingKeywordAutomation(userId: string, text: string): Promise<boolean> {
+  if (!text) return false
+
+  const automations = await prisma.waAutomation.findMany({
+    where: {
+      user_id: userId,
+      trigger_type: 'keyword_match',
+      is_active: true
+    }
+  })
+
+  if (!automations || automations.length === 0) return false
+
+  for (const automation of automations) {
+    if (triggerMatches(automation as any, { message_text: text })) {
+      return true
+    }
+  }
+
+  return false
+}
+
 export async function resumePendingExecution(pending: {
   id: string
   automation_id: string

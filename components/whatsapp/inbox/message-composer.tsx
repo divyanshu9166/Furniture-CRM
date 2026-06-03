@@ -128,7 +128,7 @@ export function MessageComposer({
           disabled={sessionExpired}
           rows={1}
           className={cn(
-            "flex-1 resize-none rounded-xl border border-border bg-surface-light px-4 py-2.5 text-sm text-foreground placeholder-muted outline-none transition-colors focus:border-accent",
+            "flex-1 resize-none rounded-xl border border-border bg-surface-light px-3 py-2 sm:px-4 sm:py-2.5 text-sm text-foreground placeholder-muted outline-none transition-colors focus:border-accent",
             sessionExpired && "cursor-not-allowed opacity-50"
           )}
         />

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getSession } from '@/lib/auth-helpers'
 import { indexKnowledgeDoc } from '@/lib/ai-agent/agent-worker'
 
 /**
@@ -10,11 +10,11 @@ import { indexKnowledgeDoc } from '@/lib/ai-agent/agent-worker'
 export async function GET() {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
     const docs = await prisma.waKnowledgeDoc.findMany({
       where: { user_id: userId },
       orderBy: { created_at: 'desc' },
@@ -49,11 +49,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
 
     let body: { title?: string; raw_text?: string; source_type?: string }
     try {

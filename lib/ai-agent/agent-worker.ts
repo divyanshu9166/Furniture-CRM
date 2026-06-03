@@ -76,6 +76,16 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     return
   }
 
+  // ── Step 1b: Skip if conversation needs a human agent ───────────────────
+  const conversation = await prisma.waConversation.findUnique({
+    where: { id: conversationId },
+    select: { needs_human: true },
+  })
+  if (conversation?.needs_human) {
+    console.log(`[ai-agent] conversation ${conversationId} flagged for human — skipping AI reply`)
+    return
+  }
+
   // ── Step 2: Load last 5 messages for conversation context ────────────────
   const recentMessages = await prisma.waMessage.findMany({
     where: { conversation_id: conversationId },
@@ -134,11 +144,12 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
   // ── Step 8: Confidence / handoff check ───────────────────────────────────
   if (!agentResponse.confidenceOk || agentResponse.needsHandoff) {
     console.log(`[ai-agent] low confidence or handoff needed — sending fallback`)
-    // Mark conversation for human review
-    await prisma.waConversation.update({
-      where: { id: conversationId },
-      data: { status: 'human_needed' },
-    }).catch(() => {/* non-critical */})
+    // Flag for human review — keep status 'open' so the inbox still shows it,
+    // but set needs_human=true so the AI agent skips future messages.
+    await prisma.$executeRawUnsafe(
+      `UPDATE conversations SET needs_human = TRUE WHERE id = $1`,
+      conversationId,
+    ).catch(() => {/* non-critical */})
     await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId)
     return
   }
@@ -284,15 +295,17 @@ export async function indexKnowledgeDoc(docId: string): Promise<void> {
         },
       })
 
-      // Embed and update via raw SQL (pgvector column not in Prisma schema)
+      // Embed and update via raw SQL (pgvector column not in Prisma schema).
+      // MUST use $executeRawUnsafe — parameterized bindings cannot be cast
+      // to the vector type by the pg driver; the literal must be inline.
       const embedding = await embedDocument(content)
       const vectorLiteral = `[${embedding.join(',')}]`
 
-      await prisma.$executeRaw`
-        UPDATE wa_knowledge_chunks
-        SET embedding = ${vectorLiteral}::vector
-        WHERE id = ${chunk.id}
-      `
+      await prisma.$executeRawUnsafe(
+        `UPDATE wa_knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
+        vectorLiteral,
+        chunk.id,
+      )
     }
 
     await prisma.waKnowledgeDoc.update({

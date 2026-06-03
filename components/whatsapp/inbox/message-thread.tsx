@@ -19,6 +19,8 @@ import {
   Check,
   Clock,
   ArrowLeft,
+  Bot,
+  User,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +74,7 @@ interface MessageThreadProps {
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
+  onNeedsHumanChange?: (conversationId: string, needsHuman: boolean) => void;
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
@@ -123,6 +126,7 @@ export function MessageThread({
   onNewMessage,
   onUpdateMessage,
   onStatusChange,
+  onNeedsHumanChange,
   onAssignChange,
   onBack,
 }: MessageThreadProps) {
@@ -427,6 +431,29 @@ export function MessageThread({
     [conversation, onStatusChange]
   );
 
+  const handleNeedsHumanToggle = useCallback(
+    async () => {
+      if (!conversation) return;
+      const newNeedsHuman = !conversation.needs_human;
+
+      try {
+        await fetchJson(`/api/whatsapp/conversations/${conversation.id}/human-takeover`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ needs_human: newNeedsHuman }),
+        });
+
+        onNeedsHumanChange?.(conversation.id, newNeedsHuman);
+        
+        toast.success(newNeedsHuman ? "AI paused — Human Takeover" : "AI Auto-reply resumed");
+      } catch (error) {
+        console.error("Failed to toggle human takeover:", error);
+        toast.error("Failed to toggle AI mode");
+      }
+    },
+    [conversation, onNeedsHumanChange]
+  );
+
   const handleOpenTemplates = useCallback(() => {
     setTemplateModalOpen(true);
   }, []);
@@ -686,7 +713,31 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
+          {/* AI Auto-Reply Toggle */}
+          <button
+            onClick={handleNeedsHumanToggle}
+            className={cn(
+              "inline-flex items-center justify-center h-7 px-2 text-xs rounded-md transition-colors border",
+              !conversation.needs_human 
+                ? "bg-accent/10 text-accent border-accent/20 hover:bg-accent/20" 
+                : "bg-surface-light text-muted border-border hover:bg-surface-light/80"
+            )}
+            title={!conversation.needs_human ? "AI is auto-replying. Click to pause." : "AI is paused. Click to resume."}
+          >
+            {!conversation.needs_human ? (
+              <>
+                <Bot className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline">AI Active</span>
+              </>
+            ) : (
+              <>
+                <User className="h-3 w-3 sm:mr-1" />
+                <span className="hidden sm:inline">Human Mode</span>
+              </>
+            )}
+          </button>
+
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger className={cn(
@@ -770,7 +821,7 @@ export function MessageThread({
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-3 sm:px-4 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />

@@ -9,8 +9,9 @@
 
 import { buildPrompt, type BuildPromptParams } from './system-prompt'
 
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`
 
 export interface AgentResponse {
   text: string

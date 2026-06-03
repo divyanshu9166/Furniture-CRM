@@ -1982,6 +1982,7 @@ model WaConversation {
   user_id          String
   contact_id       String
   status           String   @default("open")
+  needs_human      Boolean  @default(false)  // set true when AI confidence is low
   assigned_agent_id String?
   last_message_text String?
   last_message_at   DateTime?

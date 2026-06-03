@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getSession } from '@/lib/auth-helpers'
 
 /**
  * DELETE /api/whatsapp/agent/knowledge/[id]
@@ -12,11 +12,11 @@ export async function DELETE(
 ) {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
     const { id } = await params
 
     // Verify the doc belongs to the authenticated user before deleting
@@ -52,11 +52,11 @@ export async function POST(
 ) {
   try {
     const session = await getSession()
-    if (!session?.id) {
+    if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const userId = String(session.id)
+    const userId = String(session.user.id)
     const { id } = await params
 
     const doc = await prisma.waKnowledgeDoc.findUnique({
