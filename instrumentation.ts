@@ -16,5 +16,9 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     const { startAutomationWorker } = await import('./lib/queues/automation-worker')
     startAutomationWorker()
+
+    const { startAiAgentWorker } = await import('./lib/queues/ai-agent-worker')
+    startAiAgentWorker()
   }
 }
+

@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   MessageSquare, Radio, Bot, Settings,
   BarChart3, Wifi, WifiOff, Loader2, Megaphone,
-  Users, Kanban, Terminal
+  Users, Kanban, Terminal, BrainCircuit
 } from 'lucide-react';
 import { useTotalUnread } from '@/lib/use-total-unread';
 
@@ -17,6 +17,7 @@ import { ContactsTab } from '@/components/whatsapp/contacts/contacts-tab';
 import { PipelinesTab } from '@/components/whatsapp/pipelines/pipelines-tab';
 import { SettingsTab } from '@/components/whatsapp/settings/settings-tab';
 import { ApiLogsTab } from '@/components/whatsapp/logs/api-logs-tab';
+import { AgentTab } from '@/components/whatsapp/agent/agent-tab';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BarChart3 },
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'automations', label: 'Automations', icon: Bot },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'pipelines', label: 'Pipelines', icon: Kanban },
+  { id: 'agent', label: 'AI Agent', icon: BrainCircuit },
   { id: 'settings', label: 'Settings', icon: Settings },
   { id: 'logs', label: 'API Logs', icon: Terminal },
 ] as const;
@@ -135,6 +137,7 @@ export function WhatsAppMarketingClient() {
       {activeTab === 'automations' && <AutomationsTab />}
       {activeTab === 'contacts' && <ContactsTab />}
       {activeTab === 'pipelines' && <PipelinesTab />}
+      {activeTab === 'agent' && <AgentTab />}
       {activeTab === 'settings' && <SettingsTab />}
       {activeTab === 'logs' && <ApiLogsTab />}
     </div>

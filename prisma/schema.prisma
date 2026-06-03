@@ -2274,3 +2274,58 @@ model WaMessageReaction {
   @@index([message_id])
   @@map("message_reactions")
 }
+
+// ============================================================
+// WhatsApp AI RAG Agent
+// ============================================================
+
+model WaAgentConfig {
+  id                   String   @id @default(cuid())
+  user_id              String   @unique
+  enabled              Boolean  @default(false)
+  agent_name           String   @default("Assistant")
+  system_prompt        String   @db.Text
+  fallback_message     String   @default("Let me connect you with our team.")
+  confidence_threshold Float    @default(0.45)
+  max_response_tokens  Int      @default(300)
+  response_delay_ms    Int      @default(1500)
+  languages            String[] @default(["en", "hi"])
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@map("wa_agent_configs")
+}
+
+model WaKnowledgeDoc {
+  id          String   @id @default(cuid())
+  user_id     String
+  title       String
+  source_type String   @default("text")
+  raw_text    String   @db.Text
+  char_count  Int
+  status      String   @default("pending") // pending | indexed | error
+  error       String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  chunks WaKnowledgeChunk[]
+
+  @@index([user_id])
+  @@map("wa_knowledge_docs")
+}
+
+model WaKnowledgeChunk {
+  id          String   @id @default(cuid())
+  user_id     String
+  doc_id      String
+  chunk_index Int
+  content     String   @db.Text
+  // embedding vector(768) column added via raw SQL — see pgvector-migration.sql
+  created_at  DateTime @default(now())
+
+  doc WaKnowledgeDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([doc_id])
+  @@map("wa_knowledge_chunks")
+}

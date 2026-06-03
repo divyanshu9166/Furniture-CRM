@@ -6,7 +6,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
-import { getAutomationQueue } from '@/lib/queues/jobs'
+import { getAutomationQueue, getAiAgentQueue } from '@/lib/queues/jobs'
 
 interface WhatsAppMessage {
   id: string
@@ -663,6 +663,29 @@ async function processMessage(
         },
       )
       .catch((err) => console.error('[queues] automationQueue.add failed:', err))
+  }
+
+  // ── BullMQ: enqueue AI agent job (if agent is enabled + conversation is open)
+  // Only process text messages — skip media/stickers/locations.
+  if (message.type === 'text' && inboundText && conversation.status === 'open') {
+    getAiAgentQueue()
+      .add(
+        'handle_message',
+        {
+          userId,
+          conversationId: conversation.id,
+          contactId: contactRecord.id,
+          contactPhone: senderPhone,
+          messageText: inboundText,
+          incomingMessageId: message.id,
+        },
+        {
+          jobId: `ai-agent:${contactRecord.id}:${message.id}`,
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 500 },
+        },
+      )
+      .catch((err) => console.error('[queues] aiAgentQueue.add failed:', err))
   }
 }
 

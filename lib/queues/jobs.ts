@@ -53,6 +53,7 @@ const connection: RedisOptions = parseRedisUrl(REDIS_URL)
 export const QUEUE_AUTOMATION = 'automation-queue'
 export const QUEUE_BROADCAST_STATUS = 'broadcast-status-queue'
 export const QUEUE_MESSAGE_DELIVERY = 'message-delivery-queue'
+export const QUEUE_AI_AGENT = 'wa-ai-agent'
 
 // ── Typed job data shapes ──────────────────────────────────────────────────
 
@@ -82,6 +83,15 @@ export interface MessageDeliveryJobData {
   userId: string
   messageId: string      // internal DB id
   metaMessageId?: string // Meta's wa_id for status lookups
+}
+
+export interface AiAgentJobData {
+  userId: string
+  conversationId: string
+  contactId: string
+  contactPhone: string   // E.164 format
+  messageText: string
+  incomingMessageId: string
 }
 
 // ── Queue instances (Lazy Loaded) ──────────────────────────────────────────
@@ -139,6 +149,22 @@ export function getMessageDeliveryQueue() {
   return _messageDeliveryQueue
 }
 
+let _aiAgentQueue: Queue<AiAgentJobData> | undefined
+export function getAiAgentQueue() {
+  if (!_aiAgentQueue) {
+    _aiAgentQueue = new Queue<AiAgentJobData>(QUEUE_AI_AGENT, {
+      connection,
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 10_000 },
+        removeOnComplete: { count: 200 },
+        removeOnFail: { count: 500 },
+      },
+    })
+  }
+  return _aiAgentQueue
+}
+
 // ── Worker factory ─────────────────────────────────────────────────────────
 // Workers are created lazily so importing this module in the Next.js
 // process (which runs in both server and edge contexts) doesn't accidentally
@@ -168,5 +194,15 @@ export function createMessageDeliveryWorker(
   return new Worker<MessageDeliveryJobData>(QUEUE_MESSAGE_DELIVERY, handler, {
     connection,
     concurrency: 5,
+  })
+}
+
+export function createAiAgentWorker(
+  handler: WorkerHandler<AiAgentJobData>,
+): Worker {
+  // concurrency = 2 caps concurrent Gemini API calls (prevents rate limits)
+  return new Worker<AiAgentJobData>(QUEUE_AI_AGENT, handler, {
+    connection,
+    concurrency: 2,
   })
 }
