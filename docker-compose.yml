@@ -67,6 +67,8 @@ services:
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-my-crm-project.duckdns.org}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash-lite}"
       LIVEKIT_URL: "${LIVEKIT_URL}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"

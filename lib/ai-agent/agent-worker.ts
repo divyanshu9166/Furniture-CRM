@@ -10,7 +10,7 @@
  *   4.  Embed customer message with Gemini text-embedding-004
  *   5.  pgvector cosine search → top-3 knowledge chunks
  *   6.  Build prompt (system + knowledge + history + message)
- *   7.  Gemini 2.0 Flash → draft reply
+ *   7.  Gemini Flash-Lite → draft reply
  *   8.  Confidence/handoff check
  *   9.  Cache reply in Redis (TTL: 2h)
  *  10.  Send reply via WhatsApp Cloud API + save to DB

@@ -7,6 +7,7 @@ import { runAutomationsForTrigger, hasMatchingKeywordAutomation } from '@/lib/au
 import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
 import { getAutomationQueue, getAiAgentQueue } from '@/lib/queues/jobs'
+import { WHATSAPP_INQUIRY_SOURCE } from '@/lib/lead-sources'
 
 interface WhatsAppMessage {
   id: string
@@ -496,6 +497,7 @@ async function processMessage(
     message,
     accessToken
   )
+  const inboundText = contentText ?? message.text?.body ?? ''
 
   let replyToInternalId: string | null = null
   if (message.context?.id) {
@@ -560,6 +562,12 @@ async function processMessage(
     console.error('Error inserting message:', error)
     return
   }
+
+  await syncInboundInquiryToCrm({
+    phone: senderPhone,
+    name: contactName,
+    messageText: inboundText,
+  })
 
   // Update conversation and capture the result for the publish event
   let updatedConversation: any = null
@@ -631,7 +639,6 @@ async function processMessage(
   // Using BullMQ instead of fire-and-forget so a transient failure (e.g.
   // automation engine timeout) doesn't silently drop triggers. BullMQ
   // persists jobs in Redis and retries with exponential backoff.
-  const inboundText = contentText ?? message.text?.body ?? ''
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
@@ -898,5 +905,96 @@ async function findOrCreateConversation(userId: string, contactId: string) {
   } catch (error) {
     console.error('Error creating conversation:', error)
     return null
+  }
+}
+
+async function syncInboundInquiryToCrm({
+  phone,
+  name,
+  messageText,
+}: {
+  phone: string
+  name: string
+  messageText: string
+}) {
+  const normalizedPhone = normalizePhone(phone)
+  if (!normalizedPhone) return
+
+  const last10 = normalizedPhone.slice(-10)
+  const contactName = name?.trim() || normalizedPhone
+
+  try {
+    const candidates = await prisma.contact.findMany({
+      where: last10
+        ? {
+            OR: [
+              { phone: normalizedPhone },
+              { phone: { contains: last10 } },
+            ],
+          }
+        : { phone: normalizedPhone },
+      select: { id: true, phone: true, name: true, source: true },
+      take: 10,
+    })
+
+    let crmContact = candidates.find((c) => phonesMatch(c.phone, normalizedPhone))
+
+    if (!crmContact) {
+      crmContact = await prisma.contact.create({
+        data: {
+          name: contactName,
+          phone: normalizedPhone,
+          source: WHATSAPP_INQUIRY_SOURCE,
+          notes: 'Auto-captured from incoming WhatsApp inquiry.',
+        },
+        select: { id: true, phone: true, name: true, source: true },
+      })
+    } else {
+      const update: { name?: string; source?: string } = {}
+      if ((!crmContact.name || crmContact.name === crmContact.phone) && contactName) {
+        update.name = contactName
+      }
+      if (!crmContact.source) {
+        update.source = WHATSAPP_INQUIRY_SOURCE
+      }
+
+      if (Object.keys(update).length > 0) {
+        crmContact = await prisma.contact.update({
+          where: { id: crmContact.id },
+          data: update,
+          select: { id: true, phone: true, name: true, source: true },
+        })
+      }
+    }
+
+    const existingLead = await prisma.lead.findFirst({
+      where: {
+        contactId: crmContact.id,
+        source: WHATSAPP_INQUIRY_SOURCE,
+        status: { notIn: ['WON', 'LOST'] },
+      },
+      select: { id: true },
+    })
+
+    if (existingLead) return
+
+    const trimmedMessage = messageText.trim()
+    const interest = trimmedMessage
+      ? trimmedMessage.slice(0, 120)
+      : 'WhatsApp inquiry'
+
+    await prisma.lead.create({
+      data: {
+        contactId: crmContact.id,
+        source: WHATSAPP_INQUIRY_SOURCE,
+        interest,
+        status: 'NEW',
+        notes: trimmedMessage
+          ? `Auto-created from incoming WhatsApp message: ${trimmedMessage.slice(0, 500)}`
+          : 'Auto-created from incoming WhatsApp message.',
+      },
+    })
+  } catch (error) {
+    console.error('[webhook] failed to sync inbound inquiry to CRM:', error)
   }
 }

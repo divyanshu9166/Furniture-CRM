@@ -240,7 +240,7 @@ export function MessageBubble({
     >
       <div
         className={cn(
-          "relative rounded-2xl px-3 py-2",
+          "relative max-w-[78vw] rounded-2xl px-3 py-2 sm:max-w-[70%]",
           isAgent
             ? "rounded-br-md bg-accent text-foreground"
             : "rounded-bl-md bg-surface-light text-foreground"

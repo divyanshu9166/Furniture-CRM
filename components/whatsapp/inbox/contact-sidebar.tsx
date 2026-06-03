@@ -13,7 +13,6 @@ import {
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
 
 interface ContactSidebarProps {
@@ -91,7 +90,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-surface">
+      <div className="flex h-full w-[20rem] items-center justify-center border-l border-border bg-surface">
         <p className="text-sm text-muted">Select a conversation</p>
       </div>
     );
@@ -101,8 +100,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-surface">
-      <ScrollArea className="flex-1">
+    <div className="flex h-full min-h-0 w-[20rem] flex-col border-l border-border bg-surface">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="p-4">
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">
@@ -267,7 +266,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
             </div>
           </div>
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

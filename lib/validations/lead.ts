@@ -1,10 +1,11 @@
 import { z } from 'zod'
+import { LEAD_SOURCE_OPTIONS } from '@/lib/lead-sources'
 
 export const createLeadSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   phone: z.string().min(10, 'Valid phone number required'),
   email: z.string().email().optional().or(z.literal('')),
-  source: z.enum(['WhatsApp', 'Instagram', 'Facebook', 'Website', 'Showroom Visit', 'IndiaMART']),
+  source: z.enum(LEAD_SOURCE_OPTIONS),
   interest: z.string().min(1, 'Product interest is required'),
   budget: z.string().optional(),
   notes: z.string().optional(),

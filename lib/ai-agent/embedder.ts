@@ -9,8 +9,14 @@
  * Includes exponential backoff retry on 429 rate-limit responses.
  */
 
-const EMBED_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent'
+import {
+  GEMINI_EMBEDDING_MODEL,
+  geminiErrorMessage,
+  geminiUrl,
+  getGeminiApiKey,
+} from './gemini'
+
+const EMBED_URL = geminiUrl(GEMINI_EMBEDDING_MODEL, 'embedContent')
 
 const MAX_RETRIES = 3
 
@@ -19,15 +25,14 @@ async function sleep(ms: number) {
 }
 
 async function callEmbedApi(text: string, taskType: string): Promise<number[]> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set')
+  const apiKey = getGeminiApiKey()
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(`${EMBED_URL}?key=${apiKey}`, {
+    const res = await fetch(`${EMBED_URL}?key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'models/text-embedding-004',
+        model: `models/${GEMINI_EMBEDDING_MODEL}`,
         content: { parts: [{ text: text.slice(0, 2000) }] },
         taskType,
       }),
@@ -44,7 +49,7 @@ async function callEmbedApi(text: string, taskType: string): Promise<number[]> {
     }
 
     if (!res.ok) {
-      throw new Error(`Gemini embed error ${res.status}: ${await res.text()}`)
+      throw new Error(await geminiErrorMessage(res, 'embed'))
     }
 
     const data = await res.json()

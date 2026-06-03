@@ -1,0 +1,66 @@
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite'
+export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004'
+
+export function normalizeGeminiModelName(model: string) {
+  const normalized = model.trim().replace(/^models\//, '')
+
+  // There is no public Gemini text model with this exact code at the
+  // moment. Treat it as the user's intended low-latency Flash-Lite model.
+  if (normalized === 'gemini-3.1-flash-lite') {
+    return DEFAULT_GEMINI_MODEL
+  }
+
+  return normalized
+}
+
+export function getGeminiModelName() {
+  return normalizeGeminiModelName(process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL)
+}
+
+export function getGeminiApiKey() {
+  const rawKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+  const key = rawKey?.trim().replace(/^['"]|['"]$/g, '')
+
+  if (!key) {
+    throw new Error(
+      'GEMINI_API_KEY is not set. Create an API key in Google AI Studio and add it to the VPS .env file.',
+    )
+  }
+
+  return key
+}
+
+export function geminiUrl(model: string, action: 'generateContent' | 'embedContent') {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${normalizeGeminiModelName(model)}:${action}`
+}
+
+export async function geminiErrorMessage(res: Response, actionLabel: string) {
+  const raw = await res.text()
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      error?: {
+        message?: string
+        status?: string
+        details?: Array<{ reason?: string }>
+      }
+    }
+    const reason = parsed.error?.details?.find((d) => d.reason)?.reason
+    const message = parsed.error?.message || raw
+
+    const isInvalidApiKey =
+      reason === 'API_KEY_INVALID' ||
+      /API key not valid|API_KEY_INVALID/i.test(message)
+
+    if (isInvalidApiKey) {
+      return (
+        `Gemini ${actionLabel} error ${res.status}: API key is invalid. ` +
+        'Create a valid key in Google AI Studio, update GEMINI_API_KEY in the VPS .env file, then restart the app container.'
+      )
+    }
+
+    return `Gemini ${actionLabel} error ${res.status}: ${message}`
+  } catch {
+    return `Gemini ${actionLabel} error ${res.status}: ${raw}`
+  }
+}

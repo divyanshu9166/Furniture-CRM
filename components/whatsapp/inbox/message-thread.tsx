@@ -31,7 +31,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
 import { MessageActions } from "./message-actions";
 import { MessageComposer } from "./message-composer";
@@ -44,8 +43,6 @@ interface ReplyDraft {
   authorLabel: string;
   preview: string;
 }
-
-const POLL_INTERVAL_MS = 4000;
 
 async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const res = await fetch(input, init);
@@ -650,7 +647,7 @@ export function MessageThread({
   // Empty state
   if (!conversation || !contact) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-surface">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center bg-surface">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-light">
           <MessageSquare className="h-8 w-8 text-muted" />
         </div>
@@ -676,9 +673,9 @@ export function MessageThread({
     : "Assign";
 
   return (
-    <div className="flex flex-1 flex-col bg-surface">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
       {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -713,7 +710,7 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex items-center gap-1 sm:gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {/* AI Auto-Reply Toggle */}
           <button
             onClick={handleNeedsHumanToggle}
@@ -821,7 +818,7 @@ export function MessageThread({
       </div>
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-2 py-3 sm:px-4 sm:py-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 sm:px-4 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />

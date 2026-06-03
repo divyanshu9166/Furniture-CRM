@@ -10,6 +10,7 @@ import { getExpenseSummary } from '@/app/actions/expenses';
 
 const sourceIconMap = {
   WhatsApp: MessageSquare,
+  'WhatsApp Inquiry': MessageSquare,
   Instagram: Instagram,
   Facebook: Facebook,
   Website: Globe,
@@ -17,6 +18,7 @@ const sourceIconMap = {
 
 const sourceColorMap = {
   WhatsApp: 'text-success',
+  'WhatsApp Inquiry': 'text-success',
   Instagram: 'text-pink',
   Facebook: 'text-info',
   Website: 'text-teal',

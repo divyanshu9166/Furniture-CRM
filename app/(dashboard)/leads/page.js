@@ -14,16 +14,19 @@ const stageToEnum = {
   'Quotation': 'QUOTATION', 'Won': 'WON', 'Lost': 'LOST',
 };
 
-const sourceIconMap = { WhatsApp: MessageSquare, Instagram, Facebook, Website: Globe, 'Showroom Visit': Store, IndiaMART: Building2 };
+const sourceIconMap = { WhatsApp: MessageSquare, 'WhatsApp Inquiry': MessageSquare, Instagram, Facebook, Website: Globe, 'Showroom Visit': Store, IndiaMART: Building2 };
 
 const sourceColorMap = {
   WhatsApp: 'text-success bg-success-light',
+  'WhatsApp Inquiry': 'text-emerald-700 bg-emerald-500/10',
   Instagram: 'text-pink bg-pink-light',
   Facebook: 'text-info bg-info-light',
   Website: 'text-teal bg-teal-light',
   'Showroom Visit': 'text-amber-700 bg-amber-500/10',
   IndiaMART: 'text-blue-700 bg-blue-500/10',
 };
+
+const defaultSourceColor = 'text-muted bg-surface-hover';
 
 const statusColorMap = {
   New: 'bg-info-light text-info border-info/20',
@@ -208,7 +211,8 @@ export default function LeadsPage() {
                 </div>
                 <div className="space-y-3">
                   {stageLeads.map((lead) => {
-                    const SourceIcon = sourceIconMap[lead.source];
+                    const SourceIcon = sourceIconMap[lead.source] || Globe;
+                    const sourceColor = sourceColorMap[lead.source] || defaultSourceColor;
                     return (
                       <div key={lead.id} onClick={() => setSelectedLead(lead)}
                         className="glass-card p-4 cursor-pointer group hover:scale-[1.02] transition-transform">
@@ -223,7 +227,7 @@ export default function LeadsPage() {
                             </div>
                           </div>
                           {SourceIcon && (
-                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${sourceColorMap[lead.source]}`}>
+                            <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${sourceColor}`}>
                               <SourceIcon className="w-3.5 h-3.5" />
                             </div>
                           )}
@@ -251,7 +255,9 @@ export default function LeadsPage() {
               <thead><tr><th>Name</th><th>Interest</th><th>Source</th><th>Budget</th><th>Status</th><th>Date</th></tr></thead>
               <tbody>
                 {filteredLeads.map((lead) => {
-                  const SourceIcon = sourceIconMap[lead.source];
+                  const SourceIcon = sourceIconMap[lead.source] || Globe;
+                  const sourceColor = sourceColorMap[lead.source] || defaultSourceColor;
+                  const sourceTextColor = sourceColor.split(' ')[0];
                   return (
                     <tr key={lead.id} className="cursor-pointer" onClick={() => setSelectedLead(lead)}>
                       <td>
@@ -268,7 +274,7 @@ export default function LeadsPage() {
                       <td className="text-foreground">{lead.interest}</td>
                       <td>
                         <div className="flex items-center gap-2">
-                          {SourceIcon && <SourceIcon className={`w-4 h-4 ${sourceColorMap[lead.source].split(' ')[0]}`} />}
+                          {SourceIcon && <SourceIcon className={`w-4 h-4 ${sourceTextColor}`} />}
                           <span>{lead.source}</span>
                         </div>
                       </td>
@@ -468,7 +474,7 @@ export default function LeadsPage() {
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Source</label>
               <select name="source" className="w-full">
-                <option>WhatsApp</option><option>Instagram</option><option>Facebook</option><option>Website</option><option>Showroom Visit</option><option>IndiaMART</option>
+                <option>WhatsApp</option><option>WhatsApp Inquiry</option><option>Instagram</option><option>Facebook</option><option>Website</option><option>Showroom Visit</option><option>IndiaMART</option>
               </select>
             </div>
             <div>

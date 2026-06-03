@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   BrainCircuit, Settings2, BookOpen, Code2, Loader2,
@@ -70,11 +70,16 @@ export function AgentTab() {
   const [savedAt, setSavedAt] = useState<Date | null>(null)
 
   // ── Load config from API ─────────────────────────────────────────────────
-  const fetchConfig = useCallback(async () => {
-    try {
-      const res = await fetch('/api/whatsapp/agent/config')
-      if (res.ok) {
+  useEffect(() => {
+    let active = true
+
+    fetch('/api/whatsapp/agent/config')
+      .then(async (res) => {
+        if (!res.ok || !active) return
+
         const data = await res.json()
+        if (!active) return
+
         setConfig({
           enabled:              data.enabled              ?? DEFAULT_CONFIG.enabled,
           agent_name:           data.agent_name           ?? DEFAULT_CONFIG.agent_name,
@@ -85,15 +90,18 @@ export function AgentTab() {
           response_delay_ms:    data.response_delay_ms    ?? DEFAULT_CONFIG.response_delay_ms,
           languages:            data.languages            ?? DEFAULT_CONFIG.languages,
         })
-      }
-    } catch {
-      // use defaults
-    } finally {
-      setLoading(false)
+      })
+      .catch(() => {
+        // use defaults
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
     }
   }, [])
-
-  useEffect(() => { fetchConfig() }, [fetchConfig])
 
   // ── Save config to API ───────────────────────────────────────────────────
   const handleSave = async () => {
@@ -133,7 +141,7 @@ export function AgentTab() {
             AI WhatsApp Agent
           </h2>
           <p className="text-xs text-muted mt-0.5">
-            Powered by Gemini 2.0 Flash · RAG over your knowledge base · Zero extra infra
+            Powered by Gemini Flash-Lite · RAG over your knowledge base · Zero extra infra
           </p>
         </div>
 

@@ -1,17 +1,14 @@
 /**
  * lib/ai-agent/responder.ts
  *
- * Sends a filled prompt to Gemini 2.0 Flash and parses the reply.
+ * Sends a filled prompt to the configured Gemini chat model and parses the reply.
  * Returns the cleaned reply text plus two boolean signals:
  *   needsHandoff  — model asked to escalate to a human
  *   confidenceOk  — model did NOT say it lacks information
  */
 
 import { buildPrompt, type BuildPromptParams } from './system-prompt'
-
-const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`
+import { geminiErrorMessage, geminiUrl, getGeminiApiKey, getGeminiModelName } from './gemini'
 
 export interface AgentResponse {
   text: string
@@ -22,12 +19,12 @@ export interface AgentResponse {
 export async function generateResponse(
   params: BuildPromptParams & { maxTokens?: number },
 ): Promise<AgentResponse> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('GEMINI_API_KEY not set')
+  const apiKey = getGeminiApiKey()
+  const modelName = getGeminiModelName()
 
   const prompt = buildPrompt(params)
 
-  const res = await fetch(`${GEMINI_URL}?key=${apiKey}`, {
+  const res = await fetch(`${geminiUrl(modelName, 'generateContent')}?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -47,7 +44,7 @@ export async function generateResponse(
   })
 
   if (!res.ok) {
-    throw new Error(`Gemini generate error ${res.status}: ${await res.text()}`)
+    throw new Error(await geminiErrorMessage(res, 'generate'))
   }
 
   const data = await res.json()
