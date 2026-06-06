@@ -146,10 +146,12 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     console.log(`[ai-agent] low confidence or handoff needed — sending fallback`)
     // Flag for human review — keep status 'open' so the inbox still shows it,
     // but set needs_human=true so the AI agent skips future messages.
-    await prisma.$executeRawUnsafe(
-      `UPDATE conversations SET needs_human = TRUE WHERE id = $1`,
-      conversationId,
-    ).catch(() => {/* non-critical */})
+    await prisma.waConversation.update({
+      where: { id: conversationId },
+      data: { needs_human: true },
+    }).catch((err) => {
+      console.warn('[ai-agent] failed to set needs_human flag:', err)
+    })
     await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId)
     return
   }

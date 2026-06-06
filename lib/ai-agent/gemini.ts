@@ -1,12 +1,12 @@
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite'
+export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004'
 
 export function normalizeGeminiModelName(model: string) {
   const normalized = model.trim().replace(/^models\//, '')
 
-  // There is no public Gemini text model with this exact code at the
-  // moment. Treat it as the user's intended low-latency Flash-Lite model.
-  if (normalized === 'gemini-3.1-flash-lite') {
+  // gemini-3.1-flash-lite does not exist in Google's API — silently redirect
+  // to the real production model so old configs don't break.
+  if (normalized === 'gemini-3.1-flash-lite' || normalized === 'gemini-2.5-flash-lite') {
     return DEFAULT_GEMINI_MODEL
   }
 
