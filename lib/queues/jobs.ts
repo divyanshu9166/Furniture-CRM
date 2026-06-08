@@ -89,9 +89,13 @@ export interface AiAgentJobData {
   userId: string
   conversationId: string
   contactId: string
-  contactPhone: string   // E.164 format
+  contactPhone: string        // E.164 for WhatsApp; PSID/IGSID for social
   messageText: string
   incomingMessageId: string
+  // Social channel fields (optional — only present for Facebook/Instagram jobs)
+  channel?: 'whatsapp' | 'facebook' | 'instagram'
+  socialPageAccessToken?: string  // encrypted Page Access Token for Messenger API
+  socialRecipientId?: string      // PSID or IGSID to reply to
 }
 
 // ── Queue instances (Lazy Loaded) ──────────────────────────────────────────

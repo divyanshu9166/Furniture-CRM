@@ -2330,3 +2330,107 @@ model WaKnowledgeChunk {
   @@index([doc_id])
   @@map("wa_knowledge_chunks")
 }
+
+// ============================================================
+// Social Messaging — Facebook Page Messages & Instagram DMs
+// ============================================================
+// Both platforms use the same Meta Messenger Platform API v21.0.
+// They can belong to DIFFERENT Meta Business Portfolios/Apps —
+// that's fine because each has its own config + access token.
+
+/// Facebook Page DM configuration (one row per CRM user)
+model FbConfig {
+  id                String    @id @default(cuid())
+  user_id           String    @unique
+  page_id           String    // Facebook Page ID
+  page_name         String?   // Display name for UI
+  page_access_token String    // Encrypted permanent Page Access Token
+  app_secret        String?   // Encrypted App Secret — used for webhook sig verification
+  verify_token      String?   // Webhook verify token
+  status            String    @default("disconnected") // connected | disconnected
+  connected_at      DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  @@map("fb_config")
+}
+
+/// Instagram Business DM configuration (one row per CRM user)
+model IgConfig {
+  id                  String    @id @default(cuid())
+  user_id             String    @unique
+  ig_account_id       String    // Instagram Business Account ID
+  page_id             String    // Linked Facebook Page ID (used to send replies)
+  page_name           String?   // Display name for UI
+  ig_username         String?   // @handle — cosmetic only
+  page_access_token   String    // Encrypted permanent Page Access Token
+  app_secret          String?   // Encrypted App Secret
+  verify_token        String?   // Webhook verify token
+  status              String    @default("disconnected")
+  connected_at        DateTime?
+  created_at          DateTime  @default(now())
+  updated_at          DateTime  @updatedAt
+
+  @@map("ig_config")
+}
+
+/// A contact on Facebook or Instagram identified by their PSID / IGSID
+model SocialContact {
+  id           String   @id @default(cuid())
+  user_id      String
+  platform     String   // "facebook" | "instagram"
+  platform_id  String   // PSID (FB) or IGSID (IG)
+  name         String?  // Display name from profile
+  profile_pic  String?  // Profile picture URL
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  conversations SocialConversation[]
+
+  @@unique([user_id, platform, platform_id])
+  @@index([user_id, platform])
+  @@map("social_contacts")
+}
+
+/// A conversation thread on Facebook or Instagram
+model SocialConversation {
+  id                String    @id @default(cuid())
+  user_id           String
+  contact_id        String
+  platform          String    // "facebook" | "instagram"
+  status            String    @default("open")   // open | resolved | archived
+  needs_human       Boolean   @default(false)    // set true when AI confidence low or customer asks
+  last_message_text String?
+  last_message_at   DateTime?
+  unread_count      Int       @default(0)
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  contact  SocialContact  @relation(fields: [contact_id], references: [id], onDelete: Cascade)
+  messages SocialMessage[]
+
+  @@unique([user_id, contact_id])
+  @@index([user_id, platform])
+  @@index([user_id, status])
+  @@index([last_message_at])
+  @@map("social_conversations")
+}
+
+/// A single message in a Facebook or Instagram conversation
+model SocialMessage {
+  id              String   @id @default(cuid())
+  conversation_id String
+  platform_msg_id String?  // Meta's message ID (mid) — used for deduplication
+  sender_type     String   // "customer" | "agent"
+  content_type    String   @default("text")  // text | image | video | audio | file
+  content_text    String?
+  media_url       String?
+  status          String   @default("sent")  // sent | delivered | read | failed
+  created_at      DateTime @default(now())
+
+  conversation SocialConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+
+  @@index([conversation_id])
+  @@index([platform_msg_id])
+  @@map("social_messages")
+}

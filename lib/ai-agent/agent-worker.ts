@@ -19,7 +19,8 @@
 import { prisma } from '@/lib/db'
 import { redis } from '@/lib/redis'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { sendTextMessage } from '@/lib/whatsapp/meta-api'
+import { sendTextMessage as sendWhatsAppMessage } from '@/lib/whatsapp/meta-api'
+import { sendTextMessage as sendSocialMessage, setTypingOn } from '@/lib/social/messenger-api'
 import { embedText } from './embedder'
 import { retrieveChunks } from './retriever'
 import { generateResponse } from './responder'
@@ -30,9 +31,13 @@ export interface AiAgentJobPayload {
   userId: string
   conversationId: string
   contactId: string
-  contactPhone: string   // E.164 format, e.g. "919876543210"
+  contactPhone: string   // E.164 for WA; PSID/IGSID for social channels
   messageText: string
-  incomingMessageId: string  // Meta's message_id (for reply context)
+  incomingMessageId: string  // Meta message ID (for reply context)
+  // Social channel routing (optional)
+  channel?: 'whatsapp' | 'facebook' | 'instagram'
+  socialPageAccessToken?: string // encrypted Page Access Token
+  socialRecipientId?: string     // PSID or IGSID
 }
 
 // ── Cache helpers ──────────────────────────────────────────────────────────
@@ -67,6 +72,9 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
   const {
     userId, conversationId, contactId, contactPhone,
     messageText, incomingMessageId,
+    channel = 'whatsapp',
+    socialPageAccessToken,
+    socialRecipientId,
   } = payload
 
   // ── Step 1: Load agent config ────────────────────────────────────────────
@@ -76,27 +84,50 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     return
   }
 
+  const isSocialChannel = channel === 'facebook' || channel === 'instagram'
+
   // ── Step 1b: Skip if conversation needs a human agent ───────────────────
-  const conversation = await prisma.waConversation.findUnique({
-    where: { id: conversationId },
-    select: { needs_human: true },
-  })
-  if (conversation?.needs_human) {
+  let needsHuman = false
+  if (isSocialChannel) {
+    const conv = await prisma.socialConversation.findUnique({
+      where: { id: conversationId },
+      select: { needs_human: true },
+    })
+    needsHuman = conv?.needs_human ?? false
+  } else {
+    const conv = await prisma.waConversation.findUnique({
+      where: { id: conversationId },
+      select: { needs_human: true },
+    })
+    needsHuman = conv?.needs_human ?? false
+  }
+  if (needsHuman) {
     console.log(`[ai-agent] conversation ${conversationId} flagged for human — skipping AI reply`)
     return
   }
 
   // ── Step 2: Load last 5 messages for conversation context ────────────────
-  const recentMessages = await prisma.waMessage.findMany({
-    where: { conversation_id: conversationId },
-    orderBy: { created_at: 'desc' },
-    take: 5,
-    select: { sender_type: true, content_text: true },
-  })
+  let recentMessages: { sender_type: string; content_text: string | null }[] = []
+  if (isSocialChannel) {
+    recentMessages = await prisma.socialMessage.findMany({
+      where: { conversation_id: conversationId },
+      orderBy: { created_at: 'desc' },
+      take: 5,
+      select: { sender_type: true, content_text: true },
+    })
+  } else {
+    recentMessages = await prisma.waMessage.findMany({
+      where: { conversation_id: conversationId },
+      orderBy: { created_at: 'desc' },
+      take: 5,
+      select: { sender_type: true, content_text: true },
+    })
+  }
   const conversationHistory = recentMessages
     .reverse()
     .map((m) => `${m.sender_type === 'customer' ? 'Customer' : 'Agent'}: ${m.content_text ?? ''}`)
     .join('\n')
+
 
   // ── Step 3: Redis cache check ────────────────────────────────────────────
   const cached = await getCachedReply(userId, messageText)
@@ -105,6 +136,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     await sendAndSaveReply({
       userId, conversationId, contactPhone, replyText: cached,
       incomingMessageId, isFromCache: true,
+      channel, socialPageAccessToken, socialRecipientId,
     })
     return
   }
@@ -115,7 +147,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     queryEmbedding = await embedText(messageText)
   } catch (err) {
     console.error('[ai-agent] embedding failed:', err)
-    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId)
+    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)
     return
   }
 
@@ -137,22 +169,26 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     })
   } catch (err) {
     console.error('[ai-agent] Gemini call failed:', err)
-    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId)
+    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)
     return
   }
 
   // ── Step 8: Confidence / handoff check ───────────────────────────────────
   if (!agentResponse.confidenceOk || agentResponse.needsHandoff) {
     console.log(`[ai-agent] low confidence or handoff needed — sending fallback`)
-    // Flag for human review — keep status 'open' so the inbox still shows it,
-    // but set needs_human=true so the AI agent skips future messages.
-    await prisma.waConversation.update({
-      where: { id: conversationId },
-      data: { needs_human: true },
-    }).catch((err) => {
-      console.warn('[ai-agent] failed to set needs_human flag:', err)
-    })
-    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId)
+    // Flag for human review
+    if (channel === 'facebook' || channel === 'instagram') {
+      await prisma.socialConversation.update({
+        where: { id: conversationId },
+        data: { needs_human: true },
+      }).catch((err) => console.warn('[ai-agent] failed to set needs_human flag:', err))
+    } else {
+      await prisma.waConversation.update({
+        where: { id: conversationId },
+        data: { needs_human: true },
+      }).catch((err) => console.warn('[ai-agent] failed to set needs_human flag:', err))
+    }
+    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)
     return
   }
 
@@ -168,6 +204,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
   await sendAndSaveReply({
     userId, conversationId, contactPhone, replyText,
     incomingMessageId, isFromCache: false,
+    channel, socialPageAccessToken, socialRecipientId,
   })
 }
 
@@ -189,52 +226,101 @@ async function sendAndSaveReply(opts: {
   replyText: string
   incomingMessageId: string
   isFromCache: boolean
+  channel?: string
+  socialPageAccessToken?: string
+  socialRecipientId?: string
 }) {
-  const { userId, conversationId, contactPhone, replyText, incomingMessageId } = opts
-
-  let waConfig: { phoneNumberId: string; accessToken: string }
-  try {
-    waConfig = await getWaConfig(userId)
-  } catch (err) {
-    console.error('[ai-agent] cannot load WA config:', err)
-    return
-  }
+  const {
+    userId, conversationId, contactPhone, replyText,
+    incomingMessageId, channel = 'whatsapp',
+    socialPageAccessToken, socialRecipientId,
+  } = opts
 
   let metaMessageId: string | undefined
-  try {
-    const result = await sendTextMessage({
-      phoneNumberId: waConfig.phoneNumberId,
-      accessToken: waConfig.accessToken,
-      to: contactPhone,
-      text: replyText,
-      contextMessageId: incomingMessageId,
-    })
-    metaMessageId = result.messageId
-  } catch (err) {
-    console.error('[ai-agent] sendTextMessage failed:', err)
-    return
+
+  if (channel === 'facebook' || channel === 'instagram') {
+    // ── Social channel send (Messenger API) ─────────────────────────────────
+    if (!socialPageAccessToken || !socialRecipientId) {
+      console.error('[ai-agent] Missing social channel credentials — cannot send reply')
+      return
+    }
+    const decryptedToken = decrypt(socialPageAccessToken)
+    // Show typing indicator before replying
+    setTypingOn({ recipientId: socialRecipientId, pageAccessToken: decryptedToken }).catch(() => null)
+    try {
+      const result = await sendSocialMessage({
+        recipientId: socialRecipientId,
+        pageAccessToken: decryptedToken,
+        text: replyText,
+      })
+      metaMessageId = result.messageId
+    } catch (err) {
+      console.error('[ai-agent] Messenger sendTextMessage failed:', err)
+      return
+    }
+  } else {
+    // ── WhatsApp send ──────────────────────────────────────────────────────
+    let waConfig: { phoneNumberId: string; accessToken: string }
+    try {
+      waConfig = await getWaConfig(userId)
+    } catch (err) {
+      console.error('[ai-agent] cannot load WA config:', err)
+      return
+    }
+    try {
+      const result = await sendWhatsAppMessage({
+        phoneNumberId: waConfig.phoneNumberId,
+        accessToken: waConfig.accessToken,
+        to: contactPhone,
+        text: replyText,
+        contextMessageId: incomingMessageId,
+      })
+      metaMessageId = result.messageId
+    } catch (err) {
+      console.error('[ai-agent] sendTextMessage failed:', err)
+      return
+    }
   }
 
-  // Persist the AI reply as an outbound message
+  // Persist the AI reply — choose the right DB table
   try {
-    await prisma.waMessage.create({
-      data: {
-        conversation_id: conversationId,
-        sender_type: 'agent',
-        content_type: 'text',
-        content_text: replyText,
-        message_id: metaMessageId,
-        status: 'sent',
-      },
-    })
-
-    await prisma.waConversation.update({
-      where: { id: conversationId },
-      data: {
-        last_message_text: replyText,
-        last_message_at: new Date(),
-      },
-    })
+    if (channel === 'facebook' || channel === 'instagram') {
+      await prisma.socialMessage.create({
+        data: {
+          conversation_id: conversationId,
+          platform_msg_id: metaMessageId,
+          sender_type: 'agent',
+          content_type: 'text',
+          content_text: replyText,
+          status: 'sent',
+        },
+      })
+      await prisma.socialConversation.update({
+        where: { id: conversationId },
+        data: {
+          last_message_text: replyText,
+          last_message_at: new Date(),
+        },
+      })
+    } else {
+      await prisma.waMessage.create({
+        data: {
+          conversation_id: conversationId,
+          sender_type: 'agent',
+          content_type: 'text',
+          content_text: replyText,
+          message_id: metaMessageId,
+          status: 'sent',
+        },
+      })
+      await prisma.waConversation.update({
+        where: { id: conversationId },
+        data: {
+          last_message_text: replyText,
+          last_message_at: new Date(),
+        },
+      })
+    }
   } catch (err) {
     console.error('[ai-agent] DB save failed:', err)
   }
@@ -248,12 +334,18 @@ async function sendFallback(
   contactPhone: string,
   fallbackMessage: string,
   incomingMessageId: string,
+  channel?: string,
+  socialPageAccessToken?: string,
+  socialRecipientId?: string,
 ) {
   await sendAndSaveReply({
     userId, conversationId, contactPhone,
     replyText: fallbackMessage,
     incomingMessageId,
     isFromCache: false,
+    channel,
+    socialPageAccessToken,
+    socialRecipientId,
   })
 }
 

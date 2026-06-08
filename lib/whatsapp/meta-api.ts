@@ -371,3 +371,91 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+// ============================================================
+// Interactive Messages (quick-reply buttons)
+// ============================================================
+
+export interface QuickReplyButton {
+  /** Unique payload id — returned in webhook as button_reply.id (max 256 chars) */
+  id: string
+  /** Label displayed on the button (max 20 chars) */
+  title: string
+}
+
+export interface SendInteractiveButtonMessageArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  /** Main message body text */
+  bodyText: string
+  /** Optional header text shown above the body */
+  headerText?: string
+  /** Optional footer text shown below the buttons */
+  footerText?: string
+  /** 1–3 quick-reply buttons */
+  buttons: QuickReplyButton[]
+}
+
+/**
+ * Send a WhatsApp interactive message with up to 3 quick-reply buttons.
+ *
+ * Works inside the 24-hour customer service window (i.e., the customer
+ * messaged you first). For first-touch outreach, use sendTemplateMessage.
+ *
+ * @see https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
+ */
+export async function sendInteractiveButtonMessage(
+  args: SendInteractiveButtonMessageArgs,
+): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, bodyText, headerText, footerText, buttons } = args
+
+  if (buttons.length === 0 || buttons.length > 3) {
+    throw new Error('Interactive button messages require 1–3 buttons')
+  }
+
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+
+  const interactive: Record<string, unknown> = {
+    type: 'button',
+    body: { text: bodyText },
+    action: {
+      buttons: buttons.map((btn) => ({
+        type: 'reply',
+        reply: { id: btn.id, title: btn.title },
+      })),
+    },
+  }
+
+  if (headerText) {
+    interactive.header = { type: 'text', text: headerText }
+  }
+
+  if (footerText) {
+    interactive.footer = { text: footerText }
+  }
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive,
+  }
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error (interactive): ${response.status}`)
+  }
+
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}

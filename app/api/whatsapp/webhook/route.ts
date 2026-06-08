@@ -8,6 +8,16 @@ import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
 import { getAutomationQueue, getAiAgentQueue } from '@/lib/queues/jobs'
 import { WHATSAPP_INQUIRY_SOURCE } from '@/lib/lead-sources'
+import {
+  sendInquiryWelcomeMessage,
+  sendProductInfoMessage,
+  sendAddressMessage,
+} from '@/lib/whatsapp/inquiry-message'
+import {
+  getBotState,
+  startAppointmentBot,
+  handleAppointmentBotMessage,
+} from '@/lib/whatsapp/appointment-bot'
 
 interface WhatsAppMessage {
   id: string
@@ -23,6 +33,12 @@ interface WhatsAppMessage {
   location?: { latitude: number; longitude: number; name?: string; address?: string }
   reaction?: { message_id: string; emoji: string }
   context?: { id: string }
+  /** Interactive button/list reply from the customer */
+  interactive?: {
+    type: 'button_reply' | 'list_reply'
+    button_reply?: { id: string; title: string }
+    list_reply?: { id: string; title: string }
+  }
 }
 
 interface WhatsAppWebhookEntry {
@@ -492,6 +508,33 @@ async function processMessage(
     return
   }
 
+  // ── Interactive button reply handling ───────────────────────────────────
+  // Customer clicked one of our quick-reply buttons (inquiry welcome / slot picker).
+  if (message.type === 'interactive' && message.interactive?.button_reply) {
+    const buttonId = message.interactive.button_reply.id
+    const buttonTitle = message.interactive.button_reply.title
+    const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
+    if (waConfigRow) {
+      const waConfig = { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) }
+      if (buttonId === 'SCHEDULE_APPOINTMENT') {
+        await startAppointmentBot({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId }, waConfig)
+        return
+      }
+      if (buttonId === 'INFO_PRODUCTS') {
+        await sendProductInfoMessage(userId, senderPhone, conversation.id)
+        return
+      }
+      if (buttonId === 'INFO_ADDRESS') {
+        await sendAddressMessage(userId, senderPhone, conversation.id)
+        return
+      }
+      if (buttonId.startsWith('SLOT_')) {
+        const handled = await handleAppointmentBotMessage({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId, incomingText: buttonTitle, buttonReplyId: buttonId }, waConfig)
+        if (handled) return
+      }
+    }
+  }
+
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType } = await parseMessageContent(
     message,
@@ -568,6 +611,19 @@ async function processMessage(
     name: contactName,
     messageText: inboundText,
   })
+
+  // ── Send 3-button inquiry welcome to brand-new contacts ─────────────────
+  // isFirstInboundMessage is true when the contact has NEVER messaged us.
+  // We reply with the welcome menu — the AI agent is skipped for this message.
+  if (isFirstInboundMessage) {
+    sendInquiryWelcomeMessage({
+      userId,
+      contactPhone: senderPhone,
+      contactName: contactName || senderPhone,
+      conversationId: conversation.id,
+      incomingMessageId: message.id,
+    }).catch((err) => console.error('[webhook] sendInquiryWelcomeMessage failed:', err))
+  }
 
   // Update conversation and capture the result for the publish event
   let updatedConversation: any = null
@@ -674,7 +730,22 @@ async function processMessage(
 
   // ── BullMQ: enqueue AI agent job (if agent is enabled + conversation is open)
   // Only process text messages — skip media/stickers/locations.
-  if (message.type === 'text' && inboundText && conversation.status === 'open') {
+  // Also skip for first-inbound-message contacts — the welcome menu IS the reply.
+  if (!isFirstInboundMessage && message.type === 'text' && inboundText && conversation.status === 'open') {
+    // ── Appointment bot takes priority over AI agent ───────────────────────
+    const activeBotState = await getBotState(conversation.id).catch(() => null)
+    if (activeBotState) {
+      const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
+      if (waConfigRow) {
+        const waConfig = { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) }
+        const handled = await handleAppointmentBotMessage({ conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId, incomingText: inboundText }, waConfig).catch(() => false)
+        if (handled) {
+          console.log(`[webhook] msg ${message.id} handled by appointment bot`)
+          return
+        }
+      }
+    }
+
     // PREVENT CONFLICT: if a keyword automation matched, skip the AI entirely
     const willBeHandledByAutomation = await hasMatchingKeywordAutomation(userId, inboundText)
 

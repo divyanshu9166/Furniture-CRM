@@ -151,6 +151,35 @@ class FurnitureCRMTools(llm.ToolContext):
                 "phone number, preferred date (in YYYY-MM-DD format), and time before calling this tool."
             )
 
+        # ── Step 1: Check slot availability before booking ──────────────────
+        try:
+            async with aiohttp.ClientSession() as http:
+                async with http.get(
+                    f"{CRM_API_URL}/api/appointments/check-slot",
+                    params={"date": date, "time": time},
+                    headers={"x-api-secret": CRM_API_SECRET},
+                ) as resp:
+                    if resp.status == 200:
+                        slot_data = await resp.json()
+                        if not slot_data.get("available", True):
+                            suggestions = slot_data.get("suggestions", [])
+                            if suggestions:
+                                suggestion_str = ", ".join(suggestions)
+                                return (
+                                    f"That slot ({time} on {date}) is already booked. "
+                                    f"Please ask the customer to choose from these available times: {suggestion_str}. "
+                                    f"Once they confirm a new time, call this tool again with the updated time."
+                                )
+                            else:
+                                return (
+                                    f"That slot ({time} on {date}) is fully booked and no alternatives are available. "
+                                    f"Please ask the customer to choose a different date."
+                                )
+        except Exception as exc:
+            logger.warning("Slot check failed (will proceed with booking): %s", exc)
+            # Non-critical: if the check fails, proceed optimistically
+
+        # ── Step 2: Create the appointment ──────────────────────────────────
         payload = {
             "customerName": customer_name,
             "phone": phone,

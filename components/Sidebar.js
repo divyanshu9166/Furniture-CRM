@@ -33,6 +33,8 @@ import {
   Calculator,
   Building2,
   Banknote,
+  Facebook,
+  Instagram,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useSession } from '@/components/AuthProvider';
@@ -61,6 +63,8 @@ const navItems = [
   { href: '/email-marketing', label: 'Email Marketing', icon: MailPlus, roles: ['ADMIN', 'MANAGER'] },
   { href: '/whatsapp-marketing', label: 'WhatsApp Marketing', icon: Megaphone, roles: ['ADMIN', 'MANAGER'] },
   { href: '/conversations', label: 'Conversations', icon: MessageSquare },
+  { href: '/facebook-inbox', label: 'Facebook Inbox', icon: Facebook, roles: ['ADMIN', 'MANAGER'] },
+  { href: '/instagram-inbox', label: 'Instagram Inbox', icon: Instagram, roles: ['ADMIN', 'MANAGER'] },
   { href: '/calls', label: 'Call Center', icon: Headphones },
   { href: '/gst', label: 'GST Compliance', icon: FileSpreadsheet, roles: ['ADMIN', 'MANAGER'] },
   { href: '/expenses', label: 'Expenses', icon: Calculator, roles: ['ADMIN', 'MANAGER', 'STAFF'] },
