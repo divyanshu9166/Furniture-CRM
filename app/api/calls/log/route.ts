@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         durationSec: totalSec,
         agent: agent || 'AI Agent - Anushka',
         date: now,
-        time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }),
         purpose: purpose || 'AI Call',
         outcome: outcome || 'Completed',
         notes: notes || '',

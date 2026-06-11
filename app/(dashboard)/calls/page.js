@@ -162,7 +162,8 @@ export default function CallsPage() {
 
   // Compute detailed stats from callLogs
   const computedStats = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     const todayCalls = callLogs.filter(c => c.date === todayStr);
     const inbound = callLogs.filter(c => c.direction === 'Inbound').length;
     const outbound = callLogs.filter(c => c.direction === 'Outbound').length;
@@ -946,7 +947,11 @@ export default function CallsPage() {
           />
           <StatCard icon={PhoneOutgoing} label="AI Outbound" value={aiCalls.filter(c => c.direction === 'Outbound').length} trend="Total AI calls" positive />
           <StatCard icon={PhoneIncoming} label="AI Inbound" value={aiCalls.filter(c => c.direction === 'Inbound').length} trend="Total AI calls" positive />
-          <StatCard icon={Clock} label="AI Calls Today" value={aiCalls.filter(c => c.date === new Date().toISOString().split('T')[0]).length} trend="Today" positive />
+          <StatCard icon={Clock} label="AI Calls Today" value={aiCalls.filter(c => {
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            return c.date === todayStr;
+          }).length} trend="Today" positive />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

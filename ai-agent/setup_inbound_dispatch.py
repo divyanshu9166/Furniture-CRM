@@ -5,18 +5,10 @@ Creates a SIP Dispatch Rule in LiveKit so that inbound calls
 (someone calling the Vobiz/SIP number) are automatically routed
 to the 'furniture-crm-agent' AI worker.
 
-Run once from the VPS (or your local machine) after setting up
-the inbound SIP trunk in LiveKit Cloud dashboard:
-
+Run once from the VPS after setting up the inbound SIP trunk:
     python setup_inbound_dispatch.py
 
-Prerequisites:
-  • An INBOUND SIP Trunk must already exist in LiveKit Cloud.
-    (SIP → Trunks → + New Trunk → Inbound)
-    Set the trunk to receive calls at your Vobiz DID number.
-  • LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET in .env
-  • INBOUND_SIP_TRUNK_ID in .env  (the ID of the inbound trunk,
-    format: ST_xxxxxxxxxxxx — different from the outbound trunk!)
+Updated for livekit-agents >= 1.5.x SDK (removed deprecated room_prefix/pin).
 """
 
 import asyncio
@@ -26,81 +18,91 @@ from livekit import api
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+# ─── HARDCODED correct inbound trunk ID ───────────────────────────────────────
+# This is the LiveKit INBOUND trunk (ST_9bvtevghR8Fk = "inbound ai calling agent")
+# It is DIFFERENT from the outbound trunk (ST_tid7UwRXffGP)
+INBOUND_TRUNK_ID = "ST_9bvtevghR8Fk"
+AGENT_NAME       = "furniture-crm-agent"
+AGENT_METADATA   = '{"call_type": "inbound"}'
+
 
 async def main():
     lk_url    = os.getenv("LIVEKIT_URL")
     lk_key    = os.getenv("LIVEKIT_API_KEY")
     lk_secret = os.getenv("LIVEKIT_API_SECRET")
 
-    # The INBOUND SIP trunk ID — set this in .env as INBOUND_SIP_TRUNK_ID
-    # It is DIFFERENT from OUTBOUND_SIP_TRUNK_ID
-    inbound_trunk_id = os.getenv("INBOUND_SIP_TRUNK_ID") or os.getenv("VOBIZ_SIP_TRUNK_ID")
-
     if not all([lk_url, lk_key, lk_secret]):
-        print("❌ LiveKit credentials missing. Set LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env")
-        return
-
-    if not inbound_trunk_id:
-        print("❌ INBOUND_SIP_TRUNK_ID missing in .env")
-        print("   Go to LiveKit Cloud → SIP → Trunks → create an Inbound trunk")
-        print("   then add INBOUND_SIP_TRUNK_ID=ST_xxxx to your .env")
+        print("❌ LiveKit credentials missing in .env")
         return
 
     lkapi = api.LiveKitAPI(url=lk_url, api_key=lk_key, api_secret=lk_secret)
 
     print(f"LiveKit URL     : {lk_url}")
-    print(f"Inbound Trunk   : {inbound_trunk_id}")
-    print(f"Agent Name      : furniture-crm-agent")
+    print(f"Inbound Trunk   : {INBOUND_TRUNK_ID}")
+    print(f"Agent Name      : {AGENT_NAME}")
     print()
 
     try:
-        # List existing dispatch rules so we don't duplicate
-        existing = await lkapi.sip.list_sip_dispatch_rule(
-            api.ListSIPDispatchRuleRequest()
-        )
-        if existing.items:
-            print(f"Existing dispatch rules ({len(existing.items)}):")
-            for rule in existing.items:
-                print(f"  • {rule.sip_dispatch_rule_id} — trunk: {rule.trunk_ids}")
-            print()
-            ans = input("A dispatch rule already exists. Create another one? (y/N): ").strip().lower()
-            if ans != "y":
-                print("Skipped. Using existing rule.")
-                await lkapi.aclose()
-                return
+        # ── 1. List and delete ALL existing dispatch rules ─────────────────────
+        try:
+            # Use new non-deprecated method first, fall back to old one
+            try:
+                existing = await lkapi.sip.list_dispatch_rule(
+                    api.ListSIPDispatchRuleRequest()
+                )
+            except AttributeError:
+                existing = await lkapi.sip.list_sip_dispatch_rule(
+                    api.ListSIPDispatchRuleRequest()
+                )
 
-        # Create a dispatch rule: all inbound calls → agent "furniture-crm-agent"
-        # The metadata is passed to the agent entrypoint as ctx.job.metadata
+            if existing.items:
+                print(f"Found {len(existing.items)} existing dispatch rule(s) — deleting all...")
+                for rule in existing.items:
+                    try:
+                        await lkapi.sip.delete_sip_dispatch_rule(
+                            api.DeleteSIPDispatchRuleRequest(
+                                sip_dispatch_rule_id=rule.sip_dispatch_rule_id
+                            )
+                        )
+                        print(f"  ✓ Deleted rule {rule.sip_dispatch_rule_id} (trunks: {rule.trunk_ids})")
+                    except Exception as del_err:
+                        print(f"  ⚠ Could not delete {rule.sip_dispatch_rule_id}: {del_err}")
+                print()
+            else:
+                print("No existing dispatch rules found.")
+                print()
+        except Exception as list_err:
+            print(f"⚠ Could not list existing rules: {list_err}")
+            print()
+
+        # ── 2. Create the correct dispatch rule ────────────────────────────────
+        # SIPDispatchRuleDirect: newer SDK removed room_prefix and pin fields.
+        # Just use SIPDispatchRuleDirect() with no arguments.
+        print("Creating dispatch rule...")
         rule = await lkapi.sip.create_sip_dispatch_rule(
             api.CreateSIPDispatchRuleRequest(
-                trunk_ids=[inbound_trunk_id],
+                trunk_ids=[INBOUND_TRUNK_ID],
                 rule=api.SIPDispatchRule(
-                    dispatch_rule_direct=api.SIPDispatchRuleDirect(
-                        room_prefix="inbound-",
-                        pin="",   # No PIN required
-                    )
+                    dispatch_rule_direct=api.SIPDispatchRuleDirect()
                 ),
-                room_preset="",
-                attributes={},
-                hide_phone_number=False,
-                # Route to our named agent worker
-                inbound_numbers=[],   # Empty = match all numbers on this trunk
+                # Route all inbound calls to the named AI agent worker
                 dispatch=api.RoomAgentDispatch(
-                    agent_name="furniture-crm-agent",
-                    metadata='{"call_type": "inbound"}',
+                    agent_name=AGENT_NAME,
+                    metadata=AGENT_METADATA,
                 ),
             )
         )
 
-        print(f"✅ Dispatch rule created!")
+        print()
+        print("✅ Dispatch rule created successfully!")
         print(f"   Rule ID   : {rule.sip_dispatch_rule_id}")
         print(f"   Trunk IDs : {rule.trunk_ids}")
         print()
-        print("Now inbound SIP calls will be automatically dispatched to 'furniture-crm-agent'.")
-        print("Make sure the agent worker is running on VPS: docker compose logs ai-agent")
+        print("Inbound SIP calls will now be dispatched to 'furniture-crm-agent'.")
+        print("Test: call your Vobiz number and watch: docker compose logs ai-agent -f")
 
     except Exception as exc:
-        print(f"❌ Error: {exc}")
+        print(f"❌ Error creating dispatch rule: {exc}")
         import traceback
         traceback.print_exc()
     finally:
