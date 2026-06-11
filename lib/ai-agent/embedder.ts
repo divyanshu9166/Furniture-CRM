@@ -1,7 +1,7 @@
 /**
  * lib/ai-agent/embedder.ts
  *
- * Gemini text-embedding-004 wrapper.
+ * Gemini gemini-embedding-001 wrapper.
  * Two task types:
  *   - embedText     → RETRIEVAL_QUERY  (used when a customer message arrives)
  *   - embedDocument → RETRIEVAL_DOCUMENT (used when indexing knowledge chunks)
@@ -35,6 +35,7 @@ async function callEmbedApi(text: string, taskType: string): Promise<number[]> {
         model: `models/${GEMINI_EMBEDDING_MODEL}`,
         content: { parts: [{ text: text.slice(0, 2000) }] },
         taskType,
+        outputDimensionality: 768,
       }),
     })
 

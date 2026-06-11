@@ -1,5 +1,5 @@
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
-export const GEMINI_EMBEDDING_MODEL = 'text-embedding-004'
+export const GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001'
 
 export function normalizeGeminiModelName(model: string) {
   const normalized = model.trim().replace(/^models\//, '')
@@ -31,7 +31,7 @@ export function getGeminiApiKey() {
 }
 
 export function geminiUrl(model: string, action: 'generateContent' | 'embedContent') {
-  // text-embedding-004 is only available on the stable v1 API.
+  // gemini-embedding-001 uses the stable v1 API endpoint.
   // generateContent features (thinking, etc.) need v1beta.
   const version = action === 'embedContent' ? 'v1' : 'v1beta'
   return `https://generativelanguage.googleapis.com/${version}/models/${normalizeGeminiModelName(model)}:${action}`
