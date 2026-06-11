@@ -59,8 +59,8 @@ interface BotState {
   contactName: string
   /** Contact's phone number (E.164) */
   contactPhone: string
-  /** Internal CRM contact id */
-  contactId: number
+  /** WA contact id */
+  contactId: string
   /** WA conversation id — for saving the bot's reply message to DB */
   conversationId: string
   /** userId (CRM owner) — for WA config lookup */
@@ -362,7 +362,7 @@ async function sendSlotsAsButtons(
 
 export interface AppointmentBotContext {
   conversationId: string
-  contactId: number
+  contactId: string
   contactPhone: string
   contactName: string
   userId: string
@@ -545,11 +545,25 @@ export async function handleAppointmentBotMessage(
       return true
     }
 
+    // Ensure CRM global Contact exists
+    let crmContact = await prisma.contact.findUnique({
+      where: { phone: state.contactPhone },
+    })
+    if (!crmContact) {
+      crmContact = await prisma.contact.create({
+        data: {
+          phone: state.contactPhone,
+          name: state.contactName || state.contactPhone,
+          source: 'WhatsApp Bot',
+        },
+      })
+    }
+
     // Create the appointment in DB
     try {
       await prisma.appointment.create({
         data: {
-          contactId: state.contactId,
+          contactId: crmContact.id,
           date: new Date(state.date),
           time: state.time,
           purpose: 'Showroom Visit',

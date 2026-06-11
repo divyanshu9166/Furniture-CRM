@@ -173,9 +173,9 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     return
   }
 
-  // ── Step 8: Confidence / handoff check ───────────────────────────────────
-  if (!agentResponse.confidenceOk || agentResponse.needsHandoff) {
-    console.log(`[ai-agent] low confidence or handoff needed — sending fallback`)
+  // ── Step 8: Handoff check ─────────────────────────────────────────────────
+  if (agentResponse.needsHandoff) {
+    console.log(`[ai-agent] handoff requested — flagging for human`)
     // Flag for human review
     if (channel === 'facebook' || channel === 'instagram') {
       await prisma.socialConversation.update({

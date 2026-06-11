@@ -31,7 +31,10 @@ export function getGeminiApiKey() {
 }
 
 export function geminiUrl(model: string, action: 'generateContent' | 'embedContent') {
-  return `https://generativelanguage.googleapis.com/v1beta/models/${normalizeGeminiModelName(model)}:${action}`
+  // text-embedding-004 is only available on the stable v1 API.
+  // generateContent features (thinking, etc.) need v1beta.
+  const version = action === 'embedContent' ? 'v1' : 'v1beta'
+  return `https://generativelanguage.googleapis.com/${version}/models/${normalizeGeminiModelName(model)}:${action}`
 }
 
 export async function geminiErrorMessage(res: Response, actionLabel: string) {

@@ -78,7 +78,13 @@ class FurnitureCRMTools(llm.ToolContext):
         self._phone_number = phone_number
 
     @llm.function_tool(
-        description="Transfer the call to a human team member. Call this immediately when the customer requests to speak to a person."
+        description=(
+            "Transfer the call to a human team member. "
+            "Call this tool in TWO situations: "
+            "(1) The customer asks to speak to a person/human/manager, OR "
+            "(2) The customer asks something you cannot answer (unknown price, policy, complaint, etc.). "
+            "Always say a brief goodbye sentence BEFORE calling this tool, e.g. 'जी, अभी हमारे टीम मेंबर से कनेक्ट करती हूँ।'"
+        )
     )
     async def transfer_call(self, destination: Optional[str] = None) -> str:
         target = destination or DEFAULT_TRANSFER_NUMBER
