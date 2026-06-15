@@ -483,13 +483,14 @@ input[type="number"] {
 
 /* ── Mobile top safe-area clearance (TopBar) ────────────────── */
 .mobile-top-safe {
-  padding-top: env(safe-area-inset-top, 8px);
-  height: calc(56px + env(safe-area-inset-top, 8px));
+  /* Robust fallback: guarantees at least 32px clearance for Android status bars */
+  padding-top: max(env(safe-area-inset-top), 32px);
+  height: calc(56px + max(env(safe-area-inset-top), 32px));
 }
 @media (min-width: 768px) {
   .mobile-top-safe {
-    padding-top: 0;
-    height: 64px;
+    padding-top: 0 !important;
+    height: 64px !important;
   }
 }
 
