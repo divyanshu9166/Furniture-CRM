@@ -9,7 +9,7 @@ export default function DashboardLayout({ children }) {
         <SidebarClient />
         <div className="flex-1 md:ml-[260px] ml-0 min-w-0 transition-all duration-300">
           <TopBar />
-          <main className="p-3.5 md:p-6 overflow-x-hidden pb-6">
+          <main className="p-3.5 md:p-6 overflow-x-hidden mobile-bottom-safe pt-5 md:pt-6">
             {children}
           </main>
         </div>

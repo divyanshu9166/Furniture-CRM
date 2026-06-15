@@ -237,7 +237,7 @@ export default function TopBar() {
               </div>
 
               <div className="px-4 py-2.5 border-t border-border bg-surface/50 flex items-center justify-between gap-2">
-                <a href="/conversations" className="text-[11px] font-medium text-accent hover:text-accent-hover">Conversations</a>
+                <a href="/calls" className="text-[11px] font-medium text-accent hover:text-accent-hover">Call Center</a>
                 <a href="/inventory" className="text-[11px] font-medium text-accent hover:text-accent-hover">Inventory</a>
                 <a href="/billing" className="text-[11px] font-medium text-accent hover:text-accent-hover">Billing</a>
               </div>

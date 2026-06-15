@@ -90,49 +90,68 @@ export function WhatsAppMarketingClient() {
     };
   }, []);
 
+  const isInbox = activeTab === 'inbox';
+
   return (
-    <div className="wa-light space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <Megaphone className="w-6 h-6 text-accent" />
-            WhatsApp Marketing
-          </h1>
-          <p className="text-sm text-muted mt-1">
-            Manage conversations, broadcasts, and automations
-          </p>
+    // When inbox is active we switch to a full-height flex-column layout so
+    // the thread + composer can fill the remaining viewport without overflow.
+    <div className={isInbox
+      ? '-m-3.5 sm:-m-6 flex flex-col h-[calc(100dvh-56px)] md:h-[calc(100dvh-64px)]'
+      : 'wa-light space-y-6'
+    }>
+      {/* ── Page header + tab bar ─────────────────────────────────────── */}
+      <div className={isInbox
+        ? 'shrink-0 border-b border-border bg-background px-3.5 sm:px-6 pt-4 sm:pt-5 pb-0'
+        : ''
+      }>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <div>
+            <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+              <Megaphone className="w-6 h-6 text-accent" />
+              WhatsApp Marketing
+            </h1>
+            <p className="text-sm text-muted mt-1">
+              Manage conversations, broadcasts, and automations
+            </p>
+          </div>
+          <ConnectionBadge config={waConfig} loading={configLoading} />
         </div>
-        <ConnectionBadge config={waConfig} loading={configLoading} />
+
+        <div className="flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto mb-0">
+          {TABS.map(tab => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            const badge = tab.id === 'inbox' && totalUnread > 0 ? totalUnread : null;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${active
+                    ? 'bg-surface text-accent shadow-sm border border-border/50'
+                    : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                  }`}
+              >
+                <Icon className="w-4 h-4" />
+                {tab.label}
+                {badge && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-success text-surface text-[10px] font-bold leading-none">
+                    {badge > 99 ? '99+' : badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto">
-        {TABS.map(tab => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          const badge = tab.id === 'inbox' && totalUnread > 0 ? totalUnread : null;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${active
-                  ? 'bg-surface text-accent shadow-sm border border-border/50'
-                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
-                }`}
-            >
-              <Icon className="w-4 h-4" />
-              {tab.label}
-              {badge && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-success text-surface text-[10px] font-bold leading-none">
-                  {badge > 99 ? '99+' : badge}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
+      {/* ── Tab content ──────────────────────────────────────────────── */}
+      {/* Inbox gets a flex-1 min-h-0 wrapper so it fills remaining height */}
+      {activeTab === 'inbox' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <InboxTab />
+        </div>
+      )}
       {activeTab === 'overview' && <OverviewTab />}
-      {activeTab === 'inbox' && <InboxTab />}
       {activeTab === 'broadcasts' && <BroadcastsTab />}
       {activeTab === 'automations' && <AutomationsTab />}
       {activeTab === 'contacts' && <ContactsTab />}

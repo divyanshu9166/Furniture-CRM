@@ -1,10 +1,5 @@
-import { SocialInbox } from '@/components/social/social-inbox'
-
-export const metadata = {
-  title: 'Facebook Inbox | Kosmic CRM',
-  description: 'Facebook Page Messages inbox — read and reply to customer DMs',
-}
+import { redirect } from 'next/navigation'
 
 export default function FacebookInboxPage() {
-  return <SocialInbox platform="facebook" />
+  redirect('/social-inbox')
 }

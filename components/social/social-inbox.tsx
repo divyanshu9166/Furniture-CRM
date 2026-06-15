@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Send, Loader2, MessageSquare, RefreshCw,
   Facebook, Instagram, UserCheck, ArrowLeft,
-  CheckCheck, MoreVertical, Phone, Info,
+  CheckCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -87,9 +87,15 @@ const PLATFORM_BG: Record<Platform, string> = {
   instagram: 'rgba(193,53,132,0.08)',
 }
 
-// ── Main Component ───────────────────────────────────────────────────────────
+// ── Single-platform panel ─────────────────────────────────────────────────────
 
-export function SocialInbox({ platform }: { platform: Platform }) {
+function PlatformPanel({
+  platform,
+  isVisible,
+}: {
+  platform: Platform
+  isVisible: boolean
+}) {
   const [conversations, setConversations] = useState<SocialConversation[]>([])
   const [active, setActive] = useState<SocialConversation | null>(null)
   const [messages, setMessages] = useState<SocialMessage[]>([])
@@ -106,15 +112,7 @@ export function SocialInbox({ platform }: { platform: Platform }) {
   const brandBg = PLATFORM_BG[platform]
   const PlatformIcon = platform === 'facebook' ? Facebook : Instagram
 
-  // Keep activeIdRef in sync so polling closures have fresh data
   useEffect(() => { activeIdRef.current = active?.id ?? null }, [active])
-
-  // Reset active conversation when platform switches (prevents stale state)
-  useEffect(() => {
-    setActive(null)
-    setMessages([])
-    setSendText('')
-  }, [platform])
 
   // ── Load conversations ────────────────────────────────────────────────────
 
@@ -125,7 +123,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
       if (res.ok) {
         const data: SocialConversation[] = await res.json()
         setConversations(data)
-        // Keep the active conversation in sync with fresh data
         if (activeIdRef.current) {
           const updated = data.find((c) => c.id === activeIdRef.current)
           if (updated) setActive(updated)
@@ -151,7 +148,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
       if (res.ok) {
         const data: SocialMessage[] = await res.json()
         setMessages(data)
-        // Clear unread count in list
         setConversations((prev) =>
           prev.map((c) => c.id === conversationId ? { ...c, unread_count: 0 } : c)
         )
@@ -161,7 +157,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
     }
   }, [])
 
-  // Start/stop message polling when active conversation changes
   useEffect(() => {
     if (msgPollRef.current) clearInterval(msgPollRef.current)
     if (!active) return
@@ -171,7 +166,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
     return () => { if (msgPollRef.current) clearInterval(msgPollRef.current) }
   }, [active?.id, loadMessages]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -194,7 +188,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
     setSendText('')
     setSending(true)
 
-    // Optimistic bubble
     const tempId = `temp-${Date.now()}`
     const optimistic: SocialMessage = {
       id: tempId,
@@ -219,10 +212,9 @@ export function SocialInbox({ platform }: { platform: Platform }) {
         const err = await res.json()
         toast.error(err.error ?? 'Failed to send message')
         setMessages((prev) => prev.filter((m) => m.id !== tempId))
-        setSendText(text) // Restore text on failure
+        setSendText(text)
       } else {
         const saved: SocialMessage = await res.json()
-        // Replace optimistic bubble with confirmed message
         setMessages((prev) => prev.map((m) => m.id === tempId ? saved : m))
         setConversations((prev) =>
           prev.map((c) => c.id === active.id
@@ -264,24 +256,21 @@ export function SocialInbox({ platform }: { platform: Platform }) {
     } catch { toast.error('Failed to update status') }
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   const hasActive = !!active
 
   return (
-    <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden sm:-m-6">
-
+    <div className={cn('flex h-full min-h-0', !isVisible && 'hidden')}>
       {/* ── Left panel: Conversation list ─────────────────────────────────── */}
       <div className={cn(
         'flex flex-col border-r border-border min-h-0 bg-background',
-        'w-full lg:w-[320px] lg:flex-none',
+        'w-full lg:w-[300px] lg:flex-none',
         hasActive ? 'hidden lg:flex' : 'flex',
       )}>
         {/* Header */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
           <PlatformIcon className="size-5 shrink-0" style={{ color: brandColor }} />
           <h2 className="text-sm font-semibold text-foreground flex-1 capitalize">
-            {platform} Inbox
+            {platform} Chats
           </h2>
           <button
             onClick={() => loadConversations()}
@@ -325,7 +314,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
               >
                 <div className="relative shrink-0">
                   <Avatar contact={conv.contact} size={40} />
-                  {/* Online / platform dot */}
                   <span
                     className="absolute -bottom-0.5 -right-0.5 size-3.5 rounded-full border-2 border-background flex items-center justify-center"
                     style={{ background: brandColor }}
@@ -380,7 +368,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
         hasActive ? 'flex' : 'hidden lg:flex',
       )}>
         {!active ? (
-          /* Empty state — desktop only (mobile shows list instead) */
           <div className="flex flex-col items-center justify-center flex-1 text-center px-8">
             <div
               className="flex size-20 items-center justify-center rounded-full mb-4"
@@ -389,7 +376,7 @@ export function SocialInbox({ platform }: { platform: Platform }) {
               <PlatformIcon className="size-10" style={{ color: brandColor }} />
             </div>
             <p className="text-base font-semibold text-foreground">
-              {platform === 'facebook' ? 'Facebook' : 'Instagram'} Inbox
+              {platform === 'facebook' ? 'Facebook' : 'Instagram'} Chats
             </p>
             <p className="text-sm text-muted-foreground mt-2 max-w-xs leading-relaxed">
               Select a conversation from the list to view and reply to messages.
@@ -399,7 +386,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
           <>
             {/* Thread header */}
             <div className="flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-border shrink-0 bg-background">
-              {/* Back button — mobile only */}
               <button
                 onClick={() => setActive(null)}
                 className="lg:hidden flex items-center justify-center size-8 rounded-full hover:bg-surface-hover transition-colors text-muted-foreground"
@@ -432,16 +418,13 @@ export function SocialInbox({ platform }: { platform: Platform }) {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex items-center gap-1 shrink-0">
-                {/* Human-handoff pill — desktop */}
                 {active.needs_human && (
                   <span className="hidden md:inline-flex items-center gap-1.5 text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-full px-2.5 py-1">
                     <UserCheck className="size-3" />
                     AI Paused
                   </span>
                 )}
-                {/* Resolve button */}
                 <Button
                   variant="outline"
                   size="sm"
@@ -485,7 +468,6 @@ export function SocialInbox({ platform }: { platform: Platform }) {
                   const isTemp = msg.id.startsWith('temp-')
                   return (
                     <div key={msg.id} className={cn('flex', isAgent ? 'justify-end' : 'justify-start')}>
-                      {/* Customer avatar on left */}
                       {!isAgent && (
                         <Avatar contact={active.contact} size={28} />
                       )}
@@ -567,6 +549,79 @@ export function SocialInbox({ platform }: { platform: Platform }) {
             </div>
           </>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Main Component (combined with tabs) ──────────────────────────────────────
+
+export function SocialInbox({ platform }: { platform?: Platform }) {
+  // If a specific platform is forced (legacy usage), just show that panel
+  const [activeTab, setActiveTab] = useState<Platform>(platform ?? 'instagram')
+
+  // When a forced platform prop is given, keep tab in sync
+  useEffect(() => {
+    if (platform) setActiveTab(platform)
+  }, [platform])
+
+  const igColor = PLATFORM_COLOR.instagram
+  const fbColor = PLATFORM_COLOR.facebook
+
+  return (
+    <div className="-m-4 flex flex-col h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden sm:-m-6">
+
+      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
+      {!platform && (
+        <div className="flex shrink-0 border-b border-border bg-background">
+          {/* Instagram tab */}
+          <button
+            id="social-inbox-tab-instagram"
+            onClick={() => setActiveTab('instagram')}
+            className={cn(
+              'flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+              activeTab === 'instagram'
+                ? 'border-[#c13584] text-[#c13584]'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-surface-hover',
+            )}
+          >
+            <Instagram className="size-4" />
+            <span>Instagram</span>
+          </button>
+
+          {/* Facebook tab */}
+          <button
+            id="social-inbox-tab-facebook"
+            onClick={() => setActiveTab('facebook')}
+            className={cn(
+              'flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
+              activeTab === 'facebook'
+                ? 'border-[#1877f2] text-[#1877f2]'
+                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-surface-hover',
+            )}
+          >
+            <Facebook className="size-4" />
+            <span>Facebook</span>
+          </button>
+
+          {/* Spacer / platform dot indicator */}
+          <div className="flex-1" />
+          <div className="flex items-center gap-3 pr-4">
+            <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span
+                className="inline-block size-2 rounded-full"
+                style={{ backgroundColor: activeTab === 'instagram' ? igColor : fbColor }}
+              />
+              {activeTab === 'instagram' ? 'Instagram DMs' : 'Facebook Messenger'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Panel area ───────────────────────────────────────────────────── */}
+      <div className="flex-1 min-h-0 relative">
+        <PlatformPanel platform="instagram" isVisible={activeTab === 'instagram'} />
+        <PlatformPanel platform="facebook" isVisible={activeTab === 'facebook'} />
       </div>
     </div>
   )

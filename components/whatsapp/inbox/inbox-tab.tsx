@@ -231,7 +231,7 @@ export function InboxTab() {
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="-m-4 flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col overflow-hidden sm:-m-6">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {/* WhatsApp connection banner */}
       {whatsappConnected === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
