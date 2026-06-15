@@ -351,6 +351,11 @@ input[type="number"] {
 .hide-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
