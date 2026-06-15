@@ -136,7 +136,7 @@ export default function TopBar() {
   }, [showUserMenu, showNotifications]);
 
   return (
-    <header className="h-[56px] md:h-[64px] border-b border-border bg-white/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
+    <header className="mobile-top-safe border-b border-border bg-white/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
       {/* Left section */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
         {/* Hamburger — mobile only */}

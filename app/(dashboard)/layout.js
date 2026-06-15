@@ -1,5 +1,6 @@
 import SidebarClient from '@/components/SidebarClient';
 import TopBar from '@/components/TopBar';
+import BottomNav from '@/components/BottomNav';
 import { SidebarProvider } from '@/components/SidebarContext';
 
 export default function DashboardLayout({ children }) {
@@ -13,6 +14,7 @@ export default function DashboardLayout({ children }) {
             {children}
           </main>
         </div>
+        <BottomNav />
       </div>
     </SidebarProvider>
   );

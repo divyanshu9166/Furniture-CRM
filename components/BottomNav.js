@@ -176,7 +176,7 @@ export default function BottomNav() {
             background: 'rgba(255,255,255,0.92)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            paddingBottom: 'env(safe-area-inset-bottom)',
+            paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
           }}
         >
           <div className="flex items-center justify-around px-1 h-[60px]">
