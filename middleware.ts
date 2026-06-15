@@ -6,6 +6,7 @@ const publicPaths = [
   '/login',
   '/api/auth',
   '/api/webhooks',
+  '/api/social/webhook',
   '/walkin-form',
   '/api/walkin',
   '/api/email-track',
