@@ -1,92 +1,160 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
+import { getAiAgentQueue } from '@/lib/queues/jobs'
 
-// GET — Facebook webhook verification
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams
-  const mode = searchParams.get('hub.mode')
-  const token = searchParams.get('hub.verify_token')
+  const mode      = searchParams.get('hub.mode')
+  const token     = searchParams.get('hub.verify_token')
   const challenge = searchParams.get('hub.challenge')
 
-  const config = await prisma.channelConfig.findUnique({ where: { channel: 'Facebook' } })
-  const verifyToken = (config?.config as Record<string, string>)?.verifyToken
+  const config = await prisma.fbConfig.findFirst({
+    where: { status: 'connected' },
+  })
 
-  if (mode === 'subscribe' && token === verifyToken) {
+  if (mode === 'subscribe' && token === config?.verify_token) {
     return new NextResponse(challenge, { status: 200 })
   }
   return NextResponse.json({ error: 'Verification failed' }, { status: 403 })
 }
 
-// POST — Receive incoming Facebook Messenger messages
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
+  // Always return 200 immediately to prevent Meta retries
+  const body = await req.json().catch(() => null)
+  if (!body) return NextResponse.json({ status: 'ok' })
 
-    const config = await prisma.channelConfig.findUnique({ where: { channel: 'Facebook' } })
-    if (!config?.enabled) {
-      return NextResponse.json({ error: 'Facebook integration disabled' }, { status: 403 })
-    }
+  // Process async
+  handleWebhook(body).catch(err =>
+    console.error('[fb-webhook] Error:', err)
+  )
 
-    const entries = body.entry || []
-    for (const entry of entries) {
-      const messaging = entry.messaging || []
-      for (const event of messaging) {
-        if (!event.message?.text) continue
+  return NextResponse.json({ success: true })
+}
 
-        const senderId = event.sender?.id
-        const text = event.message.text
-        const now = new Date()
-        const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+async function handleWebhook(body: any) {
+  const config = await prisma.fbConfig.findFirst({
+    where: { status: 'connected' },
+  })
 
-        let conversation = await prisma.conversation.findFirst({
-          where: { externalId: senderId, channel: 'Facebook' },
+  if (!config) {
+    console.warn('[fb-webhook] No FB config found')
+    return
+  }
+
+  const userId = config.user_id
+  const pageAccessToken = decrypt(config.page_access_token)
+
+  for (const entry of body.entry || []) {
+    for (const event of entry.messaging || []) {
+      // Skip echoes, delivery, read receipts
+      if (event.message?.is_echo) continue
+      if (event.delivery || event.read) continue
+      if (!event.message?.text && !event.message?.attachments) continue
+
+      const senderId = event.sender?.id
+      const messageText = event.message?.text || ''
+      const platformMsgId = event.message?.mid
+
+      // Deduplicate
+      if (platformMsgId) {
+        const existing = await prisma.socialMessage.findFirst({
+          where: { platform_msg_id: platformMsgId },
         })
-
-        if (conversation) {
-          const existingMessages = (conversation.messages as any[]) || []
-          existingMessages.push({ from: 'customer', text, time })
-
-          await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: {
-              messages: existingMessages,
-              lastMessage: text,
-              unread: conversation.unread + 1,
-              date: now,
-            },
-          })
-        } else {
-          const accessToken = (config.config as Record<string, string>)?.accessToken
-          let customerName = `FB User ${senderId.slice(-4)}`
-          if (accessToken) {
-            try {
-              const profileRes = await fetch(`https://graph.facebook.com/v21.0/${senderId}?fields=name&access_token=${accessToken}`)
-              if (profileRes.ok) {
-                const profile = await profileRes.json()
-                customerName = profile.name || customerName
-              }
-            } catch { /* use fallback name */ }
-          }
-
-          await prisma.conversation.create({
-            data: {
-              customerName,
-              channel: 'Facebook',
-              externalId: senderId,
-              status: 'AI_HANDLED',
-              lastMessage: text,
-              unread: 1,
-              date: now,
-              messages: [{ from: 'customer', text, time }],
-            },
-          })
+        if (existing) {
+          console.log(`[fb-webhook] Duplicate mid ${platformMsgId} - skipping`)
+          continue
         }
       }
-    }
 
-    return NextResponse.json({ success: true })
-  } catch (error: any) {
-    console.error('Facebook webhook error:', error)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+      // Find or create contact
+      let contact = await prisma.socialContact.findFirst({
+        where: { user_id: userId, platform: 'facebook', platform_id: senderId },
+      })
+
+      if (!contact) {
+        let name = `FB User ${senderId.slice(-4)}`
+        try {
+          const res = await fetch(
+            `https://graph.facebook.com/v21.0/${senderId}?fields=name&access_token=${encodeURIComponent(pageAccessToken)}`
+          )
+          if (res.ok) {
+            const profile = await res.json()
+            name = profile.name || name
+          }
+        } catch {}
+
+        contact = await prisma.socialContact.create({
+          data: {
+            id: `sc_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            user_id: userId,
+            platform: 'facebook',
+            platform_id: senderId,
+            name,
+          },
+        })
+      }
+
+      // Find or create conversation
+      let conversation = await prisma.socialConversation.findFirst({
+        where: { user_id: userId, contact_id: contact.id },
+      })
+
+      if (!conversation) {
+        conversation = await prisma.socialConversation.create({
+          data: {
+            id: `conv_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            user_id: userId,
+            contact_id: contact.id,
+            platform: 'facebook',
+            status: 'open',
+          },
+        })
+      }
+
+      // Save message
+      await prisma.socialMessage.create({
+        data: {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+          conversation_id: conversation.id,
+          platform_msg_id: platformMsgId,
+          sender_type: 'customer',
+          content_type: 'text',
+          content_text: messageText,
+          status: 'delivered',
+        },
+      })
+
+      // Update conversation
+      await prisma.socialConversation.update({
+        where: { id: conversation.id },
+        data: {
+          last_message_text: messageText,
+          last_message_at: new Date(),
+          unread_count: { increment: 1 },
+        },
+      })
+
+      console.log(`[fb-webhook] ✅ Message saved from ${contact.name}: ${messageText}`)
+
+      // Enqueue AI agent
+      getAiAgentQueue()
+        .add('handle_message', {
+          userId,
+          conversationId: conversation.id,
+          contactId: contact.id,
+          contactPhone: senderId,
+          messageText,
+          incomingMessageId: platformMsgId ?? '',
+          channel: 'facebook',
+          socialPageAccessToken: encrypt(pageAccessToken),
+          socialRecipientId: senderId,
+        }, {
+          jobId: `fb-agent:${contact.id}:${platformMsgId ?? Date.now()}`,
+          removeOnComplete: { count: 200 },
+          removeOnFail: { count: 500 },
+        })
+        .catch(err => console.error('[fb-webhook] AI queue error:', err))
+    }
   }
 }
