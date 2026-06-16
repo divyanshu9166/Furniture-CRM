@@ -134,18 +134,37 @@ export async function getUserProfile(opts: {
 }): Promise<{ name: string; profile_pic?: string } | null> {
   const { userId, pageAccessToken, platform } = opts
 
-  // Instagram profile fields are limited vs Facebook
+  // Facebook's user-profile endpoint does NOT expose a single `name` field for
+  // a PSID — it returns first_name/last_name. Instagram returns `name`.
   const fields = platform === 'instagram'
-    ? 'name,profile_pic'
-    : 'name,profile_pic'
+    ? 'name,username,profile_pic'
+    : 'first_name,last_name,profile_pic'
 
   try {
     const url = `${GRAPH_API_BASE}/${userId}?fields=${fields}&access_token=${encodeURIComponent(pageAccessToken)}`
     const res = await fetch(url)
     if (!res.ok) return null
-    const data = await res.json() as { name?: string; profile_pic?: string }
+    const data = await res.json() as {
+      name?: string
+      username?: string
+      first_name?: string
+      last_name?: string
+      profile_pic?: string
+    }
+
+    // Compose a display name from whatever the platform returns.
+    const composedName = [data.first_name, data.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+    const name = data.name || composedName || data.username || ''
+
+    // Return null name (not the PSID) so callers can decide on a fallback and
+    // retry later instead of permanently persisting the raw ID as the name.
+    if (!name) return { name: '', profile_pic: data.profile_pic }
+
     return {
-      name: data.name ?? userId,
+      name,
       profile_pic: data.profile_pic,
     }
   } catch {
