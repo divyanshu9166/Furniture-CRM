@@ -212,10 +212,29 @@ async function processMessagingEvent(
         user_id: userId,
         platform,
         platform_id: senderId,
-        name: profile?.name ?? senderId,
+        // Fall back to the PSID only when no real name is available yet.
+        name: profile?.name || senderId,
         profile_pic: profile?.profile_pic,
       },
     })
+  } else if (!contact.name || contact.name === contact.platform_id || !contact.profile_pic) {
+    // Backfill: an earlier fetch may have failed and stored the PSID as the
+    // name (or no avatar). Retry the profile fetch and update if we get data.
+    const profile = await getUserProfile({
+      userId: senderId,
+      pageAccessToken,
+      platform,
+    })
+
+    if (profile && (profile.name || profile.profile_pic)) {
+      contact = await prisma.socialContact.update({
+        where: { id: contact.id },
+        data: {
+          ...(profile.name ? { name: profile.name } : {}),
+          ...(profile.profile_pic ? { profile_pic: profile.profile_pic } : {}),
+        },
+      })
+    }
   }
 
   // ── Find or create conversation ─────────────────────────────────────────
