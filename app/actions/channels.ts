@@ -92,6 +92,8 @@ async function syncSocialConfig(
 ): Promise<string | null> {
   const accessToken = config.accessToken?.trim()
   const verifyToken = config.verifyToken?.trim() || null
+  const appSecret = config.appSecret?.trim()
+  const encryptedSecret = appSecret ? encrypt(appSecret) : null
   const status = enabled ? 'connected' : 'disconnected'
   const connectedAt = enabled ? new Date() : null
 
@@ -106,6 +108,7 @@ async function syncSocialConfig(
         user_id: userId,
         page_id: pageId,
         page_access_token: encryptedToken,
+        app_secret: encryptedSecret,
         verify_token: verifyToken,
         status,
         connected_at: connectedAt,
@@ -113,6 +116,8 @@ async function syncSocialConfig(
       update: {
         page_id: pageId,
         page_access_token: encryptedToken,
+        // Only overwrite the stored secret when a new one was provided.
+        ...(encryptedSecret ? { app_secret: encryptedSecret } : {}),
         verify_token: verifyToken,
         status,
         connected_at: connectedAt,
@@ -135,6 +140,7 @@ async function syncSocialConfig(
         ig_account_id: igAccountId,
         page_id: linkedPageId,
         page_access_token: encryptedToken,
+        app_secret: encryptedSecret,
         verify_token: verifyToken,
         status,
         connected_at: connectedAt,
@@ -143,6 +149,7 @@ async function syncSocialConfig(
         ig_account_id: igAccountId,
         page_id: linkedPageId,
         page_access_token: encryptedToken,
+        ...(encryptedSecret ? { app_secret: encryptedSecret } : {}),
         verify_token: verifyToken,
         status,
         connected_at: connectedAt,
