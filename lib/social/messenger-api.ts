@@ -159,14 +159,61 @@ export async function getUserProfile(opts: {
       .trim()
     const name = data.name || composedName || data.username || ''
 
-    // Return null name (not the PSID) so callers can decide on a fallback and
-    // retry later instead of permanently persisting the raw ID as the name.
-    if (!name) return { name: '', profile_pic: data.profile_pic }
-
-    return {
-      name,
-      profile_pic: data.profile_pic,
+    if (name) {
+      return { name, profile_pic: data.profile_pic }
     }
+
+    // Facebook only: the PSID profile endpoint is often empty unless the app
+    // has App Review approval for the User Profile API. Try the Page
+    // Conversations API, which frequently still exposes the participant name.
+    if (platform === 'facebook') {
+      const fallback = await getFacebookNameFromConversations(userId, pageAccessToken)
+      if (fallback) {
+        return { name: fallback, profile_pic: data.profile_pic }
+      }
+    }
+
+    // Return empty name (not the PSID) so callers can decide on a fallback and
+    // retry later instead of permanently persisting the raw ID as the name.
+    return { name: '', profile_pic: data.profile_pic }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Facebook fallback: look up a participant's display name via the Page's
+ * Conversations API. Works in some cases where the direct PSID profile lookup
+ * returns nothing. Best-effort — returns null on any failure.
+ */
+async function getFacebookNameFromConversations(
+  psid: string,
+  pageAccessToken: string,
+): Promise<string | null> {
+  try {
+    const url =
+      `${GRAPH_API_BASE}/me/conversations` +
+      `?platform=messenger&user_id=${encodeURIComponent(psid)}` +
+      `&fields=participants&access_token=${encodeURIComponent(pageAccessToken)}`
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const data = await res.json() as {
+      data?: Array<{
+        participants?: { data?: Array<{ id?: string; name?: string }> }
+      }>
+    }
+
+    for (const conversation of data.data ?? []) {
+      const participants = conversation.participants?.data ?? []
+      // Match the customer by PSID; the Page itself is also a participant.
+      const match = participants.find((p) => p.id === psid && p.name)
+      if (match?.name) return match.name
+      // Some responses don't echo the PSID; fall back to the first named
+      // participant that isn't obviously the Page.
+      const named = participants.find((p) => p.name)
+      if (named?.name) return named.name
+    }
+    return null
   } catch {
     return null
   }
