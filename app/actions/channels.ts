@@ -3,7 +3,13 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
+import { encrypt } from '@/lib/whatsapp/encryption'
 import type { Contact } from '@prisma/client'
+
+// Instagram & Facebook are handled by the unified Meta Messenger webhook
+// (/api/social/webhook) and surfaced in the modern social inbox. Their
+// credentials are stored in the dedicated ig_config / fb_config tables.
+const SOCIAL_WEBHOOK_CHANNELS = new Set(['Instagram', 'Facebook'])
 
 // ─── GET ALL CHANNEL CONFIGS ────────────────────────
 
@@ -30,12 +36,28 @@ export async function upsertChannelConfig(data: {
   enabled: boolean
   config: Record<string, string>
 }) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  let session
+  try { session = await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const { channel, enabled, config } = data
 
-  // Generate webhook URL based on channel
+  // Generate webhook URL based on channel.
+  // Instagram & Facebook share the unified Meta Messenger webhook used by the
+  // modern social inbox; other channels keep their dedicated endpoint.
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || ''
-  const webhookUrl = `${baseUrl}/api/webhooks/${channel.toLowerCase().replace(/\s+/g, '')}`
+  const webhookUrl = SOCIAL_WEBHOOK_CHANNELS.has(channel)
+    ? `${baseUrl}/api/social/webhook`
+    : `${baseUrl}/api/webhooks/${channel.toLowerCase().replace(/\s+/g, '')}`
+
+  // For IG/FB, mirror the credentials into the dedicated config tables that the
+  // unified webhook + inbox read. Do this before saving ChannelConfig so a
+  // validation error (e.g. missing token) surfaces to the user.
+  if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && enabled) {
+    const syncError = await syncSocialConfig(channel, enabled, config, String(session.user.id))
+    if (syncError) return { success: false, error: syncError }
+  } else if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && !enabled) {
+    // Disconnect: flip status in the dedicated table too.
+    await disconnectSocialConfig(channel, String(session.user.id))
+  }
 
   const result = await prisma.channelConfig.upsert({
     where: { channel },
@@ -54,7 +76,103 @@ export async function upsertChannelConfig(data: {
 
   revalidatePath('/settings')
   revalidatePath('/conversations')
+  revalidatePath('/social-inbox')
   return { success: true, data: { id: result.id, webhookUrl: result.webhookUrl } }
+}
+
+// ─── SYNC SOCIAL CONFIG (Instagram / Facebook) ─────
+// Writes the IG/FB credentials into ig_config / fb_config (tokens encrypted) so
+// /api/social/webhook and the social inbox use them. Returns an error string on
+// validation failure, or null on success.
+async function syncSocialConfig(
+  channel: string,
+  enabled: boolean,
+  config: Record<string, string>,
+  userId: string,
+): Promise<string | null> {
+  const accessToken = config.accessToken?.trim()
+  const verifyToken = config.verifyToken?.trim() || null
+  const appSecret = config.appSecret?.trim()
+  const encryptedSecret = appSecret ? encrypt(appSecret) : null
+  const status = enabled ? 'connected' : 'disconnected'
+  const connectedAt = enabled ? new Date() : null
+
+  if (channel === 'Facebook') {
+    const pageId = config.pageId?.trim()
+    if (!pageId) return 'Facebook Page ID is required'
+    if (!accessToken) return 'Page Access Token is required'
+    const encryptedToken = encrypt(accessToken)
+    await prisma.fbConfig.upsert({
+      where: { user_id: userId },
+      create: {
+        user_id: userId,
+        page_id: pageId,
+        page_access_token: encryptedToken,
+        app_secret: encryptedSecret,
+        verify_token: verifyToken,
+        status,
+        connected_at: connectedAt,
+      },
+      update: {
+        page_id: pageId,
+        page_access_token: encryptedToken,
+        // Only overwrite the stored secret when a new one was provided.
+        ...(encryptedSecret ? { app_secret: encryptedSecret } : {}),
+        verify_token: verifyToken,
+        status,
+        connected_at: connectedAt,
+      },
+    })
+    return null
+  }
+
+  if (channel === 'Instagram') {
+    const igAccountId = config.igAccountId?.trim()
+    const linkedPageId = config.pageId?.trim()
+    if (!igAccountId) return 'Instagram Business Account ID is required'
+    if (!linkedPageId) return 'Linked Facebook Page ID is required'
+    if (!accessToken) return 'Page Access Token is required'
+    const encryptedToken = encrypt(accessToken)
+    await prisma.igConfig.upsert({
+      where: { user_id: userId },
+      create: {
+        user_id: userId,
+        ig_account_id: igAccountId,
+        page_id: linkedPageId,
+        page_access_token: encryptedToken,
+        app_secret: encryptedSecret,
+        verify_token: verifyToken,
+        status,
+        connected_at: connectedAt,
+      },
+      update: {
+        ig_account_id: igAccountId,
+        page_id: linkedPageId,
+        page_access_token: encryptedToken,
+        ...(encryptedSecret ? { app_secret: encryptedSecret } : {}),
+        verify_token: verifyToken,
+        status,
+        connected_at: connectedAt,
+      },
+    })
+    return null
+  }
+
+  return null
+}
+
+async function disconnectSocialConfig(channel: string, userId: string) {
+  if (channel === 'Facebook') {
+    await prisma.fbConfig.updateMany({
+      where: { user_id: userId },
+      data: { status: 'disconnected', connected_at: null },
+    })
+  } else if (channel === 'Instagram') {
+    await prisma.igConfig.updateMany({
+      where: { user_id: userId },
+      data: { status: 'disconnected', connected_at: null },
+    })
+  }
 }
 
 // ─── TOGGLE CHANNEL ────────────────────────────────
