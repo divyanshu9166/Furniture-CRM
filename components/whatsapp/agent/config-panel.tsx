@@ -190,8 +190,8 @@ export function ConfigPanel({ config, onConfigChange, onSave, saving, savedAt }:
       <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-50 border border-blue-200">
         <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
         <div className="text-xs text-blue-800 space-y-1">
-          <p><strong>Cost estimate:</strong> ~50 chats/day = $0/month (Gemini free tier) · ~500 chats/day ≈ $2–3/month.</p>
-          <p><strong>Cache:</strong> Identical questions skip Gemini entirely for 2 hours.</p>
+          <p><strong>Cost:</strong> Groq is free (up to 14,400 requests/day) · Embeddings run locally — no API cost.</p>
+          <p><strong>Cache:</strong> Identical questions skip the LLM entirely for 2 hours.</p>
         </div>
       </div>
 

@@ -2,7 +2,7 @@
  * lib/ai-agent/system-prompt.ts
  *
  * Default system prompt template and the buildPrompt() helper that
- * fills in all {{PLACEHOLDERS}} before sending to Gemini.
+ * fills in all {{PLACEHOLDERS}} before sending to Groq Llama.
  */
 
 export const DEFAULT_SYSTEM_PROMPT = `You are {{AGENT_NAME}}, a helpful WhatsApp assistant for {{COMPANY_NAME}}.

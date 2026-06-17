@@ -7,10 +7,10 @@
  *   1.  Load agent config — abort if disabled
  *   2.  Load last 5 messages for conversation context
  *   3.  Redis cache check — return cached reply if hit
- *   4.  Embed customer message with Gemini text-embedding-004
+ *   4.  Embed customer message with multilingual-e5-small (local ONNX)
  *   5.  pgvector cosine search → top-3 knowledge chunks
  *   6.  Build prompt (system + knowledge + history + message)
- *   7.  Gemini Flash-Lite → draft reply
+ *   7.  Groq Llama → draft reply
  *   8.  Confidence/handoff check
  *   9.  Cache reply in Redis (TTL: 2h)
  *  10.  Send reply via WhatsApp Cloud API + save to DB
@@ -155,7 +155,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
   const chunks = await retrieveChunks(userId, queryEmbedding, 3, config.confidence_threshold)
   const retrievedChunks = chunks.map((c) => c.content).join('\n\n---\n\n')
 
-  // ── Step 6–7: Build prompt + call Gemini ─────────────────────────────────
+  // ── Step 6–7: Build prompt + call Groq Llama ────────────────────────────
   let agentResponse: Awaited<ReturnType<typeof generateResponse>>
   try {
     agentResponse = await generateResponse({
@@ -168,7 +168,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
       maxTokens: config.max_response_tokens,
     })
   } catch (err) {
-    console.error('[ai-agent] Gemini call failed:', err)
+    console.error('[ai-agent] LLM call failed:', err)
     await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)
     return
   }
@@ -354,8 +354,8 @@ async function sendFallback(
 /**
  * Index a newly uploaded knowledge document:
  *   1. Chunk the raw text
- *   2. Embed each chunk with Gemini
- *   3. Insert chunks + update embeddings via raw SQL
+ *   2. Embed each chunk with multilingual-e5-small (local ONNX)
+ *   3. Insert chunks + update embeddings via raw SQL (384-dim vectors)
  *   4. Mark the doc as indexed
  */
 export async function indexKnowledgeDoc(docId: string): Promise<void> {

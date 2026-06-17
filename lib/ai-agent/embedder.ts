@@ -1,71 +1,112 @@
 /**
  * lib/ai-agent/embedder.ts
  *
- * Gemini gemini-embedding-001 wrapper.
- * Two task types:
- *   - embedText     → RETRIEVAL_QUERY  (used when a customer message arrives)
- *   - embedDocument → RETRIEVAL_DOCUMENT (used when indexing knowledge chunks)
+ * Local embedding with Xenova/multilingual-e5-small (Transformers.js / ONNX).
  *
- * Includes exponential backoff retry on 429 rate-limit responses.
+ * Why this model:
+ *   - 384-dim vectors, ~120 MB on disk — memory-efficient on a 16 GB VPS
+ *   - Handles English + Hindi (multilingual) natively
+ *   - Runs fully offline — no API key, no quota, no cost
+ *
+ * e5 prefix rules (critical — wrong prefixes silently tank retrieval quality):
+ *   - Documents at index time → "passage: <text>"
+ *   - Incoming queries at search time → "query: <text>"
+ *
+ * Implementation notes:
+ *   - The pipeline is loaded ONCE as a module-level singleton and reused for
+ *     every call. First call takes 2–3 s to load the ONNX weights; subsequent
+ *     calls are near-instant.
+ *   - We mean-pool the token embeddings and L2-normalise so cosine similarity
+ *     equals dot-product, which is what pgvector's <=> operator measures.
+ *   - Input text is truncated to 512 tokens by the tokeniser automatically;
+ *     we also hard-cap at 2 000 characters before tokenisation just in case.
  */
 
-import {
-  GEMINI_EMBEDDING_MODEL,
-  geminiErrorMessage,
-  geminiUrl,
-  getGeminiApiKey,
-} from './gemini'
+import type { FeatureExtractionPipeline } from '@xenova/transformers'
 
-const EMBED_URL = geminiUrl(GEMINI_EMBEDDING_MODEL, 'embedContent')
+// ── Singleton pipeline ──────────────────────────────────────────────────────
 
-const MAX_RETRIES = 3
+let _pipeline: FeatureExtractionPipeline | null = null
+let _loading: Promise<FeatureExtractionPipeline> | null = null
 
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
+async function getPipeline(): Promise<FeatureExtractionPipeline> {
+  if (_pipeline) return _pipeline
+  if (_loading) return _loading
+
+  _loading = (async () => {
+    const { pipeline } = await import('@xenova/transformers')
+    console.log('[embedder] Loading Xenova/multilingual-e5-small (first call — may take a few seconds)…')
+    const p = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small', {
+      // quantized ONNX is the default; it is ~30 MB and fast enough
+      quantized: true,
+    }) as FeatureExtractionPipeline
+    _pipeline = p
+    console.log('[embedder] Xenova/multilingual-e5-small loaded ✓')
+    return p
+  })()
+
+  return _loading
 }
 
-async function callEmbedApi(text: string, taskType: string): Promise<number[]> {
-  const apiKey = getGeminiApiKey()
+// ── Math helpers ─────────────────────────────────────────────────────────────
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(`${EMBED_URL}?key=${encodeURIComponent(apiKey)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: `models/${GEMINI_EMBEDDING_MODEL}`,
-        content: { parts: [{ text: text.slice(0, 2000) }] },
-        taskType,
-        outputDimensionality: 768,
-      }),
-    })
+/**
+ * Mean-pool a 2-D tensor (tokens × dim) → 1-D array (dim,).
+ * The tensor from @xenova/transformers has shape [batch, tokens, dim].
+ */
+function meanPool(tensor: { data: Float32Array; dims: number[] }): number[] {
+  const [, seqLen, hiddenSize] = tensor.dims
+  const output = new Array<number>(hiddenSize).fill(0)
 
-    if (res.status === 429) {
-      if (attempt === MAX_RETRIES) {
-        throw new Error(`Gemini embed rate-limited after ${MAX_RETRIES} retries`)
-      }
-      const waitMs = Math.pow(2, attempt + 1) * 1000  // 2s, 4s, 8s
-      console.warn(`[embedder] 429 rate limit — retrying in ${waitMs}ms (attempt ${attempt + 1})`)
-      await sleep(waitMs)
-      continue
+  for (let t = 0; t < seqLen; t++) {
+    for (let h = 0; h < hiddenSize; h++) {
+      output[h] += tensor.data[t * hiddenSize + h]
     }
-
-    if (!res.ok) {
-      throw new Error(await geminiErrorMessage(res, 'embed'))
-    }
-
-    const data = await res.json()
-    return data.embedding.values as number[]
   }
-
-  throw new Error('Gemini embed: unexpected retry loop exit')
+  for (let h = 0; h < hiddenSize; h++) {
+    output[h] /= seqLen
+  }
+  return output
 }
 
-/** Embed a customer query — use before vector search. */
+/** L2-normalise a vector in-place and return it. */
+function l2Normalize(vec: number[]): number[] {
+  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0))
+  if (norm === 0) return vec
+  for (let i = 0; i < vec.length; i++) vec[i] /= norm
+  return vec
+}
+
+// ── Core embed function ───────────────────────────────────────────────────────
+
+async function embed(text: string): Promise<number[]> {
+  const pipe = await getPipeline()
+
+  // Hard-cap input length before tokenisation
+  const capped = text.slice(0, 2000)
+
+  // @xenova/transformers returns a Tensor; { pooling: 'none' } gives us the
+  // full token-level output so we can mean-pool ourselves.
+  const output = await pipe(capped, { pooling: 'none', normalize: false })
+
+  const pooled = meanPool(output as unknown as { data: Float32Array; dims: number[] })
+  return l2Normalize(pooled)
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Embed a customer query — prefix "query: " as required by e5.
+ * Call this before pgvector similarity search.
+ */
 export async function embedText(text: string): Promise<number[]> {
-  return callEmbedApi(text, 'RETRIEVAL_QUERY')
+  return embed(`query: ${text}`)
 }
 
-/** Embed a knowledge document chunk — use during indexing. */
+/**
+ * Embed a knowledge document chunk — prefix "passage: " as required by e5.
+ * Call this during knowledge-base indexing.
+ */
 export async function embedDocument(text: string): Promise<number[]> {
-  return callEmbedApi(text, 'RETRIEVAL_DOCUMENT')
+  return embed(`passage: ${text}`)
 }

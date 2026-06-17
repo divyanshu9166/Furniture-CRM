@@ -141,7 +141,7 @@ export function AgentTab() {
             AI WhatsApp Agent
           </h2>
           <p className="text-xs text-muted mt-0.5">
-            Powered by Gemini Flash-Lite · RAG over your knowledge base · Zero extra infra
+            Powered by Groq Llama + Local RAG · Offline embeddings · Zero extra cost
           </p>
         </div>
 

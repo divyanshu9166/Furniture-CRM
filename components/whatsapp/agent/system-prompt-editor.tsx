@@ -113,7 +113,7 @@ export function SystemPromptEditor({ value, onChange, onSave, saving, savedAt }:
         <Info className="w-4 h-4 shrink-0 text-blue-600 mt-0.5" />
         <span>
           Keep the prompt under <strong>1000 tokens (~4000 chars)</strong> to leave room for retrieved knowledge
-          and conversation history within Gemini's context window.
+          and conversation history within the LLM's context window.
           Currently using <strong>{Math.round(value.length / 4)} tokens</strong>.
         </span>
       </div>

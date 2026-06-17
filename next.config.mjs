@@ -9,6 +9,10 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // @xenova/transformers loads ONNX native bindings — must NOT be bundled.
+  // Next.js server-side bundling breaks native .node addons; marking these
+  // as external makes them loaded via require() at runtime instead.
+  serverExternalPackages: ['@xenova/transformers', 'onnxruntime-node'],
   // Enable gzip/brotli compression for all responses (reduces payload 60-80%)
   compress: true,
   // Remove X-Powered-By header (minor security + bandwidth saving)

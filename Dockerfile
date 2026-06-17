@@ -71,6 +71,17 @@ COPY --from=builder /app/node_modules/postgres-date ./node_modules/postgres-date
 COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-interval
 COPY --from=builder /app/node_modules/split2 ./node_modules/split2
 
+# Copy @xenova/transformers + ONNX runtime (serverExternalPackages — NOT bundled
+# by Next.js standalone, so they must exist as real node_modules at runtime).
+# These power the local multilingual-e5-small embedding model.
+COPY --from=builder /app/node_modules/@xenova ./node_modules/@xenova
+COPY --from=builder /app/node_modules/onnxruntime-node ./node_modules/onnxruntime-node
+COPY --from=builder /app/node_modules/onnxruntime-common ./node_modules/onnxruntime-common
+COPY --from=builder /app/node_modules/sharp ./node_modules/sharp
+COPY --from=builder /app/node_modules/flatbuffers ./node_modules/flatbuffers
+COPY --from=builder /app/node_modules/long ./node_modules/long
+COPY --from=builder /app/node_modules/protobufjs ./node_modules/protobufjs
+
 # Copy entrypoint that fixes volume permissions then drops to nextjs user
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

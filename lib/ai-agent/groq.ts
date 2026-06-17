@@ -3,12 +3,10 @@
  *
  * Thin wrapper around Groq's OpenAI-compatible Chat Completions API.
  * Groq serves open models (Llama, etc.) for free, and is already used by the
- * calling agent. Used here for the WhatsApp / social chatbot reply generation
- * as a zero-cost alternative to Gemini.
+ * calling agent. Used here for the WhatsApp / social chatbot reply generation.
  *
- * NOTE: This is for CHAT generation only. Embeddings remain on Gemini
- * (see lib/ai-agent/embedder.ts) because Groq does not offer an embeddings API
- * and the stored knowledge-base vectors are 768-dim Gemini embeddings.
+ * NOTE: This is for CHAT generation only. Embeddings use Xenova/multilingual-
+ * e5-small running locally via ONNX — see lib/ai-agent/embedder.ts.
  *
  * Reference: https://console.groq.com/docs/openai
  */

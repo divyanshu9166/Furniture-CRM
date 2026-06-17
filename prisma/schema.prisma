@@ -2321,7 +2321,7 @@ model WaKnowledgeChunk {
   doc_id      String
   chunk_index Int
   content     String   @db.Text
-  // embedding vector(768) column added via raw SQL — see pgvector-migration.sql
+  // embedding vector(384) column added via raw SQL — see pgvector-migration.sql
   created_at  DateTime @default(now())
 
   doc WaKnowledgeDoc @relation(fields: [doc_id], references: [id], onDelete: Cascade)
