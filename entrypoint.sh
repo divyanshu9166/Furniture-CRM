@@ -10,4 +10,4 @@ chown -R nextjs:nodejs /app/uploads
 chmod 755 /app/uploads
 
 echo "[Entrypoint] Starting app as nextjs..."
-exec su-exec nextjs "$@"
+exec gosu nextjs "$@"
