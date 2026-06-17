@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth-helpers'
-import { indexKnowledgeDoc } from '@/lib/ai-agent/agent-worker'
 
 /**
  * GET /api/whatsapp/agent/knowledge
@@ -85,11 +84,21 @@ export async function POST(request: Request) {
       },
     })
 
-    // Trigger async indexing — don't await, respond immediately.
-    // The UI polls the status field to show pending → indexed / error.
-    indexKnowledgeDoc(doc.id).catch((err) =>
-      console.error(`[agent/knowledge] indexing failed for doc ${doc.id}:`, err),
-    )
+    // Trigger async indexing dynamically so ONNX module init errors don't crash the route
+    import('@/lib/ai-agent/agent-worker')
+      .then((mod) => {
+        mod.indexKnowledgeDoc(doc.id).catch((err) =>
+          console.error(`[agent/knowledge] indexing failed for doc ${doc.id}:`, err),
+        )
+      })
+      .catch((err) => {
+        console.error(`[agent/knowledge] failed to load worker module for doc ${doc.id}:`, err)
+        // Mark as error so it doesn't get stuck in pending forever
+        prisma.waKnowledgeDoc.update({
+          where: { id: doc.id },
+          data: { status: 'error', error: err.message ?? 'Module load failed' },
+        }).catch(console.error)
+      })
 
     return NextResponse.json({ success: true, id: doc.id, status: 'pending' }, { status: 201 })
   } catch (error) {
