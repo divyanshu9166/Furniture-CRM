@@ -101,8 +101,10 @@ export async function POST(request: Request) {
       })
 
     return NextResponse.json({ success: true, id: doc.id, status: 'pending' }, { status: 201 })
-  } catch (error) {
+  } catch (error: any) {
     console.error('[agent/knowledge POST]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ 
+      error: error?.message ? `Server Error: ${error.message}` : 'Internal server error' 
+    }, { status: 500 })
   }
 }

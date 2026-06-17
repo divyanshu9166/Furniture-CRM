@@ -32,8 +32,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Install curl for healthcheck + gosu for privilege dropping in entrypoint
-RUN apt-get update && apt-get install -y --no-install-recommends curl gosu && rm -rf /var/lib/apt/lists/*
+# Install curl (healthcheck), gosu (permissions), and libgomp1 (required by ONNX runtime)
+RUN apt-get update && apt-get install -y --no-install-recommends curl gosu libgomp1 && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
