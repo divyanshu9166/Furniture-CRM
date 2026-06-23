@@ -469,7 +469,98 @@ export default function PaymentsPage() {
             </div>
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: app-style card list */}
+          <div className="md:hidden space-y-2.5">
+            {filtered.length === 0 ? (
+              <div className="glass-card py-12 text-center text-sm text-muted">No payment records found</div>
+            ) : (
+              filtered.map((p, i) => {
+                const PayIcon = PAYMENT_ICONS[p.method] || Receipt;
+                const isOut = p.type === 'OUT';
+                const statusColors = {
+                  'Pending': 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
+                  'Reconciled': 'bg-green-500/10 text-green-700 border-green-500/20',
+                  'Reversed': 'bg-red-500/10 text-red-700 border-red-500/20',
+                  'Bounced': 'bg-orange-500/10 text-orange-700 border-orange-500/20'
+                };
+                const canBounce = !p.isReversal && p.status !== 'Bounced' && p.method === 'Cheque' && !p.chequeBounced;
+                const canReverse = !p.isReversal && p.status !== 'Bounced';
+                return (
+                  <div
+                    key={p.id}
+                    className="m-card tap-press animate-list-in"
+                    style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${isOut ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
+                        {isOut ? <TrendingDown className="w-5 h-5" /> : <TrendingUp className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">{p.customerName || p.contact?.name || p.notes || 'Unknown'}</p>
+                          <span className={`text-sm font-bold flex-shrink-0 ${isOut ? 'text-red-500' : 'text-green-500'}`}>
+                            {isOut ? '-' : '+'}{formatCurrency(p.amount + (p.gstAmount || 0))}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border w-max ${statusColors[p.status] || 'bg-surface'}`}>
+                            {p.status}
+                          </span>
+                          {p.gstAmount > 0 && <span className="text-[10px] text-muted">+{formatCurrency(p.gstAmount)} GST</span>}
+                        </div>
+                        <div className="flex items-center gap-2 flex-wrap mt-2">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-foreground bg-background border border-border px-1.5 py-0.5 rounded-md">
+                            <PayIcon className="w-3 h-3 text-muted" /> {p.method}
+                          </span>
+                          <span className="text-[11px] text-muted">
+                            {new Date(p.date).toLocaleDateString('en-GB')} · {new Date(p.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span className="text-[11px] font-mono text-muted ml-auto">{p.displayId}</span>
+                        </div>
+                        {(p.reference || p.chequeNumber || p.invoice || p.order || p.bankRefNumber) && (
+                          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap mt-1.5">
+                            {p.reference && <span className="text-[11px] text-foreground font-mono truncate max-w-full">Ref: {p.reference}</span>}
+                            {p.chequeNumber && <span className="text-[11px] text-blue-500">Check: {p.chequeNumber}</span>}
+                            {p.invoice && <span className="text-[11px] text-accent">Inv: {p.invoice.displayId}</span>}
+                            {p.order && <span className="text-[11px] text-blue-500">Ord: {p.order.displayId}</span>}
+                            {p.bankRefNumber && <span className="text-[11px] text-green-600">Bank: {p.bankRefNumber}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {/* Row actions */}
+                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                      {p.attachment && (
+                        <a href={p.attachment} target="_blank" rel="noreferrer"
+                          className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted bg-surface border border-border">
+                          <Eye className="w-3.5 h-3.5" /> View
+                        </a>
+                      )}
+                      {canBounce && (
+                        <button onClick={() => { setSelectedPaymentForAction(p); setShowBounceModal(true); }}
+                          className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-orange-600 bg-orange-500/10 border border-orange-500/20">
+                          <AlertCircle className="w-3.5 h-3.5" /> Bounced
+                        </button>
+                      )}
+                      {canReverse && (
+                        <button onClick={() => { setSelectedPaymentForAction(p); setShowReverseModal(true); }}
+                          className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 bg-red-500/10 border border-red-500/20">
+                          <RotateCcw className="w-3.5 h-3.5" /> Reverse
+                        </button>
+                      )}
+                      <button onClick={() => handleDelete(p.id)} disabled={deletingId === p.id}
+                        className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 bg-red-500/10 border border-red-500/20 ml-auto disabled:opacity-50">
+                        {deletingId === p.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="crm-table">
                 <thead>
@@ -722,9 +813,9 @@ export default function PaymentsPage() {
             </div>
 
             {/* Daily trend (simple bar chart) */}
-            <div className="glass-card p-5">
+            <div className="glass-card p-4 md:p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4">Daily Income Trend</h3>
-              <div className="flex items-end gap-1 h-40 overflow-x-auto pb-6 relative">
+              <div className="flex items-end gap-1.5 md:gap-1 h-44 md:h-40 overflow-x-auto hide-scrollbar pb-6 relative -mx-1 px-1">
                 {(() => {
                   const days = {};
                   filtered.filter(p => p.type === 'IN').forEach(p => {
@@ -739,7 +830,7 @@ export default function PaymentsPage() {
 
                   const maxDay = Math.max(...Object.values(days), 1);
                   return sortedDays.map(d => (
-                    <div key={d} className="flex flex-col items-center min-w-[28px] flex-1 relative group">
+                    <div key={d} className="flex flex-col items-center min-w-[32px] md:min-w-[28px] flex-1 relative group">
                       <div className="absolute -top-6 bg-foreground text-background px-1.5 py-0.5 rounded text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                         {formatCurrency(days[d])}
                       </div>

@@ -5,6 +5,7 @@ import { Calendar as CalIcon, Plus, Clock, User, Check, X, ChevronLeft, ChevronR
 import { getAppointments, createAppointment, updateAppointmentStatus, cancelAppointment } from '@/app/actions/appointments';
 import { moveAppointmentToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
+import MagicCard from '@/components/MagicCard';
 import { useAlertToast } from '@/components/AlertToastProvider';
 
 const statusColors = {
@@ -13,8 +14,8 @@ const statusColors = {
   Cancelled: 'bg-danger-light text-danger',
 };
 
-const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function AppointmentsPage() {
   const [appointments, setAppointments] = useState([]);
@@ -50,12 +51,12 @@ export default function AppointmentsPage() {
   for (let i = 0; i < firstDay; i++) calendarDays.push(null);
   for (let i = 1; i <= daysInMonth; i++) calendarDays.push(i);
 
-  const getDateStr = (day) => !day ? '' : `${currentYear}-${String(currentMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  const getDateStr = (day) => !day ? '' : `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   const getAptsForDate = (dateStr) => appointments.filter(a => a.date === dateStr);
   const selectedApts = getAptsForDate(selectedDate);
 
-  const prevMonth = () => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y-1); } else setCurrentMonth(m => m-1); };
-  const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y+1); } else setCurrentMonth(m => m+1); };
+  const prevMonth = () => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(y => y - 1); } else setCurrentMonth(m => m - 1); };
+  const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(y => y + 1); } else setCurrentMonth(m => m + 1); };
 
   const handleComplete = async (id) => {
     await updateAppointmentStatus(id, 'Completed');
@@ -151,18 +152,28 @@ export default function AppointmentsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Calendar */}
-        <div className="lg:col-span-2 glass-card p-5">
+        <MagicCard className="lg:col-span-2 glass-card p-4 md:p-5" gradientSize={320}>
           <div className="flex items-center justify-between mb-5">
-            <h2 className="text-lg font-semibold text-foreground">{months[currentMonth]} {currentYear}</h2>
-            <div className="flex gap-1">
-              <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-              <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">{months[currentMonth]} {currentYear}</h2>
+              <p className="text-xs text-muted mt-0.5">
+                {appointments.filter(a => a.date && a.date.startsWith(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)).length} appointments this month
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => { const t = new Date(); setCurrentMonth(t.getMonth()); setCurrentYear(t.getFullYear()); setSelectedDate(t.toISOString().split('T')[0]); }}
+                className="tap-press-sm px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
+                Today
+              </button>
+              <button onClick={prevMonth} className="tap-press-sm p-2 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+              <button onClick={nextMonth} className="tap-press-sm p-2 rounded-lg hover:bg-surface-hover text-muted hover:text-foreground transition-colors"><ChevronRight className="w-4 h-4" /></button>
             </div>
           </div>
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {days.map(d => <div key={d} className="text-center text-xs font-semibold text-muted py-2">{d}</div>)}
+          <div className="grid grid-cols-7 gap-1 md:gap-1.5 mb-2">
+            {days.map(d => <div key={d} className="text-center text-[11px] font-semibold text-muted uppercase tracking-wide py-1">{d}</div>)}
           </div>
-          <div className="grid grid-cols-7 gap-1">
+          <div className="grid grid-cols-7 gap-1 md:gap-1.5">
             {calendarDays.map((day, i) => {
               const dateStr = getDateStr(day);
               const dayApts = day ? getAptsForDate(dateStr) : [];
@@ -170,18 +181,17 @@ export default function AppointmentsPage() {
               const isToday = dateStr === new Date().toISOString().split('T')[0];
               return (
                 <button key={i} onClick={() => day && setSelectedDate(dateStr)} disabled={!day}
-                  className={`aspect-square rounded-xl flex flex-col items-center justify-center gap-0.5 text-sm transition-all ${
-                    !day ? '' : isSelected ? 'bg-accent text-white font-bold' :
+                  className={`relative aspect-square rounded-xl flex flex-col items-center justify-center text-sm transition-all duration-150 ${!day ? 'pointer-events-none' : isSelected ? 'bg-accent text-white font-bold shadow-sm scale-[1.04]' :
                     isToday ? 'bg-accent/10 text-accent font-semibold ring-1 ring-accent/30' :
-                    'text-foreground hover:bg-surface-hover'
-                  }`}>
+                      'text-foreground hover:bg-surface-hover hover:scale-[1.04]'
+                    }`}>
                   {day && (
                     <>
-                      <span>{day}</span>
+                      <span className="leading-none">{day}</span>
                       {dayApts.length > 0 && (
-                        <div className="flex gap-0.5">
-                          {dayApts.slice(0, 3).map((_, j) => <div key={j} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white/60' : 'bg-accent'}`} />)}
-                        </div>
+                        <span className={`mt-1 min-w-[16px] h-[15px] px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${isSelected ? 'bg-white/25 text-white' : 'bg-accent/15 text-accent'}`}>
+                          {dayApts.length}
+                        </span>
                       )}
                     </>
                   )}
@@ -189,18 +199,18 @@ export default function AppointmentsPage() {
               );
             })}
           </div>
-        </div>
+        </MagicCard>
 
         {/* Appointments for selected date */}
-        <div className="glass-card p-5">
+        <MagicCard className="glass-card p-5">
           <h2 className="text-base font-semibold text-foreground mb-1">
             {selectedDate ? new Date(selectedDate + 'T00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : 'Select a date'}
           </h2>
           <p className="text-xs text-muted mb-4">{selectedApts.length} appointment{selectedApts.length !== 1 ? 's' : ''}</p>
           {selectedApts.length > 0 ? (
             <div className="space-y-3">
-              {selectedApts.map(apt => (
-                <div key={apt.id} className="p-4 rounded-xl bg-surface border border-border">
+              {selectedApts.map((apt, i) => (
+                <div key={apt.id} className="p-4 rounded-xl bg-surface border border-border animate-list-in" style={{ animationDelay: `${Math.min(i * 40, 280)}ms` }}>
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <Clock className="w-4 h-4 text-accent" />
@@ -239,7 +249,7 @@ export default function AppointmentsPage() {
               <p className="text-sm">No appointments on this date</p>
             </div>
           )}
-        </div>
+        </MagicCard>
       </div>
 
       {/* All Appointments Table */}
@@ -347,6 +357,6 @@ export default function AppointmentsPage() {
           </div>
         </form>
       </Modal>
-    </div>
+    </div >
   );
 }

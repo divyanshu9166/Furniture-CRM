@@ -117,7 +117,7 @@ export function WhatsAppMarketingClient() {
           <ConnectionBadge config={waConfig} loading={configLoading} />
         </div>
 
-        <div className="flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto mb-0">
+        <div className="flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto hide-scrollbar mb-0">
           {TABS.map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -126,9 +126,9 @@ export function WhatsAppMarketingClient() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${active
-                    ? 'bg-surface text-accent shadow-sm border border-border/50'
-                    : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                className={`flex shrink-0 items-center gap-2 px-4 min-h-[42px] py-2.5 rounded-lg text-sm font-medium transition-all whitespace-nowrap tap-press-sm md:min-h-0 ${active
+                  ? 'bg-surface text-accent shadow-sm border border-border/50'
+                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
                   }`}
               >
                 <Icon className="w-4 h-4" />

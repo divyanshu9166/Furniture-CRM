@@ -169,7 +169,7 @@ export default function LeadsPage() {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-8 w-48 bg-surface rounded-lg" />
-        <div className="flex gap-4">{[1,2,3,4].map(i => <div key={i} className="min-w-[280px] h-64 bg-surface rounded-2xl" />)}</div>
+        <div className="flex gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="min-w-[280px] h-64 bg-surface rounded-2xl" />)}</div>
       </div>
     );
   }
@@ -249,45 +249,85 @@ export default function LeadsPage() {
           })}
         </div>
       ) : (
-        <div className="glass-card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="crm-table">
-              <thead><tr><th>Name</th><th>Interest</th><th>Source</th><th>Budget</th><th>Status</th><th>Date</th></tr></thead>
-              <tbody>
-                {filteredLeads.map((lead) => {
-                  const SourceIcon = sourceIconMap[lead.source] || Globe;
-                  const sourceColor = sourceColorMap[lead.source] || defaultSourceColor;
-                  const sourceTextColor = sourceColor.split(' ')[0];
-                  return (
-                    <tr key={lead.id} className="cursor-pointer" onClick={() => setSelectedLead(lead)}>
-                      <td>
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-semibold text-accent">
-                            {lead.name.split(' ').map(n => n[0]).join('')}
-                          </div>
-                          <div>
-                            <p className="font-medium text-foreground">{lead.name}</p>
-                            <p className="text-xs text-muted">{lead.phone}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="text-foreground">{lead.interest}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          {SourceIcon && <SourceIcon className={`w-4 h-4 ${sourceTextColor}`} />}
-                          <span>{lead.source}</span>
-                        </div>
-                      </td>
-                      <td className="text-accent font-medium">{lead.budget}</td>
-                      <td><span className={`badge ${statusColorMap[lead.status]}`}>{lead.status}</span></td>
-                      <td className="text-muted">{lead.date}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <>
+          {/* Mobile: app-style card list */}
+          <div className="md:hidden space-y-2.5">
+            {filteredLeads.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No leads found</div>
+            )}
+            {filteredLeads.map((lead, i) => {
+              const SourceIcon = sourceIconMap[lead.source] || Globe;
+              const sourceColor = sourceColorMap[lead.source] || defaultSourceColor;
+              return (
+                <div
+                  key={lead.id}
+                  onClick={() => setSelectedLead(lead)}
+                  className="m-card tap-press animate-list-in flex items-center gap-3"
+                  style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                >
+                  <div className="w-11 h-11 rounded-full bg-accent/10 flex items-center justify-center text-sm font-semibold text-accent flex-shrink-0">
+                    {lead.name.split(' ').map(n => n[0]).join('')}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{lead.name}</p>
+                      <span className={`badge flex-shrink-0 ${statusColorMap[lead.status]}`}>{lead.status}</span>
+                    </div>
+                    <p className="text-xs text-muted truncate mt-0.5">🛋️ {lead.interest}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-md ${sourceColor}`}>
+                        {SourceIcon && <SourceIcon className="w-3 h-3" />}
+                        {lead.source}
+                      </span>
+                      <span className="text-xs font-medium text-accent ml-auto">{lead.budget}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block glass-card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="crm-table">
+                <thead><tr><th>Name</th><th>Interest</th><th>Source</th><th>Budget</th><th>Status</th><th>Date</th></tr></thead>
+                <tbody>
+                  {filteredLeads.map((lead) => {
+                    const SourceIcon = sourceIconMap[lead.source] || Globe;
+                    const sourceColor = sourceColorMap[lead.source] || defaultSourceColor;
+                    const sourceTextColor = sourceColor.split(' ')[0];
+                    return (
+                      <tr key={lead.id} className="cursor-pointer" onClick={() => setSelectedLead(lead)}>
+                        <td>
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-xs font-semibold text-accent">
+                              {lead.name.split(' ').map(n => n[0]).join('')}
+                            </div>
+                            <div>
+                              <p className="font-medium text-foreground">{lead.name}</p>
+                              <p className="text-xs text-muted">{lead.phone}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="text-foreground">{lead.interest}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            {SourceIcon && <SourceIcon className={`w-4 h-4 ${sourceTextColor}`} />}
+                            <span>{lead.source}</span>
+                          </div>
+                        </td>
+                        <td className="text-accent font-medium">{lead.budget}</td>
+                        <td><span className={`badge ${statusColorMap[lead.status]}`}>{lead.status}</span></td>
+                        <td className="text-muted">{lead.date}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       <Modal isOpen={!!leadToDraft} onClose={cancelDelete} title="Move Lead to Draft" size="sm">
@@ -340,11 +380,10 @@ export default function LeadsPage() {
               <div className="flex flex-wrap gap-1.5">
                 {pipelineStages.map(stage => (
                   <button key={stage} disabled={updatingStatus} onClick={() => handleUpdateStatus(selectedLead.id, stage)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                      selectedLead.status === stage
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${selectedLead.status === stage
                         ? `${statusColorMap[stage]} font-bold`
                         : 'bg-surface border-border text-muted hover:text-foreground'
-                    }`}>
+                      }`}>
                     {stage}
                   </button>
                 ))}

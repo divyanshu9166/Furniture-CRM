@@ -48,9 +48,9 @@ export default function InventoryPage() {
   const { notify } = useAlertToast();
 
   // ─── Fetch-once guard refs (prevents infinite-loop when data is empty) ───
-  const deepFetched    = React.useRef(false);
+  const deepFetched = React.useRef(false);
   const locationFetched = React.useRef(false);
-  const ledgerFetched  = React.useRef(false);
+  const ledgerFetched = React.useRef(false);
 
   // ─── BULK IMPORT STATE ─────────────────────────────────
   const [showImportModal, setShowImportModal] = useState(false);
@@ -213,16 +213,16 @@ export default function InventoryPage() {
     const map = {};
     const normalize = h => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
     const ALIASES = {
-      name:         ['productname', 'name', 'itemname', 'product'],
-      sku:          ['sku', 'skucode', 'itemcode', 'code', 'productcode'],
-      category:     ['category', 'cat', 'productcategory', 'type'],
-      price:        ['price', 'sellingprice', 'mrp', 'rate'],
-      instock:      ['instock', 'stock', 'quantity', 'qty', 'stockqty'],
-      description:  ['description', 'desc', 'details', 'productdesc'],
-      material:     ['material', 'materials', 'fabric'],
-      color:        ['color', 'colour'],
+      name: ['productname', 'name', 'itemname', 'product'],
+      sku: ['sku', 'skucode', 'itemcode', 'code', 'productcode'],
+      category: ['category', 'cat', 'productcategory', 'type'],
+      price: ['price', 'sellingprice', 'mrp', 'rate'],
+      instock: ['instock', 'stock', 'quantity', 'qty', 'stockqty'],
+      description: ['description', 'desc', 'details', 'productdesc'],
+      material: ['material', 'materials', 'fabric'],
+      color: ['color', 'colour'],
       reorderLevel: ['reorderlevel', 'reorder', 'minstock', 'minimumstock'],
-      warehouse:    ['warehouse', 'location', 'godown', 'store'],
+      warehouse: ['warehouse', 'location', 'godown', 'store'],
     };
     headers.forEach((h, i) => {
       const norm = normalize(h);
@@ -316,16 +316,16 @@ export default function InventoryPage() {
 
     try {
       const parsed = importRows.map(row => ({
-        name:         String(row[importColMap.name] ?? '').trim(),
-        sku:          importColMap.sku        !== undefined ? String(row[importColMap.sku] ?? '').trim() : '',
-        category:     importColMap.category   !== undefined ? String(row[importColMap.category] ?? '').trim() : 'General',
-        price:        importColMap.price      !== undefined ? Number(row[importColMap.price] ?? 0) : 0,
-        instock:      importColMap.instock    !== undefined ? Number(row[importColMap.instock] ?? 0) : 0,
-        description:  importColMap.description !== undefined ? String(row[importColMap.description] ?? '').trim() : '',
-        material:     importColMap.material   !== undefined ? String(row[importColMap.material] ?? '').trim() : '',
-        color:        importColMap.color      !== undefined ? String(row[importColMap.color] ?? '').trim() : '',
+        name: String(row[importColMap.name] ?? '').trim(),
+        sku: importColMap.sku !== undefined ? String(row[importColMap.sku] ?? '').trim() : '',
+        category: importColMap.category !== undefined ? String(row[importColMap.category] ?? '').trim() : 'General',
+        price: importColMap.price !== undefined ? Number(row[importColMap.price] ?? 0) : 0,
+        instock: importColMap.instock !== undefined ? Number(row[importColMap.instock] ?? 0) : 0,
+        description: importColMap.description !== undefined ? String(row[importColMap.description] ?? '').trim() : '',
+        material: importColMap.material !== undefined ? String(row[importColMap.material] ?? '').trim() : '',
+        color: importColMap.color !== undefined ? String(row[importColMap.color] ?? '').trim() : '',
         reorderLevel: importColMap.reorderLevel !== undefined ? Number(row[importColMap.reorderLevel] ?? 5) : 5,
-        warehouse:    importColMap.warehouse  !== undefined ? String(row[importColMap.warehouse] ?? '').trim() : '',
+        warehouse: importColMap.warehouse !== undefined ? String(row[importColMap.warehouse] ?? '').trim() : '',
       }));
 
       const payload = parsed.filter(r => r.name && Number.isFinite(r.price) && Number.isFinite(r.instock));
@@ -404,7 +404,7 @@ export default function InventoryPage() {
 
   // Derived slices for stats
   const finishedGoods = useMemo(() => products.filter(p => !p.isRawMaterial), [products]);
-  const rawMaterials  = useMemo(() => products.filter(p => p.isRawMaterial),  [products]);
+  const rawMaterials = useMemo(() => products.filter(p => p.isRawMaterial), [products]);
   const activeProducts = productType === 'finished' ? finishedGoods : rawMaterials;
 
   // Categories relevant to current type (excluding 'Raw Material' from finished goods list)
@@ -440,8 +440,8 @@ export default function InventoryPage() {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-8 w-64 bg-surface rounded-lg" />
-        <div className="flex gap-3">{[1,2,3,4,5].map(i => <div key={i} className="h-20 min-w-[160px] bg-surface rounded-2xl flex-1" />)}</div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">{[1,2,3,4].map(i => <div key={i} className="h-64 bg-surface rounded-2xl" />)}</div>
+        <div className="flex gap-3">{[1, 2, 3, 4, 5].map(i => <div key={i} className="h-20 min-w-[160px] bg-surface rounded-2xl flex-1" />)}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="h-64 bg-surface rounded-2xl" />)}</div>
       </div>
     );
   }
@@ -456,11 +456,11 @@ export default function InventoryPage() {
             {finishedGoods.length} finished goods · {rawMaterials.length} raw materials · {godowns.length || 1} location{godowns.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full md:w-auto">
           {tab === 'products' && productType === 'finished' && (
             <button
               onClick={() => { setImportResult(null); setImportRows([]); setImportError(''); setShowImportModal(true); }}
-              className="flex items-center gap-2 px-4 py-2.5 bg-surface hover:bg-surface-hover border border-border text-muted hover:text-accent rounded-xl text-sm font-semibold transition-all"
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 md:py-2.5 bg-surface hover:bg-surface-hover border border-border text-muted hover:text-accent rounded-xl text-sm font-semibold transition-all tap-press-sm"
             >
               <Upload className="w-4 h-4" /> Bulk Import
             </button>
@@ -468,7 +468,7 @@ export default function InventoryPage() {
           {!(tab === 'products' && productType === 'rawMaterial') && (
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
+              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 md:py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all tap-press-sm"
             >
               <Plus className="w-4 h-4" />
               Add Product
@@ -515,31 +515,27 @@ export default function InventoryPage() {
             <div className="flex bg-surface border border-border rounded-xl p-1 gap-0.5">
               <button
                 onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  productType === 'finished'
-                    ? 'bg-accent text-white shadow-sm'
-                    : 'text-muted hover:text-foreground hover:bg-surface-hover'
-                }`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'finished'
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                  }`}
               >
                 <Package className="w-3.5 h-3.5" />
                 Finished Goods
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  productType === 'finished' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
-                }`}>{finishedGoods.length}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${productType === 'finished' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
+                  }`}>{finishedGoods.length}</span>
               </button>
               <button
                 onClick={() => { setProductType('rawMaterial'); setCategory('All'); setSearch(''); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  productType === 'rawMaterial'
-                    ? 'bg-accent text-white shadow-sm'
-                    : 'text-muted hover:text-foreground hover:bg-surface-hover'
-                }`}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'rawMaterial'
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                  }`}
               >
                 <Boxes className="w-3.5 h-3.5" />
                 Raw Materials
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  productType === 'rawMaterial' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
-                }`}>{rawMaterials.length}</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${productType === 'rawMaterial' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
+                  }`}>{rawMaterials.length}</span>
               </button>
             </div>
 
@@ -618,15 +614,15 @@ export default function InventoryPage() {
                         <span className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-accent/90 text-white">RAW MAT</span>
                       )}
                       <span className="absolute top-2 right-12 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
-                   {!product.isRawMaterial && (
-                     <button
-                        onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
-                        className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
-                        title="Edit Product"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                   )}
+                      {!product.isRawMaterial && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
+                          className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
+                          title="Edit Product"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="absolute top-2 right-2 p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -637,7 +633,7 @@ export default function InventoryPage() {
                       </div>
                       <p className="text-xs text-muted mb-1">{product.category}{product.brand ? ` · ${product.brand}` : product.material ? ` · ${product.material}` : ''}</p>
                       <p className="text-[10px] text-muted mb-2 flex items-center gap-1"><Warehouse className="w-3 h-3" /> {product.warehouse}</p>
-                      
+
                       {/* Godown distribution */}
                       {godownDist.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-2">
@@ -648,7 +644,7 @@ export default function InventoryPage() {
                           ))}
                         </div>
                       )}
-                      
+
                       <div className="flex items-center justify-between">
                         {product.isRawMaterial ? (
                           <span className="text-base font-bold text-accent">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted">/ {product.unitOfMeasure || 'PCS'}</span></span>
@@ -686,90 +682,148 @@ export default function InventoryPage() {
               )}
             </div>
           ) : (
-            <div className="glass-card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="crm-table">
-                  <thead>
-                    <tr>
-                      <th>{productType === 'rawMaterial' ? 'Material' : 'Product'}</th>
-                      <th>SKU</th>
-                      <th>Category</th>
-                      <th>{productType === 'rawMaterial' ? 'Cost / Unit' : 'Price'}</th>
-                      <th>Stock</th>
-                      <th>Godown Split</th>
-                      <th>Reorder At</th>
-                      {productType === 'rawMaterial' ? <th>UOM</th> : <th>Sold</th>}
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map(product => {
-                      const badge = stockBadge(product.stock, product.reorderLevel);
-                      const godownDist = godownStocks.filter(gs => gs.productId === product.id);
-                      return (
-                        <tr key={product.id} className="cursor-pointer" onClick={() => setShowStockModal(product)}>
-                          <td>
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
-                                {product.image && !product.image.includes('/') ? (
-                                  <span className="text-xl">{product.image}</span>
-                                ) : product.image ? (
-                                  <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Package className="w-5 h-5 text-muted/30" />
-                                )}
-                              </div>
-                              <div>
-                                <p className="font-medium text-foreground">{product.name}</p>
-                                <p className="text-xs text-muted">{product.material} · {product.color}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="font-mono text-xs text-muted">{product.sku}</td>
-                          <td>{product.category}</td>
-                          {product.isRawMaterial ? (
-                            <td className="text-accent font-semibold">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] text-muted font-normal">/{product.unitOfMeasure || 'PCS'}</span></td>
-                          ) : (
-                            <td className="text-accent font-semibold">₹{product.price.toLocaleString()}</td>
-                          )}
-                          <td className={`font-medium ${product.stock <= product.reorderLevel ? 'text-danger' : 'text-foreground'}`}>{product.stock}</td>
-                          <td>
-                            <div className="flex flex-wrap gap-1">
-                              {godownDist.length > 0 ? godownDist.map(gs => (
-                                <span key={gs.id} className="text-[9px] px-1.5 py-0.5 rounded bg-surface-hover text-muted">{gs.godown?.name}: {gs.quantity}</span>
-                              )) : <span className="text-[10px] text-muted">—</span>}
-                            </div>
-                          </td>
-                          <td className="text-muted">{product.reorderLevel}</td>
-                          {product.isRawMaterial ? (
-                            <td className="text-muted text-xs">{product.unitOfMeasure || 'PCS'}</td>
-                          ) : (
-                            <td>{product.sold}</td>
-                          )}
-                          <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
-                          <td>
-                            <div className="flex items-center gap-2">
-                              <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
-                                Update Stock
+            <>
+              {/* Mobile: app-style product card list */}
+              <div className="md:hidden space-y-2.5">
+                {filtered.length === 0 && (
+                  <div className="glass-card py-12 text-center text-sm text-muted">
+                    No {productType === 'rawMaterial' ? 'raw materials' : 'finished goods'} found
+                  </div>
+                )}
+                {filtered.map((product, i) => {
+                  const badge = stockBadge(product.stock, product.reorderLevel);
+                  return (
+                    <div
+                      key={product.id}
+                      onClick={() => setShowStockModal(product)}
+                      className="m-card tap-press animate-list-in flex items-center gap-3"
+                      style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                    >
+                      <div className="w-11 h-11 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
+                        {product.image && !product.image.includes('/') ? (
+                          <span className="text-xl">{product.image}</span>
+                        ) : product.image ? (
+                          <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="w-5 h-5 text-muted/30" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">{product.name}</p>
+                          <span className={`badge flex-shrink-0 text-[10px] ${badge.cls}`}>{badge.text}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-muted font-mono truncate">{product.sku}</span>
+                          <span className="text-xs text-muted flex-shrink-0">· {product.stock} {product.unitOfMeasure || 'PCS'} in stock</span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-sm font-bold text-accent">
+                            ₹{(product.isRawMaterial ? (product.costPrice || 0) : product.price).toLocaleString()}
+                          </span>
+                          <div className="flex items-center gap-1.5 ml-auto" onClick={(e) => e.stopPropagation()}>
+                            {!product.isRawMaterial && (
+                              <button onClick={(e) => openEditModal(product, e)} className="tap-press-sm w-11 h-11 flex items-center justify-center rounded-lg bg-accent/10 text-accent" aria-label="Edit product">
+                                <Pencil className="w-4 h-4" />
                               </button>
-                              {!product.isRawMaterial && (
-                                <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
-                                  <Pencil className="w-3 h-3" /> Edit
-                                </button>
-                              )}
-                              <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            )}
+                            <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="tap-press-sm w-11 h-11 flex items-center justify-center rounded-lg bg-danger-light text-danger" aria-label="Move product to drafts">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block glass-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="crm-table">
+                    <thead>
+                      <tr>
+                        <th>{productType === 'rawMaterial' ? 'Material' : 'Product'}</th>
+                        <th>SKU</th>
+                        <th>Category</th>
+                        <th>{productType === 'rawMaterial' ? 'Cost / Unit' : 'Price'}</th>
+                        <th>Stock</th>
+                        <th>Godown Split</th>
+                        <th>Reorder At</th>
+                        {productType === 'rawMaterial' ? <th>UOM</th> : <th>Sold</th>}
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map(product => {
+                        const badge = stockBadge(product.stock, product.reorderLevel);
+                        const godownDist = godownStocks.filter(gs => gs.productId === product.id);
+                        return (
+                          <tr key={product.id} className="cursor-pointer" onClick={() => setShowStockModal(product)}>
+                            <td>
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {product.image && !product.image.includes('/') ? (
+                                    <span className="text-xl">{product.image}</span>
+                                  ) : product.image ? (
+                                    <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Package className="w-5 h-5 text-muted/30" />
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="font-medium text-foreground">{product.name}</p>
+                                  <p className="text-xs text-muted">{product.material} · {product.color}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="font-mono text-xs text-muted">{product.sku}</td>
+                            <td>{product.category}</td>
+                            {product.isRawMaterial ? (
+                              <td className="text-accent font-semibold">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] text-muted font-normal">/{product.unitOfMeasure || 'PCS'}</span></td>
+                            ) : (
+                              <td className="text-accent font-semibold">₹{product.price.toLocaleString()}</td>
+                            )}
+                            <td className={`font-medium ${product.stock <= product.reorderLevel ? 'text-danger' : 'text-foreground'}`}>{product.stock}</td>
+                            <td>
+                              <div className="flex flex-wrap gap-1">
+                                {godownDist.length > 0 ? godownDist.map(gs => (
+                                  <span key={gs.id} className="text-[9px] px-1.5 py-0.5 rounded bg-surface-hover text-muted">{gs.godown?.name}: {gs.quantity}</span>
+                                )) : <span className="text-[10px] text-muted">—</span>}
+                              </div>
+                            </td>
+                            <td className="text-muted">{product.reorderLevel}</td>
+                            {product.isRawMaterial ? (
+                              <td className="text-muted text-xs">{product.unitOfMeasure || 'PCS'}</td>
+                            ) : (
+                              <td>{product.sold}</td>
+                            )}
+                            <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
+                            <td>
+                              <div className="flex items-center gap-2">
+                                <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
+                                  Update Stock
+                                </button>
+                                {!product.isRawMaterial && (
+                                  <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                    <Pencil className="w-3 h-3" /> Edit
+                                  </button>
+                                )}
+                                <button onClick={(e) => { e.stopPropagation(); handleMoveProductToDraft(product.id); }} className="p-1.5 rounded-md bg-red-50 text-red-600" title="Move to Draft" aria-label="Move product to drafts">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </>
       )}
@@ -849,48 +903,88 @@ export default function InventoryPage() {
           {ledgerLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
           ) : (
-            <div className="glass-card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border">
-                    {['Date', 'Product', 'Godown', 'Type', 'Qty', 'Balance', 'Reference', 'Notes'].map(h => <th key={h} className="px-3 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {ledgerEntries.map(e => {
-                      const typeColors = {
-                        'IN': 'bg-emerald-500/10 text-emerald-400', 'OUT': 'bg-red-500/10 text-red-400',
-                        'TRANSFER_IN': 'bg-blue-500/10 text-blue-400', 'TRANSFER_OUT': 'bg-orange-500/10 text-orange-400',
-                        'ADJUSTMENT': 'bg-amber-500/10 text-amber-400', 'PRODUCTION': 'bg-purple-500/10 text-purple-400',
-                        'SALE': 'bg-red-500/10 text-red-400', 'RETURN': 'bg-cyan-500/10 text-cyan-400',
-                      };
-                      return (
-                        <tr key={e.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                          <td className="px-3 py-2.5 text-muted text-xs whitespace-nowrap">{new Date(e.createdAt).toLocaleDateString('en-IN')} {new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td>
-                          <td className="px-3 py-2.5">
-                            <p className="text-foreground font-medium text-xs">{e.product?.name}</p>
-                            <p className="text-[10px] text-muted font-mono">{e.product?.sku}</p>
-                          </td>
-                          <td className="px-3 py-2.5 text-foreground text-xs">{e.godown?.name}</td>
-                          <td className="px-3 py-2.5">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeColors[e.entryType] || 'bg-gray-500/10 text-gray-400'}`}>{e.entryType.replace('_', ' ')}</span>
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <span className={`font-semibold flex items-center gap-0.5 ${e.quantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
-                              {Math.abs(e.quantity)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2.5 text-foreground font-medium text-xs">{e.balanceAfter}</td>
-                          <td className="px-3 py-2.5 text-muted text-[10px]">{e.referenceType || '—'}</td>
-                          <td className="px-3 py-2.5 text-muted text-[10px] max-w-[200px] truncate">{e.notes || '—'}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <>
+              {/* Mobile: ledger movement cards */}
+              <div className="md:hidden space-y-2.5">
+                {ledgerEntries.length === 0 && (
+                  <div className="glass-card py-12 text-center text-sm text-muted">No stock movements yet.</div>
+                )}
+                {ledgerEntries.map((e, i) => {
+                  const typeColors = {
+                    'IN': 'bg-emerald-500/10 text-emerald-400', 'OUT': 'bg-red-500/10 text-red-400',
+                    'TRANSFER_IN': 'bg-blue-500/10 text-blue-400', 'TRANSFER_OUT': 'bg-orange-500/10 text-orange-400',
+                    'ADJUSTMENT': 'bg-amber-500/10 text-amber-400', 'PRODUCTION': 'bg-purple-500/10 text-purple-400',
+                    'SALE': 'bg-red-500/10 text-red-400', 'RETURN': 'bg-cyan-500/10 text-cyan-400',
+                  };
+                  return (
+                    <div key={e.id} className="m-card animate-list-in" style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-foreground truncate">{e.product?.name}</p>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${typeColors[e.entryType] || 'bg-surface-hover text-muted'}`}>{e.entryType.replace('_', ' ')}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-xs text-muted font-mono truncate">{e.product?.sku}</span>
+                        <span className="text-xs text-muted flex-shrink-0">· {e.godown?.name}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 mt-1.5">
+                        <span className="text-[11px] text-muted">{new Date(e.createdAt).toLocaleDateString('en-IN')} {new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span className="flex items-center gap-3">
+                          <span className={`font-semibold flex items-center gap-0.5 text-sm ${e.quantity > 0 ? 'text-success' : 'text-danger'}`}>
+                            {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                            {Math.abs(e.quantity)}
+                          </span>
+                          <span className="text-xs text-muted">Bal: <span className="text-foreground font-medium">{e.balanceAfter}</span></span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No stock movements yet. Movements will appear here when stock is adjusted, transferred, or sold.</div>}
-            </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block glass-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-border">
+                      {['Date', 'Product', 'Godown', 'Type', 'Qty', 'Balance', 'Reference', 'Notes'].map(h => <th key={h} className="px-3 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {ledgerEntries.map(e => {
+                        const typeColors = {
+                          'IN': 'bg-emerald-500/10 text-emerald-400', 'OUT': 'bg-red-500/10 text-red-400',
+                          'TRANSFER_IN': 'bg-blue-500/10 text-blue-400', 'TRANSFER_OUT': 'bg-orange-500/10 text-orange-400',
+                          'ADJUSTMENT': 'bg-amber-500/10 text-amber-400', 'PRODUCTION': 'bg-purple-500/10 text-purple-400',
+                          'SALE': 'bg-red-500/10 text-red-400', 'RETURN': 'bg-cyan-500/10 text-cyan-400',
+                        };
+                        return (
+                          <tr key={e.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                            <td className="px-3 py-2.5 text-muted text-xs whitespace-nowrap">{new Date(e.createdAt).toLocaleDateString('en-IN')} {new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td className="px-3 py-2.5">
+                              <p className="text-foreground font-medium text-xs">{e.product?.name}</p>
+                              <p className="text-[10px] text-muted font-mono">{e.product?.sku}</p>
+                            </td>
+                            <td className="px-3 py-2.5 text-foreground text-xs">{e.godown?.name}</td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeColors[e.entryType] || 'bg-gray-500/10 text-gray-400'}`}>{e.entryType.replace('_', ' ')}</span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`font-semibold flex items-center gap-0.5 ${e.quantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                                {Math.abs(e.quantity)}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-foreground font-medium text-xs">{e.balanceAfter}</td>
+                            <td className="px-3 py-2.5 text-muted text-[10px]">{e.referenceType || '—'}</td>
+                            <td className="px-3 py-2.5 text-muted text-[10px] max-w-[200px] truncate">{e.notes || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No stock movements yet. Movements will appear here when stock is adjusted, transferred, or sold.</div>}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -911,7 +1005,50 @@ export default function InventoryPage() {
                 <p className="text-xs text-muted mt-1">{outOfStockItems.length} out of stock, {lowStockItems.length} below reorder level</p>
               </div>
 
-              <div className="glass-card overflow-hidden">
+              {/* Mobile: reorder alert cards */}
+              <div className="md:hidden space-y-2.5">
+                {needsReorder.map((product, i) => {
+                  const shortfall = product.reorderLevel - product.stock;
+                  const isOut = product.stock === 0;
+                  return (
+                    <div
+                      key={product.id}
+                      onClick={() => setShowStockModal(product)}
+                      className="m-card tap-press animate-list-in flex items-center gap-3"
+                      style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                    >
+                      <div className="w-11 h-11 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
+                        {product.image && !product.image.includes('/') ? (
+                          <span className="text-xl">{product.image}</span>
+                        ) : product.image ? (
+                          <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="w-5 h-5 text-muted/30" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">{product.name}</p>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border flex-shrink-0 ${isOut ? 'bg-red-500/10 text-red-700 border-red-500/20' : 'bg-amber-500/10 text-amber-700 border-amber-500/20'}`}>
+                            {isOut ? 'Urgent' : 'Low'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className={`text-xs font-bold ${isOut ? 'text-danger' : 'text-warning'}`}>{product.stock} in stock</span>
+                          <span className="text-xs text-muted">· reorder @ {product.reorderLevel}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1.5">
+                          <span className="text-xs text-danger font-medium">{shortfall > 0 ? `Need ${shortfall} more` : 'Restocked'}</span>
+                          <span className="text-xs font-medium text-accent flex-shrink-0">Tap to restock</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block glass-card overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="crm-table">
                     <thead>
@@ -934,49 +1071,49 @@ export default function InventoryPage() {
                         return (
                           <tr key={product.id}>
                             <td className="whitespace-nowrap">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
-                                {product.image && !product.image.includes('/') ? (
-                                  <span className="text-lg">{product.image}</span>
-                                ) : product.image ? (
-                                  <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <Package className="w-4 h-4 text-muted/30" />
-                                )}
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
+                                  {product.image && !product.image.includes('/') ? (
+                                    <span className="text-lg">{product.image}</span>
+                                  ) : product.image ? (
+                                    <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
+                                  ) : (
+                                    <Package className="w-4 h-4 text-muted/30" />
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="font-medium text-foreground">{product.name}</p>
+                                  <p className="text-xs text-muted">{product.category}</p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="font-medium text-foreground">{product.name}</p>
-                                <p className="text-xs text-muted">{product.category}</p>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="font-mono text-xs text-muted whitespace-nowrap">{product.sku}</td>
-                          <td className={`font-bold whitespace-nowrap ${isOut ? 'text-danger' : 'text-warning'}`}>{product.stock}</td>
-                          <td className="text-muted whitespace-nowrap">{product.reorderLevel}</td>
-                          <td className="text-danger font-medium whitespace-nowrap">
-                            {shortfall > 0 ? `Need ${shortfall} more` : 'Restocked'}
-                          </td>
-                          <td className="text-xs text-muted whitespace-nowrap">{product.warehouse}</td>
-                          <td className="text-xs text-muted whitespace-nowrap">{product.lastRestocked}</td>
-                          <td className="whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${isOut ? 'bg-red-500/10 text-red-700 border-red-500/20' : 'bg-amber-500/10 text-amber-700 border-amber-500/20'}`}>
-                              {isOut ? 'Urgent' : 'Low'}
-                            </span>
-                          </td>
-                          <td className="whitespace-nowrap">
-                            <button
-                              onClick={() => setShowStockModal(product)}
-                              className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
-                            >
-                              Restock
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                            </td>
+                            <td className="font-mono text-xs text-muted whitespace-nowrap">{product.sku}</td>
+                            <td className={`font-bold whitespace-nowrap ${isOut ? 'text-danger' : 'text-warning'}`}>{product.stock}</td>
+                            <td className="text-muted whitespace-nowrap">{product.reorderLevel}</td>
+                            <td className="text-danger font-medium whitespace-nowrap">
+                              {shortfall > 0 ? `Need ${shortfall} more` : 'Restocked'}
+                            </td>
+                            <td className="text-xs text-muted whitespace-nowrap">{product.warehouse}</td>
+                            <td className="text-xs text-muted whitespace-nowrap">{product.lastRestocked}</td>
+                            <td className="whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${isOut ? 'bg-red-500/10 text-red-700 border-red-500/20' : 'bg-amber-500/10 text-amber-700 border-amber-500/20'}`}>
+                                {isOut ? 'Urgent' : 'Low'}
+                              </span>
+                            </td>
+                            <td className="whitespace-nowrap">
+                              <button
+                                onClick={() => setShowStockModal(product)}
+                                className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
+                              >
+                                Restock
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </>
           )}
@@ -1034,30 +1171,61 @@ export default function InventoryPage() {
             <button onClick={() => setShowBatchModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Batch</button>
           </div>
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
-            <div className="glass-card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border">
-                    {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {batches.map(b => (
-                      <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
-                        <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{b.product?.name}</td>
-                        <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{b.product?.sku}</td>
-                        <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.batchNumber}</td>
-                        <td className="px-4 py-3 text-muted whitespace-nowrap">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
-                        <td className="px-4 py-3 text-muted whitespace-nowrap">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
-                        <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.quantity}</td>
-                        <td className="px-4 py-3 whitespace-nowrap"><span className={`font-medium ${b.remainingQty <= 0 ? 'text-red-400' : b.remainingQty < b.quantity * 0.2 ? 'text-amber-400' : 'text-emerald-400'}`}>{b.remainingQty}</span></td>
-                        <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{b.costPrice?.toLocaleString('en-IN')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <>
+              {/* Mobile: batch cards */}
+              <div className="md:hidden space-y-2.5">
+                {batches.length === 0 && (
+                  <div className="glass-card py-12 text-center text-sm text-muted">No batch records found</div>
+                )}
+                {batches.map((b, i) => (
+                  <div key={b.id} className="m-card animate-list-in" style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{b.product?.name}</p>
+                      <span className={`text-xs font-bold flex-shrink-0 ${b.remainingQty <= 0 ? 'text-danger' : b.remainingQty < b.quantity * 0.2 ? 'text-warning' : 'text-success'}`}>
+                        {b.remainingQty}/{b.quantity}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-xs text-muted font-mono truncate">{b.product?.sku}</span>
+                      <span className="text-xs text-muted flex-shrink-0">· Batch {b.batchNumber}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-1.5">
+                      <span className="text-[11px] text-muted">
+                        {new Date(b.purchaseDate).toLocaleDateString('en-IN')}
+                        {b.expiryDate ? ` → ${new Date(b.expiryDate).toLocaleDateString('en-IN')}` : ''}
+                      </span>
+                      <span className="text-xs font-medium text-accent flex-shrink-0">₹{b.costPrice?.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              {batches.length === 0 && <div className="text-center py-12 text-muted">No batch records found</div>}
-            </div>
+
+              {/* Desktop: table */}
+              <div className="hidden md:block glass-card overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="border-b border-border">
+                      {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {batches.map(b => (
+                        <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
+                          <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{b.product?.name}</td>
+                          <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{b.product?.sku}</td>
+                          <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.batchNumber}</td>
+                          <td className="px-4 py-3 text-muted whitespace-nowrap">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
+                          <td className="px-4 py-3 text-muted whitespace-nowrap">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
+                          <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.quantity}</td>
+                          <td className="px-4 py-3 whitespace-nowrap"><span className={`font-medium ${b.remainingQty <= 0 ? 'text-red-400' : b.remainingQty < b.quantity * 0.2 ? 'text-amber-400' : 'text-emerald-400'}`}>{b.remainingQty}</span></td>
+                          <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{b.costPrice?.toLocaleString('en-IN')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {batches.length === 0 && <div className="text-center py-12 text-muted">No batch records found</div>}
+              </div>
+            </>
           )}
           <Modal isOpen={showBatchModal} onClose={() => setShowBatchModal(false)} title="Add Batch">
             <div className="space-y-4">
@@ -1137,7 +1305,30 @@ export default function InventoryPage() {
                       );
                     })}
                   </div>
-                  <div className="glass-card overflow-hidden">
+                  {/* Mobile: batch aging cards */}
+                  <div className="md:hidden space-y-2.5">
+                    {agingData.map((a, i) => (
+                      <div key={i} className="m-card animate-list-in" style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate">{a.product?.name}</p>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
+                            a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
+                              a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
+                                'bg-emerald-500/10 text-emerald-400'
+                            }`}>{a.bracket}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-muted font-mono truncate">{a.product?.sku}</span>
+                          <span className="text-xs text-muted flex-shrink-0">· Batch {a.batchNumber}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 mt-1.5">
+                          <span className="text-[11px] text-muted">{a.ageDays} days · {a.remainingQty} left</span>
+                          <span className="text-xs font-medium text-accent flex-shrink-0">₹{a.value?.toLocaleString('en-IN')}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden md:block glass-card overflow-hidden">
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b border-border">
@@ -1152,12 +1343,11 @@ export default function InventoryPage() {
                               <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.batchNumber}</td>
                               <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.ageDays}</td>
                               <td className="px-4 py-3 whitespace-nowrap">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${a.bracket === '180+ days' ? 'bg-red-500/10 text-red-400' :
                                   a.bracket === '91-180 days' ? 'bg-orange-500/10 text-orange-400' :
-                                  a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
-                                  'bg-emerald-500/10 text-emerald-400'
-                                }`}>{a.bracket}</span>
+                                    a.bracket === '61-90 days' ? 'bg-amber-500/10 text-amber-400' :
+                                      'bg-emerald-500/10 text-emerald-400'
+                                  }`}>{a.bracket}</span>
                               </td>
                               <td className="px-4 py-3 text-foreground whitespace-nowrap">{a.remainingQty}</td>
                               <td className="px-4 py-3 text-foreground whitespace-nowrap">₹{a.value?.toLocaleString('en-IN')}</td>
@@ -1209,7 +1399,28 @@ export default function InventoryPage() {
                             );
                           })}
                         </div>
-                        <div className="glass-card overflow-hidden">
+                        {/* Mobile: product aging cards */}
+                        <div className="md:hidden space-y-2.5">
+                          {productAging.length === 0 ? (
+                            <div className="glass-card py-12 text-center text-sm text-muted">No in-stock products found.</div>
+                          ) : productAging.map((p, i) => (
+                            <div key={i} className="m-card animate-list-in" style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}>
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-foreground truncate">{p.name}</p>
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium flex-shrink-0 ${bracketBg[p.bracket]} ${bracketColors[p.bracket]}`}>{p.bracket}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-xs text-muted font-mono truncate">{p.sku}</span>
+                                <span className="text-xs text-muted flex-shrink-0">· {p.category || '—'}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 mt-1.5">
+                                <span className="text-[11px] text-muted">{p.ageDays}d old · {p.stock} in stock</span>
+                                <span className="text-xs font-medium text-accent flex-shrink-0">₹{p.value.toLocaleString('en-IN')}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="hidden md:block glass-card overflow-hidden">
                           <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-border">
@@ -1450,11 +1661,10 @@ export default function InventoryPage() {
             <button
               type="submit"
               disabled={addingProduct}
-              className={`px-6 py-2.5 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${
-                tab === 'products' && productType === 'rawMaterial'
-                  ? 'bg-orange-500 hover:bg-orange-600'
-                  : 'bg-accent hover:bg-accent-hover'
-              }`}
+              className={`px-6 py-2.5 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${tab === 'products' && productType === 'rawMaterial'
+                ? 'bg-orange-500 hover:bg-orange-600'
+                : 'bg-accent hover:bg-accent-hover'
+                }`}
             >
               {addingProduct
                 ? <><RefreshCw className="w-4 h-4 animate-spin" /> Adding...</>

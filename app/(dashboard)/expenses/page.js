@@ -196,14 +196,14 @@ export default function ExpensesPage() {
       categoryId: parseInt(expForm.categoryId),
       amount: parseInt(expForm.amount),
     };
-    
+
     let res;
     if (editingExpenseId) {
       res = await updateExpense(editingExpenseId, payload);
     } else {
       res = await createExpense(payload);
     }
-    
+
     if (res.success) {
       setShowAddExpense(false);
       setEditingExpenseId(null);
@@ -368,7 +368,7 @@ export default function ExpensesPage() {
     return (
       <div className="space-y-6 animate-pulse">
         <div className="h-8 w-64 bg-surface rounded-lg" />
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">{[1,2,3,4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
         <div className="h-96 bg-surface rounded-2xl" />
       </div>
     );
@@ -657,8 +657,59 @@ export default function ExpensesPage() {
             </div>
           </div>
 
-          {/* Expense table */}
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: app-style card list */}
+          <div className="md:hidden space-y-2.5">
+            {filtered.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No expenses found</div>
+            )}
+            {filtered.slice(0, 100).map((exp, i) => {
+              const PayIcon = PAYMENT_ICONS[exp.paymentMode] || Receipt;
+              return (
+                <div
+                  key={exp.id}
+                  className="m-card tap-press animate-list-in flex items-center gap-3"
+                  style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${exp.categoryColor}20` }}>
+                    <CatIcon name={exp.categoryIcon} className="w-5 h-5" style={{ color: exp.categoryColor }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{exp.description || exp.categoryName}</p>
+                      <span className="text-sm font-bold text-red-600 flex-shrink-0">{formatCurrency(exp.amount)}</span>
+                    </div>
+                    <p className="text-xs text-muted truncate mt-0.5">{exp.categoryName}{exp.vendor ? ` · ${exp.vendor}` : ''}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+                        <PayIcon className="w-3 h-3" /> {exp.paymentMode}
+                      </span>
+                      <span className="text-[11px] text-muted ml-auto">{exp.date}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                    {exp.receipt && (
+                      <a href={exp.receipt} target="_blank" rel="noreferrer"
+                        className="touch-target tap-press-sm p-2 rounded-lg text-muted hover:text-accent flex items-center justify-center" title="View receipt">
+                        <Eye className="w-4 h-4" />
+                      </a>
+                    )}
+                    {session?.user?.role === 'ADMIN' && (
+                      <button onClick={() => handleEditExpense(exp)} className="touch-target tap-press-sm p-2 rounded-lg text-muted hover:text-accent flex items-center justify-center" title="Edit expense">
+                        <Edit3 className="w-4 h-4" />
+                      </button>
+                    )}
+                    <button onClick={() => handleDeleteExpense(exp)} className="touch-target tap-press-sm p-2 rounded-lg text-muted hover:text-red-600 flex items-center justify-center" title="Delete expense">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {filtered.length > 100 && <div className="text-center py-3 text-xs text-muted">Showing first 100 of {filtered.length} results</div>}
+          </div>
+
+          {/* Desktop: Expense table */}
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="crm-table">
                 <thead>
@@ -845,11 +896,11 @@ export default function ExpensesPage() {
           {summary.dailyTotals.length > 0 && (
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4">Daily Spend Trend</h3>
-              <div className="flex items-end gap-1 h-40 overflow-x-auto pb-6 relative">
+              <div className="flex items-end gap-1.5 md:gap-1 h-40 overflow-x-auto hide-scrollbar pb-6 relative">
                 {(() => {
                   const maxDay = Math.max(...summary.dailyTotals.map(d => d.total), 1);
                   return summary.dailyTotals.map(d => (
-                    <div key={d.date} className="flex flex-col items-center min-w-[28px] flex-1 relative group">
+                    <div key={d.date} className="flex flex-col items-center min-w-[34px] md:min-w-[28px] flex-1 relative group">
                       <div className="absolute -top-6 bg-foreground text-background px-1.5 py-0.5 rounded text-[9px] font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                         {formatCurrency(d.total)}
                       </div>
@@ -883,7 +934,50 @@ export default function ExpensesPage() {
             </span>
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: app-style card list */}
+          <div className="md:hidden space-y-2.5">
+            {budgetData.filter(b => b.budget > 0 || b.actual > 0).length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No budget data. Set budgets in the Categories tab.</div>
+            )}
+            {budgetData.filter(b => b.budget > 0 || b.actual > 0).map((b, i) => (
+              <div
+                key={b.categoryId}
+                onClick={() => { setShowBudgetEdit(b.categoryId); setBudgetVal(b.budget); }}
+                className="m-card tap-press animate-list-in"
+                style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: `${b.categoryColor}20` }}>
+                    <CatIcon name={b.categoryIcon} className="w-5 h-5" style={{ color: b.categoryColor }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{b.categoryName}</p>
+                      <span className="text-sm font-bold text-red-600 flex-shrink-0">{formatCurrency(b.actual)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className="text-xs text-muted">Budget {formatCurrency(b.budget)}</p>
+                      <span className={`text-[11px] font-medium ${b.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        {b.variance >= 0 ? '+' : ''}{formatCurrency(b.variance)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {b.budget > 0 ? (
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <div className="flex-1 bg-border rounded-full h-2">
+                      <div className={`h-2 rounded-full ${b.percent > 100 ? 'bg-red-500' : b.percent > 80 ? 'bg-amber-500' : 'bg-green-500'}`}
+                        style={{ width: `${Math.min(100, b.percent)}%` }} />
+                    </div>
+                    <span className={`text-[11px] font-medium flex-shrink-0 ${b.percent > 100 ? 'text-red-600' : b.percent > 80 ? 'text-amber-600' : 'text-green-600'}`}>{b.percent}%</span>
+                  </div>
+                ) : <p className="text-xs text-muted mt-2.5">No budget set</p>}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: Budget table */}
+          <div className="hidden md:block glass-card overflow-hidden">
             <table className="crm-table">
               <thead>
                 <tr>
@@ -936,135 +1030,142 @@ export default function ExpensesPage() {
           </div>
 
           {/* Over-budget alerts */}
-          {budgetData.filter(b => b.budget > 0 && b.actual > b.budget).length > 0 && (
-            <div className="glass-card p-4 border-l-4 border-red-500">
-              <h4 className="text-sm font-semibold text-red-600 flex items-center gap-2 mb-2">
-                <AlertTriangle className="w-4 h-4" /> Over Budget Alerts
-              </h4>
-              <div className="space-y-1">
-                {budgetData.filter(b => b.budget > 0 && b.actual > b.budget).map(b => (
-                  <p key={b.categoryId} className="text-xs text-muted">
-                    <strong className="text-foreground">{b.categoryName}</strong> exceeded by {formatCurrency(Math.abs(b.variance))} ({b.percent}% of budget)
-                  </p>
-                ))}
+          {
+            budgetData.filter(b => b.budget > 0 && b.actual > b.budget).length > 0 && (
+              <div className="glass-card p-4 border-l-4 border-red-500">
+                <h4 className="text-sm font-semibold text-red-600 flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4" /> Over Budget Alerts
+                </h4>
+                <div className="space-y-1">
+                  {budgetData.filter(b => b.budget > 0 && b.actual > b.budget).map(b => (
+                    <p key={b.categoryId} className="text-xs text-muted">
+                      <strong className="text-foreground">{b.categoryName}</strong> exceeded by {formatCurrency(Math.abs(b.variance))} ({b.percent}% of budget)
+                    </p>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )
+          }
+        </div >
+      )
+      }
 
       {/* ═══════ RECURRING TAB ═══════ */}
-      {tab === 'recurring' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted">{recurring.length} recurring expenses · {recurring.filter(r => r.isActive).length} active</p>
-            <button onClick={() => setShowAddRecurring(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-              <Plus className="w-4 h-4" /> Add Recurring
-            </button>
-          </div>
+      {
+        tab === 'recurring' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted">{recurring.length} recurring expenses · {recurring.filter(r => r.isActive).length} active</p>
+              <button onClick={() => setShowAddRecurring(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+                <Plus className="w-4 h-4" /> Add Recurring
+              </button>
+            </div>
 
-          {recurring.length === 0 ? (
-            <div className="glass-card py-16 text-center text-muted">
-              <Repeat className="w-12 h-12 mx-auto mb-3 opacity-20" />
-              <p className="font-medium">No recurring expenses</p>
-              <p className="text-sm mt-1">Add monthly rent, EMIs, subscriptions etc.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {recurring.map(rec => (
-                <div key={rec.id} className={`glass-card p-4 ${!rec.isActive ? 'opacity-60' : ''}`}>
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${rec.categoryColor}20` }}>
-                        <Repeat className="w-4 h-4" style={{ color: rec.categoryColor }} />
+            {recurring.length === 0 ? (
+              <div className="glass-card py-16 text-center text-muted">
+                <Repeat className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                <p className="font-medium">No recurring expenses</p>
+                <p className="text-sm mt-1">Add monthly rent, EMIs, subscriptions etc.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {recurring.map(rec => (
+                  <div key={rec.id} className={`glass-card p-4 ${!rec.isActive ? 'opacity-60' : ''}`}>
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${rec.categoryColor}20` }}>
+                          <Repeat className="w-4 h-4" style={{ color: rec.categoryColor }} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{rec.description}</p>
+                          <p className="text-[11px] text-muted">{rec.categoryName} · {rec.vendor || 'No vendor'}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{rec.description}</p>
-                        <p className="text-[11px] text-muted">{rec.categoryName} · {rec.vendor || 'No vendor'}</p>
-                      </div>
+                      <p className="text-base font-bold text-red-600">{formatCurrency(rec.amount)}</p>
                     </div>
-                    <p className="text-base font-bold text-red-600">{formatCurrency(rec.amount)}</p>
+                    <div className="flex items-center gap-3 text-[11px] text-muted mb-3">
+                      <span className="px-2 py-0.5 bg-surface border border-border rounded-lg">{rec.frequency}</span>
+                      {rec.dayOfMonth && rec.frequency === 'Monthly' && <span>Day {rec.dayOfMonth}</span>}
+                      <span>{rec.paymentMode}</span>
+                      <span className={`px-2 py-0.5 rounded-lg ${rec.isActive ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
+                        {rec.isActive ? 'Active' : 'Paused'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); }}
+                        className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-accent/30 text-muted hover:text-foreground transition-all text-center">
+                        {rec.isActive ? 'Pause' : 'Resume'}
+                      </button>
+                      <button onClick={async () => { if (confirm('Delete?')) { await deleteRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); } }}
+                        className="py-1.5 px-3 text-xs font-medium rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-all">
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] text-muted mb-3">
-                    <span className="px-2 py-0.5 bg-surface border border-border rounded-lg">{rec.frequency}</span>
-                    {rec.dayOfMonth && rec.frequency === 'Monthly' && <span>Day {rec.dayOfMonth}</span>}
-                    <span>{rec.paymentMode}</span>
-                    <span className={`px-2 py-0.5 rounded-lg ${rec.isActive ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-600'}`}>
-                      {rec.isActive ? 'Active' : 'Paused'}
-                    </span>
-                  </div>
-              <div className="flex items-center gap-2">
-                    <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); }}
-                      className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-accent/30 text-muted hover:text-foreground transition-all text-center">
-                      {rec.isActive ? 'Pause' : 'Resume'}
-                    </button>
-                    <button onClick={async () => { if (confirm('Delete?')) { await deleteRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); } }}
-                      className="py-1.5 px-3 text-xs font-medium rounded-lg bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-all">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      }
 
 
 
       {/* ═══════ CATEGORIES TAB ═══════ */}
-      {tab === 'categories' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted">{categories.length} active categories</p>
-            <button onClick={() => setShowAddCategory(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-              <Plus className="w-4 h-4" /> Add Category
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {categories.map(cat => (
-              <div key={cat.id} className="glass-card p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${cat.color}20` }}>
-                      <CatIcon name={cat.icon} className="w-4 h-4" style={{ color: cat.color }} />
+      {
+        tab === 'categories' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted">{categories.length} active categories</p>
+              <button onClick={() => setShowAddCategory(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+                <Plus className="w-4 h-4" /> Add Category
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {categories.map(cat => (
+                <div key={cat.id} className="glass-card p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${cat.color}20` }}>
+                        <CatIcon name={cat.icon} className="w-4 h-4" style={{ color: cat.color }} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{cat.name}</p>
+                        <p className="text-[11px] text-muted">{cat._count.expenses} expenses</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">{cat.name}</p>
-                      <p className="text-[11px] text-muted">{cat._count.expenses} expenses</p>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => { setShowBudgetEdit(cat.id); setBudgetVal(cat.budget); }}
+                        className="p-1.5 text-muted hover:text-accent rounded-lg hover:bg-surface transition-colors" title="Edit budget">
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const actionLabel = cat._count.expenses > 0 || cat.isDefault ? 'archive' : 'delete'
+                          if (confirm(`Are you sure you want to ${actionLabel} "${cat.name}"?`)) {
+                            await deleteExpenseCategory(cat.id)
+                            await loadData(dateRange.from, dateRange.to)
+                          }
+                        }}
+                        className="p-1.5 text-muted hover:text-red-600 rounded-lg hover:bg-surface transition-colors"
+                        title={cat._count.expenses > 0 || cat.isDefault ? 'Archive category' : 'Delete category'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => { setShowBudgetEdit(cat.id); setBudgetVal(cat.budget); }}
-                      className="p-1.5 text-muted hover:text-accent rounded-lg hover:bg-surface transition-colors" title="Edit budget">
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={async () => {
-                        const actionLabel = cat._count.expenses > 0 || cat.isDefault ? 'archive' : 'delete'
-                        if (confirm(`Are you sure you want to ${actionLabel} "${cat.name}"?`)) {
-                          await deleteExpenseCategory(cat.id)
-                          await loadData(dateRange.from, dateRange.to)
-                        }
-                      }}
-                      className="p-1.5 text-muted hover:text-red-600 rounded-lg hover:bg-surface transition-colors"
-                      title={cat._count.expenses > 0 || cat.isDefault ? 'Archive category' : 'Delete category'}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="flex items-center justify-between text-xs text-muted mt-2 pt-2 border-t border-border">
+                    <span>Monthly Budget:</span>
+                    <span className="font-medium text-foreground">{cat.budget > 0 ? formatCurrency(cat.budget) : 'Not set'}</span>
                   </div>
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted mt-2 pt-2 border-t border-border">
-                  <span>Monthly Budget:</span>
-                  <span className="font-medium text-foreground">{cat.budget > 0 ? formatCurrency(cat.budget) : 'Not set'}</span>
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* ═══════ ADD / EDIT EXPENSE MODAL ═══════ */}
       <Modal isOpen={!!expenseToDraft} onClose={cancelMoveExpenseToDraft} title="Move Expense to Draft" size="sm">
@@ -1302,6 +1403,6 @@ export default function ExpensesPage() {
           </div>
         </div>
       </Modal>
-    </div>
+    </div >
   );
 }

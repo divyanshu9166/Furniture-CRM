@@ -5,6 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from '@/components/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useSidebarContext } from './SidebarContext';
+import ThemeToggle from './ThemeToggle';
 import {
   getTopNotifications,
   markConversationNotificationRead,
@@ -46,7 +47,7 @@ export default function TopBar() {
 
   useEffect(() => {
     const tick = () => {
-      refreshNotifications().catch(() => {});
+      refreshNotifications().catch(() => { });
     };
 
     queueMicrotask(tick);
@@ -136,7 +137,7 @@ export default function TopBar() {
   }, [showUserMenu, showNotifications]);
 
   return (
-    <header className="mobile-top-safe border-b border-border bg-white/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
+    <header className="mobile-top-safe border-b border-border bg-surface/95 backdrop-blur-md flex items-center justify-between px-4 md:px-6 sticky top-0 z-40">
       {/* Left section */}
       <div className="flex items-center gap-3 flex-1 min-w-0">
         {/* Hamburger — mobile only */}
@@ -159,7 +160,7 @@ export default function TopBar() {
             type="text"
             placeholder="Search leads, products, orders..."
             style={{ paddingLeft: '40px' }}
-            className="w-full pr-4 py-2 bg-surface-hover rounded-lg border border-border text-sm placeholder:text-muted/60 focus:bg-white transition-all"
+            className="w-full pr-4 py-2 bg-surface-hover rounded-lg border border-border text-sm placeholder:text-muted/60 focus:bg-surface transition-all"
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
           />
@@ -168,6 +169,9 @@ export default function TopBar() {
 
       {/* Right section */}
       <div className="flex items-center gap-2 md:gap-3 flex-shrink-0 ml-2">
+        {/* Theme toggle */}
+        <ThemeToggle />
+
         {/* Notifications */}
         <div className="relative" ref={notificationsRef}>
           <button
@@ -184,7 +188,7 @@ export default function TopBar() {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[calc(100vw-24px)] bg-white rounded-2xl border border-border shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
+            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[calc(100vw-24px)] bg-surface rounded-2xl border border-border shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Notifications</p>
@@ -267,16 +271,15 @@ export default function TopBar() {
 
           {/* Dropdown menu */}
           {showUserMenu && (
-            <div className="absolute right-0 top-full mt-1.5 w-56 bg-white rounded-xl border border-border shadow-lg py-1.5 z-50 animate-[fade-in_0.15s_ease-out]">
+            <div className="absolute right-0 top-full mt-1.5 w-56 bg-surface rounded-xl border border-border shadow-lg py-1.5 z-50 animate-[fade-in_0.15s_ease-out]">
               {/* User info */}
               <div className="px-4 py-3 border-b border-border">
                 <p className="text-sm font-semibold text-foreground">{userName}</p>
                 <p className="text-xs text-muted">{session?.user?.email}</p>
-                <span className={`inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                  userRole === 'ADMIN' ? 'bg-blue-500/10 text-blue-700' :
+                <span className={`inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium ${userRole === 'ADMIN' ? 'bg-blue-500/10 text-blue-700' :
                   userRole === 'MANAGER' ? 'bg-purple-500/10 text-purple-700' :
-                  'bg-amber-500/10 text-amber-700'
-                }`}>
+                    'bg-amber-500/10 text-amber-700'
+                  }`}>
                   <Shield className="w-2.5 h-2.5 inline mr-1 -mt-0.5" />
                   {roleLabel}
                 </span>
@@ -296,7 +299,7 @@ export default function TopBar() {
               <div className="border-t border-border pt-1">
                 <button
                   onClick={() => signOut({ callbackUrl: '/login' })}
-                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-danger hover:bg-danger-light transition-colors"
                 >
                   <LogOut className="w-4 h-4" />
                   Sign Out

@@ -914,7 +914,78 @@ export default function ManufacturingPage() {
             </select>
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: app-style production order cards */}
+          <div className="md:hidden space-y-2.5">
+            {filteredOrders.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">
+                {orders.length === 0 ? 'No production orders yet' : 'No orders match your filters'}
+              </div>
+            )}
+            {filteredOrders.map((o, i) => {
+              const isOverdue = o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED', 'CANCELLED'].includes(o.status)
+              const progress = o.plannedQty > 0 ? Math.min(100, Math.round((o.actualQty / o.plannedQty) * 100)) : 0
+              return (
+                <div
+                  key={o.id}
+                  onClick={() => { setSelectedOrder(o); setShowDetailModal(true) }}
+                  className={`m-card tap-press animate-list-in ${isOverdue ? 'border-red-500/30' : ''}`}
+                  style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="font-mono text-xs font-semibold text-foreground truncate">{o.displayId}</span>
+                      {isOverdue && <span className="text-[9px] px-1.5 py-0.5 bg-red-500/15 text-red-400 rounded-full flex-shrink-0">OVERDUE</span>}
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${PRIORITY_COLORS[o.priority] || ''}`}>{o.priority}</span>
+                  </div>
+                  <p className="text-sm font-medium text-foreground truncate mt-1">{o.finishedProduct?.name}</p>
+                  <p className="text-[11px] text-muted truncate">{o.bom?.name} v{o.bom?.version}</p>
+                  {o.customOrder && <p className="text-[11px] text-accent truncate">{o.customOrder.displayId} · {o.customOrder.contact?.name}</p>}
+                  <div className="flex items-center gap-2 mt-2">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[o.status] || ''}`}>{o.status?.replace(/_/g, ' ')}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${QUALITY_COLORS[o.qualityStatus] || ''}`}>{o.qualityStatus}</span>
+                    <span className="text-xs text-foreground ml-auto flex-shrink-0">{o.actualQty}<span className="text-muted text-[10px]"> / {o.plannedQty}</span></span>
+                  </div>
+                  {o.status === 'IN_PROGRESS' && o.plannedQty > 0 && (
+                    <div className="h-1.5 bg-surface rounded-full overflow-hidden mt-2">
+                      <div className={`h-full rounded-full ${o.actualQty >= o.plannedQty ? 'bg-emerald-500' : 'bg-accent'}`} style={{ width: `${progress}%` }} />
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-border/50">
+                    <span className="text-[11px] text-muted truncate">{o.dueDate ? `Due ${new Date(o.dueDate).toLocaleDateString('en-IN')}` : 'No due date'} · {o.assignedStaff?.name || o.assignedTo || 'Unassigned'}</span>
+                    <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
+                      {o.status === 'PLANNED' && (
+                        <button onClick={() => handleStartProd(o.id)} className="p-2 rounded-lg tap-press-sm hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Start Production"><PlayCircle className="w-4 h-4" /></button>
+                      )}
+                      {o.status === 'IN_PROGRESS' && (
+                        <>
+                          <button onClick={() => openCompleteModal(o)} className="p-2 rounded-lg tap-press-sm hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-4 h-4" /></button>
+                          <button onClick={() => handleHoldProd(o.id)} className="p-2 rounded-lg tap-press-sm hover:bg-amber-500/10 text-muted hover:text-amber-400" title="Hold"><Pause className="w-4 h-4" /></button>
+                        </>
+                      )}
+                      {o.status === 'ON_HOLD' && (
+                        <>
+                          <button onClick={() => handleStartProd(o.id)} className="p-2 rounded-lg tap-press-sm hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Resume"><PlayCircle className="w-4 h-4" /></button>
+                          <button onClick={() => openCompleteModal(o)} className="p-2 rounded-lg tap-press-sm hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-4 h-4" /></button>
+                        </>
+                      )}
+                      {(o.status === 'IN_PROGRESS' || o.status === 'ON_HOLD') && (
+                        <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-4 h-4" /></button>
+                      )}
+                      {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
+                        <button onClick={() => { setCancelTarget(o); setShowCancelModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-4 h-4" /></button>
+                      )}
+                      {['PLANNED', 'CANCELLED'].includes(o.status) && (
+                        <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-4 h-4" /></button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[980px]">
                 <thead>
@@ -1236,7 +1307,36 @@ export default function ManufacturingPage() {
             ))}
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: quality record cards */}
+          <div className="md:hidden space-y-2.5">
+            {completedOrders.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No completed orders yet</div>
+            )}
+            {completedOrders.map((o, i) => (
+              <div
+                key={o.id}
+                className="m-card animate-list-in"
+                style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-semibold text-foreground truncate">{o.displayId}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${QUALITY_COLORS[o.qualityStatus] || ''}`}>{o.qualityStatus}</span>
+                </div>
+                <p className="text-sm font-medium text-foreground truncate mt-1">{o.finishedProduct?.name}</p>
+                <div className="flex items-center gap-2 mt-2 text-xs">
+                  <span className="text-muted">Plan {o.plannedQty}</span>
+                  <span className="text-foreground">Act {o.actualQty}</span>
+                  <span className="text-red-400">Scrap {o.scrapQty || 0}</span>
+                  <span className={`ml-auto font-semibold ${(o.yieldRate || 0) >= 90 ? 'text-emerald-400' : (o.yieldRate || 0) >= 75 ? 'text-amber-400' : 'text-red-400'}`}>{o.yieldRate?.toFixed(1) || 0}%</span>
+                </div>
+                {(o.qualityNotes || o.scrapReason) && (
+                  <p className="text-[11px] text-muted truncate mt-1.5">{o.qualityNotes || o.scrapReason}</p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <h3 className="text-sm font-medium text-foreground">Quality Records — All Production Orders</h3>
             </div>
@@ -1273,35 +1373,58 @@ export default function ManufacturingPage() {
           </div>
 
           {orders.filter(o => o.status === 'IN_PROGRESS').length > 0 && (
-            <div className="glass-card overflow-hidden">
-              <div className="px-4 py-3 border-b border-border">
-                <h3 className="text-sm font-medium text-foreground">Pending Quality Checks</h3>
+            <>
+              {/* Mobile: pending QC cards */}
+              <div className="md:hidden space-y-2.5">
+                {orders.filter(o => o.status === 'IN_PROGRESS').map((o, i) => (
+                  <div
+                    key={o.id}
+                    className="m-card animate-list-in"
+                    style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-xs font-semibold text-foreground truncate">{o.displayId}</span>
+                      <span className="text-[11px] text-muted flex-shrink-0">Qty {o.plannedQty}</span>
+                    </div>
+                    <p className="text-sm font-medium text-foreground truncate mt-1">{o.finishedProduct?.name}</p>
+                    <p className="text-[11px] text-muted truncate">{o.workCenter?.name || 'No work center'}</p>
+                    <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="mt-2 w-full py-2 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 tap-press-sm">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Record QC
+                    </button>
+                  </div>
+                ))}
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-surface-hover">
-                    {['Order #', 'Product', 'Planned Qty', 'Work Center', 'Action'].map(h => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.filter(o => o.status === 'IN_PROGRESS').map(o => (
-                    <tr key={o.id} className="border-b border-border/50">
-                      <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground">{o.displayId}</td>
-                      <td className="px-4 py-3 text-foreground">{o.finishedProduct?.name}</td>
-                      <td className="px-4 py-3 text-muted">{o.plannedQty}</td>
-                      <td className="px-4 py-3 text-muted">{o.workCenter?.name || '—'}</td>
-                      <td className="px-4 py-3">
-                        <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5">
-                          <ShieldCheck className="w-3.5 h-3.5" /> Record QC
-                        </button>
-                      </td>
+
+              <div className="hidden md:block glass-card overflow-hidden">
+                <div className="px-4 py-3 border-b border-border">
+                  <h3 className="text-sm font-medium text-foreground">Pending Quality Checks</h3>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-surface-hover">
+                      {['Order #', 'Product', 'Planned Qty', 'Work Center', 'Action'].map(h => (
+                        <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {orders.filter(o => o.status === 'IN_PROGRESS').map(o => (
+                      <tr key={o.id} className="border-b border-border/50">
+                        <td className="px-4 py-3 font-mono text-xs font-semibold text-foreground">{o.displayId}</td>
+                        <td className="px-4 py-3 text-foreground">{o.finishedProduct?.name}</td>
+                        <td className="px-4 py-3 text-muted">{o.plannedQty}</td>
+                        <td className="px-4 py-3 text-muted">{o.workCenter?.name || '—'}</td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5" /> Record QC
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -1327,7 +1450,39 @@ export default function ManufacturingPage() {
             ))}
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: scrap cards */}
+          <div className="md:hidden space-y-2.5">
+            {scrapInventory.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No material scrap recorded yet</div>
+            )}
+            {scrapInventory.map((s, i) => (
+              <div
+                key={s.id}
+                className="m-card animate-list-in"
+                style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{s.rawMaterial?.name}</p>
+                    <p className="text-[10px] text-muted font-mono truncate">{s.rawMaterial?.sku}</p>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${s.status === 'IN_STOCK' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-500/10 text-gray-400'}`}>{s.status.replace(/_/g, ' ')}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-2 text-xs">
+                  <span className="text-foreground font-semibold">{s.quantity} {s.unitOfMeasure}</span>
+                  <span className="text-muted">·</span>
+                  <span className="text-foreground">₹{(s.estimatedValue || 0).toLocaleString('en-IN')}</span>
+                  <span className="text-muted ml-auto">{s.disposition}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-muted">
+                  <span className="truncate">{s.productionOrder?.displayId || '—'} · {s.reason || s.notes || 'No reason'}</span>
+                  <span className="flex-shrink-0">{s.createdAt ? new Date(s.createdAt).toLocaleDateString('en-IN') : '—'}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <h3 className="text-sm font-medium text-foreground">Material Scrap & Offcuts</h3>
             </div>
@@ -1386,7 +1541,36 @@ export default function ManufacturingPage() {
             ))}
           </div>
 
-          <div className="glass-card overflow-hidden">
+          {/* Mobile: custom inventory cards */}
+          <div className="md:hidden space-y-2.5">
+            {customInventory.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">No custom order inventory yet</div>
+            )}
+            {customInventory.map((i, idx) => (
+              <div
+                key={i.id}
+                className="m-card animate-list-in"
+                style={{ animationDelay: `${Math.min(idx * 35, 350)}ms` }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono text-xs font-semibold text-foreground truncate">{i.customOrder?.displayId}</span>
+                    <span className="text-[10px] text-muted truncate">{i.customOrder?.type}</span>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${i.status === 'READY' ? 'bg-emerald-500/10 text-emerald-400' : i.status === 'WIP' ? 'bg-blue-500/10 text-blue-400' : 'bg-gray-500/10 text-gray-400'}`}>{i.status}</span>
+                </div>
+                <p className="text-sm font-medium text-foreground truncate mt-1">{i.product?.name}</p>
+                <p className="text-[11px] text-muted truncate">{i.customOrder?.contact?.name || '—'} · {i.product?.sku}</p>
+                <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50 text-xs">
+                  <span className="text-foreground font-semibold">×{i.quantity}</span>
+                  <span className="text-muted">@ ₹{(i.unitCost || 0).toLocaleString('en-IN')}</span>
+                  <span className="text-foreground ml-auto font-medium">₹{(i.totalCost || 0).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="px-4 py-3 border-b border-border">
               <h3 className="text-sm font-medium text-foreground">Finished Goods for Custom Orders</h3>
             </div>
@@ -1494,7 +1678,27 @@ export default function ManufacturingPage() {
           {stats.monthlyTrend.length > 0 && (
             <div className="glass-card p-5">
               <h3 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2"><BarChart3 className="w-4 h-4 text-purple-400" /> Monthly Production Trend (Last 6 Months)</h3>
-              <div className="overflow-x-auto">
+              {/* Mobile: trend cards */}
+              <div className="md:hidden space-y-2.5">
+                {stats.monthlyTrend.map((m, i) => (
+                  <div
+                    key={i}
+                    className="m-card animate-list-in"
+                    style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-foreground">{m.month}</span>
+                      <span className="text-[11px] text-muted">{m.orders} orders</span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 text-xs">
+                      <span className="text-foreground">{m.qty.toLocaleString('en-IN')} units</span>
+                      <span className="text-foreground ml-auto font-medium">₹{m.cost.toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {/* Desktop: trend table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
@@ -1779,8 +1983,145 @@ export default function ManufacturingPage() {
             )}
           </div>
 
+          {/* Mobile: raw material cards (display + inline edit) */}
+          <div className="md:hidden space-y-2.5">
+            {rawMaterials.length === 0 && (
+              <div className="glass-card py-12 text-center text-sm text-muted">
+                {rmSearch ? 'No materials match your search' : 'No raw materials yet. Add one above to get started.'}
+              </div>
+            )}
+            {rawMaterials.map((rm, idx) => {
+              const unitSize = Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1
+              const stockQty = (Number(rm.stock) || 0) / unitSize
+              const isLow = stockQty <= (Number(rm.reorderLevel) || 0)
+              const stockQtyLabel = Number.isInteger(stockQty) ? String(stockQty) : stockQty.toFixed(2)
+              const stockMeasureLabel = Number.isInteger(Number(rm.stock) || 0) ? String(Number(rm.stock) || 0) : Number(rm.stock || 0).toFixed(2)
+              const isEditing = editingRmId === rm.id
+              if (isEditing) {
+                return (
+                  <div key={rm.id} className="m-card border-accent/50 space-y-2">
+                    <input value={rmEditForm.name} onChange={e => setRmEditForm(f => ({ ...f, name: e.target.value }))}
+                      className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Material name" />
+                    <input value={rmEditForm.brand || ''} onChange={e => setRmEditForm(f => ({ ...f, brand: e.target.value }))}
+                      className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Brand" />
+                    <input value={rmEditForm.description || ''} onChange={e => setRmEditForm(f => ({ ...f, description: e.target.value }))}
+                      className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Size e.g. 1 inch (square)" />
+                    <input type="file" accept="image/*"
+                      onChange={e => { const file = e.target.files?.[0]; if (file) setRmEditImages([file]); e.target.value = '' }}
+                      className="w-full text-[10px] text-muted" />
+                    {rmEditImages.length > 0 && <p className="text-[10px] text-muted">{rmEditImages[0].name}</p>}
+                    <div className="grid grid-cols-2 gap-2">
+                      <select value={rmEditForm.stockAction || 'SET'} onChange={e => setRmEditForm(f => ({ ...f, stockAction: e.target.value }))}
+                        className="px-2 py-1.5 bg-surface border border-accent rounded text-[11px] text-foreground">
+                        <option value="SET">Set Stock</option>
+                        <option value="ADD">Add Stock</option>
+                      </select>
+                      <input type="number" min="0" value={rmEditForm.stockQuantity}
+                        onChange={e => setRmEditForm(f => ({ ...f, stockQuantity: e.target.value, currentStockQuantity: stockQty }))}
+                        className="px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground"
+                        placeholder={rmEditForm.stockAction === 'ADD' ? 'Add Qty' : 'Stock Qty'} />
+                      <select value={rmEditForm.unitOfMeasure || rm.unitOfMeasure || 'PCS'} onChange={e => setRmEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
+                        className="px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground">
+                        <option value="PCS">PCS</option>
+                        <option value="BOX">BOX</option>
+                        <option value="KG">KG</option>
+                        <option value="G">G</option>
+                        <option value="MTR">MTR</option>
+                        <option value="FT">FT</option>
+                        <option value="INCH">INCH</option>
+                      </select>
+                      <input type="number" min="0" value={rmEditForm.reorderLevel} onChange={e => setRmEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
+                        className="px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" placeholder="Min. alert" />
+                      <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
+                        className="px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground col-span-2" placeholder="Measure / Qty" />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button onClick={() => handleUpdateRawMaterial(rm.id)} disabled={submitting}
+                        className="flex-1 px-2.5 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1 tap-press-sm">
+                        <Save className="w-3 h-3" /> Save
+                      </button>
+                      <button onClick={() => { setEditingRmId(null); setRmEditImages([]) }}
+                        className="px-4 py-2 rounded-lg bg-surface border border-border text-xs text-muted tap-press-sm">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div
+                  key={rm.id}
+                  className={`m-card animate-list-in ${selectedRmIds.has(rm.id) ? 'border-accent/50 bg-accent/5' : ''}`}
+                  style={{ animationDelay: `${Math.min(idx * 35, 350)}ms` }}
+                >
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedRmIds.has(rm.id)}
+                      onChange={e => {
+                        const newSet = new Set(selectedRmIds)
+                        if (e.target.checked) newSet.add(rm.id)
+                        else newSet.delete(rm.id)
+                        setSelectedRmIds(newSet)
+                      }}
+                      className="w-4 h-4 rounded border-border bg-surface text-accent focus:ring-accent/50 cursor-pointer flex-shrink-0" />
+                    {rm.image ? (
+                      <img src={rm.image} alt={rm.name} className="w-10 h-10 rounded-lg object-cover border border-border flex-shrink-0" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-surface-hover border border-border flex items-center justify-center flex-shrink-0"><Package className="w-4 h-4 text-muted" /></div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium text-foreground truncate">{rm.name}</p>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${isLow ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>{isLow ? '⚠ Low' : '✓ In Stock'}</span>
+                      </div>
+                      <p className="text-[11px] text-muted truncate">
+                        <span className="text-accent font-mono">{rm.sku}</span>
+                        {rm.description ? ` · ${rm.description}` : ''}
+                        {rm.brand ? ` · ${rm.brand}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50 text-xs">
+                    <span className={isLow ? 'text-red-400 font-semibold' : 'text-emerald-400 font-semibold'}>{stockQtyLabel}</span>
+                    <span className="text-muted">({stockMeasureLabel} {rm.unitOfMeasure})</span>
+                    <span className="text-foreground ml-auto">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</span>
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <button
+                      onClick={() => {
+                        setEditingRmId(rm.id)
+                        setRmEditForm({
+                          name: rm.name,
+                          brand: rm.brand || '',
+                          stockQuantity: ((Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1)).toFixed(2),
+                          currentStockQuantity: (Number(rm.stock) || 0) / (Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1),
+                          stockAction: 'SET',
+                          unitSize: Number(rm.unitSize) > 0 ? Number(rm.unitSize) : 1,
+                          unitOfMeasure: rm.unitOfMeasure || 'PCS',
+                          reorderLevel: rm.reorderLevel,
+                          description: rm.description || '',
+                          image: rm.image || '',
+                        })
+                        setRmEditImages([])
+                      }}
+                      className="flex-1 px-2.5 py-2 rounded-lg bg-surface border border-border text-xs text-muted hover:text-accent hover:border-accent/50 transition-colors flex items-center justify-center gap-1 tap-press-sm">
+                      <Edit2 className="w-3 h-3" /> Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteRawMaterial(rm.id, rm.name)}
+                      disabled={submitting}
+                      className="flex-1 px-2.5 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400 hover:bg-red-500/20 transition-colors flex items-center justify-center gap-1 disabled:opacity-50 tap-press-sm">
+                      <Trash2 className="w-3 h-3" /> Delete
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
           {/* Raw Materials Table */}
-          <div className="glass-card overflow-hidden">
+          <div className="hidden md:block glass-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[1000px]">
                 <thead>

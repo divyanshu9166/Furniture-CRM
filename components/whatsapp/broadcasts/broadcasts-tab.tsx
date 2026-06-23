@@ -173,7 +173,7 @@ export function BroadcastsTab() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Broadcasts</h1>
           <p className="mt-1 text-sm text-muted">
@@ -182,7 +182,7 @@ export function BroadcastsTab() {
         </div>
         <Button
           onClick={() => router.push('/broadcasts/new')}
-          className="bg-accent text-foreground hover:bg-accent"
+          className="w-full sm:w-auto bg-accent text-foreground hover:bg-accent"
         >
           <Plus className="h-4 w-4" />
           New Broadcast
@@ -205,75 +205,147 @@ export function BroadcastsTab() {
           </Button>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border bg-surface">
-          <Table>
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="text-muted">Name</TableHead>
-                <TableHead className="hidden text-muted md:table-cell">Template</TableHead>
-                <TableHead className="hidden text-right text-muted sm:table-cell">
-                  Recipients
-                </TableHead>
-                <TableHead className="hidden text-muted lg:table-cell">Delivery</TableHead>
-                <TableHead className="hidden text-muted lg:table-cell">Read</TableHead>
-                <TableHead className="text-muted">Status</TableHead>
-                <TableHead className="hidden text-muted sm:table-cell">Date</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {broadcasts.map((broadcast) => {
-                const status = getBroadcastStatus(broadcast.status);
-                return (
-                  <TableRow
-                    key={broadcast.id}
-                    className="cursor-pointer border-border hover:bg-surface-light"
-                    onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
-                  >
-                    <TableCell className="font-medium text-foreground">
-                      {broadcast.name}
-                    </TableCell>
-                    <TableCell className="hidden text-foreground md:table-cell">
-                      {broadcast.template_name}
-                    </TableCell>
-                    <TableCell className="hidden text-right text-foreground tabular-nums sm:table-cell">
-                      {broadcast.total_recipients}
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
+        <>
+          {/* Mobile: stacked tappable cards */}
+          <div className="space-y-3 md:hidden">
+            {broadcasts.map((broadcast) => {
+              const status = getBroadcastStatus(broadcast.status);
+              return (
+                <button
+                  key={broadcast.id}
+                  type="button"
+                  onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                  className="m-card tap-press animate-list-in w-full p-4 text-left"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-foreground">
+                        {broadcast.name}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-muted">
+                        {broadcast.template_name}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
+                    >
+                      {status.pulse && (
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
+                        </span>
+                      )}
+                      {status.label}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted">
+                      {broadcast.total_recipients} recipients
+                    </span>
+                    <span className="text-xs text-muted">
+                      {new Date(broadcast.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="mb-1 text-[10px] uppercase tracking-wide text-muted">
+                        Delivery
+                      </p>
                       <RateCell
                         value={broadcast.delivered_count}
                         total={broadcast.total_recipients}
                         color="bg-accent"
                       />
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
+                    </div>
+                    <div>
+                      <p className="mb-1 text-[10px] uppercase tracking-wide text-muted">
+                        Read
+                      </p>
                       <RateCell
                         value={broadcast.read_count}
                         total={broadcast.total_recipients}
                         color="bg-blue-500"
                       />
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
-                      >
-                        {status.pulse && (
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
-                          </span>
-                        )}
-                        {status.label}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden text-muted sm:table-cell">
-                      {new Date(broadcast.created_at).toLocaleDateString()}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden overflow-x-auto rounded-xl border border-border bg-surface md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="text-muted">Name</TableHead>
+                  <TableHead className="hidden text-muted md:table-cell">Template</TableHead>
+                  <TableHead className="hidden text-right text-muted sm:table-cell">
+                    Recipients
+                  </TableHead>
+                  <TableHead className="hidden text-muted lg:table-cell">Delivery</TableHead>
+                  <TableHead className="hidden text-muted lg:table-cell">Read</TableHead>
+                  <TableHead className="text-muted">Status</TableHead>
+                  <TableHead className="hidden text-muted sm:table-cell">Date</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {broadcasts.map((broadcast) => {
+                  const status = getBroadcastStatus(broadcast.status);
+                  return (
+                    <TableRow
+                      key={broadcast.id}
+                      className="cursor-pointer border-border hover:bg-surface-light"
+                      onClick={() => router.push(`/broadcasts/${broadcast.id}`)}
+                    >
+                      <TableCell className="font-medium text-foreground">
+                        {broadcast.name}
+                      </TableCell>
+                      <TableCell className="hidden text-foreground md:table-cell">
+                        {broadcast.template_name}
+                      </TableCell>
+                      <TableCell className="hidden text-right text-foreground tabular-nums sm:table-cell">
+                        {broadcast.total_recipients}
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <RateCell
+                          value={broadcast.delivered_count}
+                          total={broadcast.total_recipients}
+                          color="bg-accent"
+                        />
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        <RateCell
+                          value={broadcast.read_count}
+                          total={broadcast.total_recipients}
+                          color="bg-blue-500"
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${status.classes}`}
+                        >
+                          {status.pulse && (
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-yellow-400 opacity-75" />
+                              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-yellow-400" />
+                            </span>
+                          )}
+                          {status.label}
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden text-muted sm:table-cell">
+                        {new Date(broadcast.created_at).toLocaleDateString()}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </div>
   );

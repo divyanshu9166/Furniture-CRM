@@ -89,14 +89,14 @@ function loadSavedBankDetails() {
   try {
     const saved = localStorage.getItem(BANK_DETAILS_KEY)
     if (saved) return { ...createBlankBankDetails(), ...JSON.parse(saved) }
-  } catch {}
+  } catch { }
   return createBlankBankDetails()
 }
 
 function saveBankDetailsToStorage(details) {
   try {
     localStorage.setItem(BANK_DETAILS_KEY, JSON.stringify(details))
-  } catch {}
+  } catch { }
 }
 
 const createInitialForm = () => ({
@@ -136,23 +136,23 @@ function formatDateDisplay(dateValue) {
 function buildFormFromQuotation(quotation) {
   const mappedItems = Array.isArray(quotation?.items) && quotation.items.length > 0
     ? quotation.items.map(item => {
-        const productImage = item.productImage || ''
-        const savedImage = item.referenceImage || ''
-        const imageSource = productImage && savedImage && productImage === savedImage ? 'PRODUCT' : 'REFERENCE'
+      const productImage = item.productImage || ''
+      const savedImage = item.referenceImage || ''
+      const imageSource = productImage && savedImage && productImage === savedImage ? 'PRODUCT' : 'REFERENCE'
 
-        return {
-          productId: item.productId || '',
-          name: item.name || '',
-          sku: item.sku || '',
-          description: item.description || '',
-          quantity: Number(item.quantity) || 1,
-          rate: Number(item.rate) || 0,
-          productImage,
-          referenceImage: imageSource === 'REFERENCE' ? savedImage : '',
-          imageSource,
-          isCustom: !item.productId,
-        }
-      })
+      return {
+        productId: item.productId || '',
+        name: item.name || '',
+        sku: item.sku || '',
+        description: item.description || '',
+        quantity: Number(item.quantity) || 1,
+        rate: Number(item.rate) || 0,
+        productImage,
+        referenceImage: imageSource === 'REFERENCE' ? savedImage : '',
+        imageSource,
+        isCustom: !item.productId,
+      }
+    })
     : [createBlankItem()]
 
   return {
@@ -441,11 +441,11 @@ function buildPrintHtml(quotation, storeSettings) {
           <table class="totals section">
             <tr class="bar"><td>TOTAL Rs.</td><td>${Number(quotation.subtotal || 0).toLocaleString('en-IN')}</td></tr>
             ${discountAmount > 0
-              ? `<tr><td>${discountTypeLabel}</td><td>-${discountAmount.toLocaleString('en-IN')}</td></tr><tr><td>DISCOUNTED TOTAL</td><td>${subtotalAfterDiscount.toLocaleString('en-IN')}</td></tr>`
-              : ''}
+      ? `<tr><td>${discountTypeLabel}</td><td>-${discountAmount.toLocaleString('en-IN')}</td></tr><tr><td>DISCOUNTED TOTAL</td><td>${subtotalAfterDiscount.toLocaleString('en-IN')}</td></tr>`
+      : ''}
             ${Number(quotation.installationPercent || 0) > 0
-              ? `<tr><td>INSTALLATION @${quotation.installationPercent || 0}%</td><td>${Number(quotation.installationCharge || 0).toLocaleString('en-IN')}</td></tr>`
-              : ''}
+      ? `<tr><td>INSTALLATION @${quotation.installationPercent || 0}%</td><td>${Number(quotation.installationCharge || 0).toLocaleString('en-IN')}</td></tr>`
+      : ''}
             <tr><td>FREIGHT CHARGES</td><td>${Number(quotation.freightCharge || 0).toLocaleString('en-IN')}</td></tr>
             <tr><td>LABOUR UNLOADING</td><td>${Number(quotation.loadingCharge || 0).toLocaleString('en-IN')}</td></tr>
             <tr class="bar"><td>GRAND TOTAL</td><td>${Number(quotation.totalBeforeTax || 0).toLocaleString('en-IN')}</td></tr>
@@ -463,10 +463,10 @@ function buildPrintHtml(quotation, storeSettings) {
               <p><strong>Bank Details</strong></p>
               <p>Make Cheques in favor of <strong class="brand">${escapeHtml(storeName).toUpperCase()}</strong></p>
               ${populatedBankRows.length > 0
-                ? populatedBankRows
-                    .map(row => `<p>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</p>`)
-                    .join('')
-                : '<p>No bank details provided for this quotation.</p>'}
+      ? populatedBankRows
+        .map(row => `<p>${escapeHtml(row.label)}: ${escapeHtml(row.value)}</p>`)
+        .join('')
+      : '<p>No bank details provided for this quotation.</p>'}
             </div>
             <div class="pay-qr">
               <p class="pay-title">SCAN & PAY</p>
@@ -576,8 +576,8 @@ function QuotationSheetPreview({ quotation, storeSettings }) {
                 )}
               </td>
               <td className="border border-black p-1 text-center align-top">{item.quantity}</td>
-                <td className="border border-black p-1 text-right align-top">{toINR(item.rate)}</td>
-                <td className="border border-black p-1 text-right align-top">{toINR(item.amount)}</td>
+              <td className="border border-black p-1 text-right align-top">{toINR(item.rate)}</td>
+              <td className="border border-black p-1 text-right align-top">{toINR(item.amount)}</td>
             </tr>
           ))}
         </tbody>
@@ -1117,7 +1117,7 @@ export default function QuotationsPage() {
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
     script.setAttribute('data-html2pdf', '1');
-    script.onload  = () => resolve(window.html2pdf);
+    script.onload = () => resolve(window.html2pdf);
     script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
     document.head.appendChild(script);
   });
@@ -1166,7 +1166,7 @@ export default function QuotationsPage() {
       notify('Preparing PDF for sharing...', { variant: 'info' })
       const element = document.createElement('div')
       element.innerHTML = buildPrintHtml(quotation, storeSettings)
-      
+
       const opt = {
         margin: 0,
         filename: 'Quotation_${quotation.id}.pdf',
@@ -1174,7 +1174,7 @@ export default function QuotationsPage() {
         html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
       }
-      
+
       html2pdf().set(opt).from(element).outputPdf('blob').then(async (pdfBlob) => {
         const file = new File([pdfBlob], 'Quotation_${quotation.id}.pdf', { type: 'application/pdf' })
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -1289,14 +1289,13 @@ export default function QuotationsPage() {
               className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm"
             />
           </div>
-          <div className="flex gap-1 overflow-x-auto hide-scrollbar">
+          <div className="seg-row">
             {['ALL', 'DRAFT', 'SENT', 'APPROVED', 'REJECTED'].map(status => (
               <button
                 key={status}
                 onClick={() => setStatusFilter(status)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  statusFilter === status ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover'
-                }`}
+                data-active={statusFilter === status}
+                className="seg-pill"
               >
                 {status === 'ALL' ? 'All' : status.charAt(0) + status.slice(1).toLowerCase()}
               </button>
@@ -1304,7 +1303,91 @@ export default function QuotationsPage() {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        {/* Mobile: app-style card list */}
+        <div className="md:hidden space-y-2.5">
+          {filteredQuotations.length === 0 && (
+            <div className="glass-card py-12 text-center text-sm text-muted">No quotations found for current filters</div>
+          )}
+          {filteredQuotations.map((quotation, i) => (
+            <div
+              key={quotation.dbId}
+              onClick={() => setSelectedQuotation(quotation)}
+              className="m-card tap-press animate-list-in"
+              style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-mono text-accent font-semibold text-sm truncate">{quotation.id}</p>
+                  <p className="text-sm font-medium text-foreground truncate mt-0.5">{quotation.customer}</p>
+                </div>
+                <p className="font-semibold text-foreground text-sm flex-shrink-0">{formatCurrency(quotation.grandTotal)}</p>
+              </div>
+              <div className="flex items-center justify-between gap-2 mt-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <select
+                    value={quotation.statusKey}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => { e.stopPropagation(); handleStatusChange(quotation.dbId, e.target.value) }}
+                    className={`px-2 py-1 rounded-lg text-xs border ${statusColors[quotation.statusKey]}`}
+                  >
+                    {['DRAFT', 'SENT', 'APPROVED', 'REJECTED'].map(status => (
+                      <option key={status} value={status}>{status.charAt(0) + status.slice(1).toLowerCase()}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted truncate">{quotation.items.length} items</span>
+                </div>
+                <span className="text-xs text-muted flex-shrink-0">{quotation.date}</span>
+              </div>
+              <div className="flex items-center gap-1 mt-2.5 pt-2.5 border-t border-border">
+                <button
+                  onClick={e => { e.stopPropagation(); handleShareQuotationWhatsApp(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors"
+                  title="Share on WhatsApp"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handleShareQuotationEmail(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-700 transition-colors"
+                  title="Share by Email"
+                >
+                  <Mail className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); openEditQuotationModal(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors"
+                  title="Edit"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handlePrint(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors"
+                  title="Print"
+                >
+                  <Printer className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handleDownload(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors"
+                  title="Download PDF"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); handleMoveToDraft(quotation) }}
+                  className="tap-press-sm p-2 rounded-lg hover:bg-red-500/10 text-muted hover:text-red-600 transition-colors ml-auto"
+                  title="Move to Draft"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop: table */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr>

@@ -8,7 +8,7 @@ export default function BottomNav() {
       <div
         className="border-t border-border/60"
         style={{
-          background: 'rgba(255,255,255,0.92)',
+          background: 'color-mix(in srgb, var(--color-surface) 92%, transparent)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
           paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',

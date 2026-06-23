@@ -106,7 +106,7 @@ export default function Dashboard() {
       <div className="space-y-6 animate-pulse">
         <div className="h-8 w-48 bg-surface rounded-lg" />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
-          {[1,2,3,4].map(i => <div key={i} className="h-28 bg-surface rounded-2xl" />)}
+          {[1, 2, 3, 4].map(i => <div key={i} className="h-28 bg-surface rounded-2xl" />)}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 h-80 bg-surface rounded-2xl" />
@@ -330,15 +330,15 @@ export default function Dashboard() {
           </div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={stats.bestSellers} barSize={32} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="name" tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: '#71717a', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(245,158,11,0.05)' }} />
-              <Bar dataKey="sold" fill="url(#barGradient)" radius={[6, 6, 0, 0]} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
+              <XAxis dataKey="name" tick={{ fill: 'var(--color-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: 'var(--color-muted)', fontSize: 11 }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--color-accent-light)' }} />
+              <Bar dataKey="sold" fill="url(#barGradient)" radius={[8, 8, 0, 0]} />
               <defs>
                 <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f59e0b" />
-                  <stop offset="100%" stopColor="#d97706" />
+                  <stop offset="0%" stopColor="var(--color-accent)" />
+                  <stop offset="100%" stopColor="var(--color-accent)" stopOpacity="0.55" />
                 </linearGradient>
               </defs>
             </BarChart>
@@ -359,8 +359,8 @@ export default function Dashboard() {
               <div key={item.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-hover transition-colors">
                 <div className="w-10 h-10 rounded-lg bg-surface-hover flex items-center justify-center overflow-hidden flex-shrink-0">
                   {item.image && item.image.includes('/') ? (
-                    <img 
-                      src={item.image.split(',')[0]} 
+                    <img
+                      src={item.image.split(',')[0]}
                       alt={item.name}
                       className="w-full h-full object-cover"
                     />
@@ -501,13 +501,12 @@ export default function Dashboard() {
                     <p className="text-xs text-muted">{lead.interest}</p>
                   </div>
                   <SourceIcon className={`w-4 h-4 ${sourceColorMap[lead.source] || 'text-muted'}`} />
-                  <span className={`badge text-[10px] ${
-                    displayStatus === 'New' ? 'bg-info-light text-info' :
-                    displayStatus === 'Contacted' ? 'bg-accent-light text-accent' :
-                    displayStatus === 'Converted' ? 'bg-success-light text-success' :
-                    displayStatus === 'Lost' ? 'bg-danger-light text-danger' :
-                    'bg-purple-light text-purple'
-                  }`}>
+                  <span className={`badge text-[10px] ${displayStatus === 'New' ? 'bg-info-light text-info' :
+                      displayStatus === 'Contacted' ? 'bg-accent-light text-accent' :
+                        displayStatus === 'Converted' ? 'bg-success-light text-success' :
+                          displayStatus === 'Lost' ? 'bg-danger-light text-danger' :
+                            'bg-purple-light text-purple'
+                    }`}>
                     {displayStatus}
                   </span>
                 </div>
@@ -566,11 +565,10 @@ export default function Dashboard() {
             {stats.fieldVisits.map((visit) => (
               <div key={visit.id} className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-hover transition-colors">
                 {/* Status icon */}
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                  visit.status === 'Completed' ? 'bg-emerald-500/10' :
-                  visit.status === 'In Progress' ? 'bg-amber-500/10' :
-                  'bg-blue-500/10'
-                }`}>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${visit.status === 'Completed' ? 'bg-emerald-500/10' :
+                    visit.status === 'In Progress' ? 'bg-amber-500/10' :
+                      'bg-blue-500/10'
+                  }`}>
                   {visit.status === 'Completed' ? (
                     <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600" />
                   ) : visit.status === 'In Progress' ? (
@@ -604,11 +602,10 @@ export default function Dashboard() {
 
                 {/* Right side */}
                 <div className="text-right flex-shrink-0">
-                  <span className={`badge text-[10px] ${
-                    visit.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
-                    visit.status === 'In Progress' ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20' :
-                    'bg-blue-500/10 text-blue-700 border border-blue-500/20'
-                  }`}>
+                  <span className={`badge text-[10px] ${visit.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
+                      visit.status === 'In Progress' ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20' :
+                        'bg-blue-500/10 text-blue-700 border border-blue-500/20'
+                    }`}>
                     {visit.status}
                   </span>
                   <div className="flex items-center gap-1 text-[10px] text-muted mt-1 justify-end">

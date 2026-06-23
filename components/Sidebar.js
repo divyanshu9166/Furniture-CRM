@@ -120,6 +120,8 @@ export default function Sidebar() {
       <aside
         className={`
           fixed top-0 left-0 h-screen bg-sidebar flex flex-col z-[60] transition-all duration-300
+          ${/* Top safe-area clearance so the header clears the mobile status bar/notch */ ''}
+          max-md:pt-[max(env(safe-area-inset-top),12px)]
           ${/* Desktop */ ''}
           max-md:w-[280px]
           ${sidebarOpen ? 'max-md:translate-x-0' : 'max-md:translate-x-[-100%]'}
@@ -159,11 +161,10 @@ export default function Sidebar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${
-                  isActive
+                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive
                     ? 'bg-white/15 text-white'
                     : 'text-white/50 hover:text-white/80 hover:bg-white/5'
-                }`}
+                  }`}
                 title={collapsed && !sidebarOpen ? item.label : undefined}
               >
                 <Icon className={`w-[17px] h-[17px] flex-shrink-0 ${isActive ? 'text-white' : ''}`} />

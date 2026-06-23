@@ -7,71 +7,188 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
-  /* Light mode — warm, professional CRM palette */
-  --color-background: #f5f5f4;
-  --color-foreground: #292524;
-  --color-surface: #ffffff;
-  --color-surface-hover: #fafaf9;
-  --color-surface-light: #f5f5f4;
-  --color-card: #ffffff;
-  --color-card-foreground: #292524;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #292524;
-  --color-primary: #b45309;
-  --color-primary-foreground: #ffffff;
-  --color-secondary: #f5f5f4;
-  --color-secondary-foreground: #292524;
-  --color-input: #e7e5e4;
-  --color-ring: rgba(180, 83, 9, 0.28);
-  --color-destructive: #b91c1c;
-  --color-border: #e7e5e4;
-  --color-border-light: #d6d3d1;
-  --color-muted: #78716c;
-  --color-muted-foreground: #78716c;
-  --color-accent: #b45309;
-  --color-accent-foreground: #ffffff;
-  --color-accent-hover: #92400e;
-  --color-accent-light: rgba(180, 83, 9, 0.07);
-  --color-teal: #0f766e;
-  --color-teal-light: rgba(15, 118, 110, 0.07);
-  --color-success: #15803d;
-  --color-success-light: rgba(21, 128, 61, 0.07);
-  --color-danger: #b91c1c;
-  --color-danger-light: rgba(185, 28, 28, 0.07);
-  --color-warning: #a16207;
-  --color-warning-light: rgba(161, 98, 7, 0.07);
-  --color-info: #1d4ed8;
-  --color-info-light: rgba(29, 78, 216, 0.07);
-  --color-purple: #6d28d9;
-  --color-purple-light: rgba(109, 40, 217, 0.07);
-  --color-pink: #be185d;
-  --color-pink-light: rgba(190, 24, 93, 0.07);
-  --color-glass: #ffffff;
-  --color-glass-border: #e7e5e4;
-  --color-sidebar: #1c1917;
-  --color-sidebar-active: rgba(255, 255, 255, 0.1);
+  /* Tokens reference runtime CSS variables so they flip with .dark */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-light: var(--surface-light);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-border-light: var(--border-light);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-light: var(--accent-light);
+  --color-teal: var(--teal);
+  --color-teal-light: var(--teal-light);
+  --color-success: var(--success);
+  --color-success-light: var(--success-light);
+  --color-danger: var(--danger);
+  --color-danger-light: var(--danger-light);
+  --color-warning: var(--warning);
+  --color-warning-light: var(--warning-light);
+  --color-info: var(--info);
+  --color-info-light: var(--info-light);
+  --color-purple: var(--purple);
+  --color-purple-light: var(--purple-light);
+  --color-pink: var(--pink);
+  --color-pink-light: var(--pink-light);
+  --color-glass: var(--glass);
+  --color-glass-border: var(--glass-border);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-active: var(--sidebar-active);
   --font-sans: "Roboto Mono", ui-monospace, monospace;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-card-hover: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-card: var(--shadow-card-token);
+  --shadow-card-hover: var(--shadow-card-hover-token);
   --shadow-glow: none;
   --animate-fade-in: fade-in 0.3s ease-out;
   --animate-slide-up: slide-up 0.3s ease-out;
   --animate-slide-in-left: slide-in-left 0.2s ease-out;
 }
 
+/* ── Light mode — modern, cool, professional palette (indigo accent) ── */
+:root {
+  --background: #f6f7f9;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --surface-hover: #f3f4f6;
+  --surface-light: #f1f2f4;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f2f4;
+  --secondary-foreground: #18181b;
+  --input: #e6e7eb;
+  --ring: rgba(79, 70, 229, 0.30);
+  --destructive: #dc2626;
+  --border: #e8e9ed;
+  --border-light: #dcdde2;
+  --muted: #6b7280;
+  --muted-foreground: #6b7280;
+  --accent: #4f46e5;
+  --accent-foreground: #ffffff;
+  --accent-hover: #4338ca;
+  --accent-light: rgba(79, 70, 229, 0.08);
+  --teal: #0d9488;
+  --teal-light: rgba(13, 148, 136, 0.08);
+  --success: #16a34a;
+  --success-light: rgba(22, 163, 74, 0.08);
+  --danger: #dc2626;
+  --danger-light: rgba(220, 38, 38, 0.08);
+  --warning: #d97706;
+  --warning-light: rgba(217, 119, 6, 0.08);
+  --info: #2563eb;
+  --info-light: rgba(37, 99, 235, 0.08);
+  --purple: #7c3aed;
+  --purple-light: rgba(124, 58, 237, 0.08);
+  --pink: #db2777;
+  --pink-light: rgba(219, 39, 119, 0.08);
+  --glass: #ffffff;
+  --glass-border: #e8e9ed;
+  --sidebar: #0f1117;
+  --sidebar-active: rgba(255, 255, 255, 0.10);
+  --shadow-card-token: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.04);
+  --shadow-card-hover-token: 0 6px 20px rgba(16, 24, 40, 0.08);
+  color-scheme: light;
+}
+
+/* ── Dark mode — deep, modern, slightly blue-tinted neutrals ── */
+.dark {
+  --background: #0a0b0f;
+  --foreground: #e7e8ec;
+  --surface: #14161d;
+  --surface-hover: #1c1f29;
+  --surface-light: #1c1f29;
+  --card: #14161d;
+  --card-foreground: #e7e8ec;
+  --popover: #14161d;
+  --popover-foreground: #e7e8ec;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #1c1f29;
+  --secondary-foreground: #e7e8ec;
+  --input: #2a2d39;
+  --ring: rgba(99, 102, 241, 0.40);
+  --destructive: #ef4444;
+  --border: #252834;
+  --border-light: #2f3340;
+  --muted: #8b8d98;
+  --muted-foreground: #8b8d98;
+  --accent: #6366f1;
+  --accent-foreground: #ffffff;
+  --accent-hover: #818cf8;
+  --accent-light: rgba(99, 102, 241, 0.16);
+  --teal: #2dd4bf;
+  --teal-light: rgba(45, 212, 191, 0.14);
+  --success: #34d399;
+  --success-light: rgba(52, 211, 153, 0.14);
+  --danger: #f87171;
+  --danger-light: rgba(248, 113, 113, 0.14);
+  --warning: #fbbf24;
+  --warning-light: rgba(251, 191, 36, 0.14);
+  --info: #60a5fa;
+  --info-light: rgba(96, 165, 250, 0.14);
+  --purple: #a78bfa;
+  --purple-light: rgba(167, 139, 250, 0.14);
+  --pink: #f472b6;
+  --pink-light: rgba(244, 114, 182, 0.14);
+  --glass: #14161d;
+  --glass-border: #252834;
+  --sidebar: #0c0d12;
+  --sidebar-active: rgba(255, 255, 255, 0.08);
+  --shadow-card-token: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-card-hover-token: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
 @keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slide-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slide-in-left {
-  from { opacity: 0; transform: translateX(-10px); }
-  to { opacity: 1; transform: translateX(0); }
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 * {
@@ -87,74 +204,68 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
 
 /* Card utility */
 .glass-card {
   background: var(--color-glass);
   border: 1px solid var(--color-glass-border);
-  border-radius: 10px;
+  border-radius: 16px;
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
 }
 
 .glass-card:hover {
-  border-color: #d6d3d1;
+  border-color: var(--color-border-light);
   box-shadow: var(--shadow-card-hover);
 }
 
 /* WhatsApp Marketing was originally imported from a dark dashboard. Keep the
    translation scoped so nested widgets and body-level portals inherit the CRM
    palette without affecting the rest of the app. */
-:where(.wa-light, .wa-light-active) :is(
-  .bg-slate-950, .bg-slate-950\/95, .bg-slate-950\/90, .bg-slate-950\/80, .bg-slate-950\/70, .bg-slate-950\/60, .bg-slate-950\/50, .bg-slate-950\/40, .bg-slate-950\/30, .bg-slate-950\/20, .bg-slate-950\/10,
+:where(.wa-light, .wa-light-active) :is(.bg-slate-950, .bg-slate-950\/95, .bg-slate-950\/90, .bg-slate-950\/80, .bg-slate-950\/70, .bg-slate-950\/60, .bg-slate-950\/50, .bg-slate-950\/40, .bg-slate-950\/30, .bg-slate-950\/20, .bg-slate-950\/10,
   .bg-slate-900, .bg-slate-900\/95, .bg-slate-900\/90, .bg-slate-900\/80, .bg-slate-900\/70, .bg-slate-900\/60, .bg-slate-900\/50, .bg-slate-900\/40, .bg-slate-900\/30, .bg-slate-900\/20, .bg-slate-900\/10,
-  .bg-black, .bg-black\/20
-) {
+  .bg-black, .bg-black\/20) {
   background-color: var(--color-surface) !important;
 }
 
-:where(.wa-light, .wa-light-active) :is(
-  .bg-slate-800, .bg-slate-800\/95, .bg-slate-800\/90, .bg-slate-800\/80, .bg-slate-800\/70, .bg-slate-800\/60, .bg-slate-800\/50, .bg-slate-800\/40, .bg-slate-800\/30, .bg-slate-800\/20, .bg-slate-800\/10,
+:where(.wa-light, .wa-light-active) :is(.bg-slate-800, .bg-slate-800\/95, .bg-slate-800\/90, .bg-slate-800\/80, .bg-slate-800\/70, .bg-slate-800\/60, .bg-slate-800\/50, .bg-slate-800\/40, .bg-slate-800\/30, .bg-slate-800\/20, .bg-slate-800\/10,
   .bg-slate-700, .bg-slate-700\/95, .bg-slate-700\/90, .bg-slate-700\/80, .bg-slate-700\/70, .bg-slate-700\/60, .bg-slate-700\/50, .bg-slate-700\/40, .bg-slate-700\/30, .bg-slate-700\/20, .bg-slate-700\/10,
-  .bg-slate-600, .bg-slate-600\/50, .bg-slate-600\/30, .bg-slate-600\/20, .bg-slate-500
-) {
+  .bg-slate-600, .bg-slate-600\/50, .bg-slate-600\/30, .bg-slate-600\/20, .bg-slate-500) {
   background-color: var(--color-surface-light) !important;
 }
 
-:where(.wa-light, .wa-light-active) :is(
-  .hover\:bg-slate-950:hover, .hover\:bg-slate-900:hover, .hover\:bg-slate-900\/80:hover, .hover\:bg-slate-900\/60:hover,
+:where(.wa-light, .wa-light-active) :is(.hover\:bg-slate-950:hover, .hover\:bg-slate-900:hover, .hover\:bg-slate-900\/80:hover, .hover\:bg-slate-900\/60:hover,
   .hover\:bg-slate-800:hover, .hover\:bg-slate-800\/80:hover, .hover\:bg-slate-800\/60:hover, .hover\:bg-slate-800\/50:hover,
-  .hover\:bg-slate-700:hover, .hover\:bg-slate-700\/50:hover, .focus\:bg-slate-800:focus, .focus\:bg-slate-700:focus
-) {
+  .hover\:bg-slate-700:hover, .hover\:bg-slate-700\/50:hover, .focus\:bg-slate-800:focus, .focus\:bg-slate-700:focus) {
   background-color: var(--color-surface-hover) !important;
 }
 
-:where(.wa-light, .wa-light-active) :is(
-  .border-slate-900, .border-slate-800, .border-slate-800\/80, .border-slate-800\/50,
+:where(.wa-light, .wa-light-active) :is(.border-slate-900, .border-slate-800, .border-slate-800\/80, .border-slate-800\/50,
   .border-slate-700, .border-slate-700\/80, .border-slate-700\/50, .border-slate-600,
   .border-slate-600\/30, .border-slate-600\/50, .divide-slate-800, .divide-slate-700,
-  .ring-slate-800, .ring-slate-700
-) {
+  .ring-slate-800, .ring-slate-700) {
   border-color: var(--color-border) !important;
   --tw-divide-opacity: 1 !important;
   --tw-ring-color: var(--color-border) !important;
 }
 
-:where(.wa-light, .wa-light-active) :is(
-  .text-white, .text-white\/90, .text-slate-100, .text-slate-100\/90,
+:where(.wa-light, .wa-light-active) :is(.text-white, .text-white\/90, .text-slate-100, .text-slate-100\/90,
   .text-slate-200, .text-slate-200\/90, .text-slate-200\/80,
-  .text-slate-300, .text-slate-300\/90, .text-slate-300\/80
-) {
+  .text-slate-300, .text-slate-300\/90, .text-slate-300\/80) {
   color: var(--color-foreground) !important;
 }
 
-:where(.wa-light, .wa-light-active) :is(
-  .text-white\/70, .text-white\/60, .text-white\/50, .text-slate-400, .text-slate-400\/90,
+:where(.wa-light, .wa-light-active) :is(.text-white\/70, .text-white\/60, .text-white\/50, .text-slate-400, .text-slate-400\/90,
   .text-slate-400\/80, .text-slate-500, .text-slate-500\/90, .text-slate-500\/80,
-  .text-slate-600, .text-slate-600\/90, .text-slate-600\/80
-) {
+  .text-slate-600, .text-slate-600\/90, .text-slate-600\/80) {
   color: var(--color-muted) !important;
 }
 
@@ -313,7 +424,8 @@ select {
   font-size: 0.78rem;
 }
 
-input, textarea {
+input,
+textarea {
   background: var(--color-surface);
   color: var(--color-foreground);
   border: 1px solid var(--color-border);
@@ -322,13 +434,16 @@ input, textarea {
   transition: border-color 0.15s;
 }
 
-input:focus, textarea:focus, select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-light);
 }
 
-input::placeholder, textarea::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: #a8a29e;
 }
 
@@ -338,6 +453,7 @@ input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
 input[type="number"] {
   -moz-appearance: textfield;
 }
@@ -352,6 +468,7 @@ input[type="number"] {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -407,7 +524,8 @@ select {
   font-size: 0.78rem;
 }
 
-input, textarea {
+input,
+textarea {
   background: var(--color-surface);
   color: var(--color-foreground);
   border: 1px solid var(--color-border);
@@ -416,13 +534,16 @@ input, textarea {
   transition: border-color 0.15s;
 }
 
-input:focus, textarea:focus, select:focus {
+input:focus,
+textarea:focus,
+select:focus {
   outline: none;
   border-color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-light);
 }
 
-input::placeholder, textarea::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: #a8a29e;
 }
 
@@ -432,6 +553,7 @@ input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+
 input[type="number"] {
   -moz-appearance: textfield;
 }
@@ -446,6 +568,7 @@ input[type="number"] {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -457,6 +580,7 @@ input[type="number"] {
     padding: 8px 10px;
     white-space: nowrap;
   }
+
   .crm-table tbody td {
     padding: 10px;
     font-size: 0.72rem;
@@ -475,6 +599,7 @@ input[type="number"] {
 .mobile-bottom-safe {
   padding-bottom: calc(60px + 16px + env(safe-area-inset-bottom) + 24px);
 }
+
 @media (min-width: 768px) {
   .mobile-bottom-safe {
     padding-bottom: 24px;
@@ -487,6 +612,7 @@ input[type="number"] {
   padding-top: max(env(safe-area-inset-top), 32px);
   height: calc(56px + max(env(safe-area-inset-top), 32px));
 }
+
 @media (min-width: 768px) {
   .mobile-top-safe {
     padding-top: 0 !important;
@@ -502,14 +628,218 @@ input[type="number"] {
 
 /* ── Slide-up animation (shared / used by BottomNav drawer) ── */
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(24px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 .animate-slide-up-sheet {
   animation: slideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* ── Smooth tap feedback for links/buttons on iOS ───────────── */
-a, button {
+a,
+button {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* ════════════════════════════════════════════════════════════
+   Modern UI primitives & micro-interactions (shared)
+   Inspired by patterns from Aceternity / Magic UI / Cult UI.
+   Kept lightweight and token-driven so they work in both themes.
+   ════════════════════════════════════════════════════════════ */
+
+/* Tap feedback for cards / list rows on touch devices */
+.tap-press {
+  transition: transform 0.12s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.tap-press:active {
+  transform: scale(0.985);
+}
+
+/* Soft press for primary actions */
+.tap-press-sm:active {
+  transform: scale(0.96);
+}
+
+/* Staggered entrance for mobile list items */
+@keyframes list-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-list-in {
+  animation: list-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Shimmer skeleton loader */
+@keyframes shimmer {
+  0% {
+    background-position: -468px 0;
+  }
+
+  100% {
+    background-position: 468px 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg,
+      var(--color-surface-hover) 25%,
+      var(--color-surface-light) 37%,
+      var(--color-surface-hover) 63%);
+  background-size: 936px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 12px;
+}
+
+/* Segmented control / pill tab row (mobile-friendly) */
+.seg-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--color-surface-light);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg-row::-webkit-scrollbar {
+  display: none;
+}
+
+.seg-pill {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-muted);
+  white-space: nowrap;
+  transition: background-color 0.18s ease, color 0.18s ease;
+  min-height: 38px;
+}
+
+.seg-pill[data-active="true"] {
+  background: var(--color-surface);
+  color: var(--color-foreground);
+  box-shadow: var(--shadow-card);
+}
+
+/* Mobile data-row card — replaces horizontal-scrolling tables on phones */
+.m-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 14px;
+  transition: transform 0.12s ease, border-color 0.15s ease, box-shadow 0.2s ease;
+}
+
+.m-card:active {
+  transform: scale(0.99);
+  border-color: var(--color-border-light);
+}
+
+/* Sticky mobile action bar (e.g. primary "Add" button) */
+.m-actionbar {
+  position: sticky;
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  z-index: 30;
+}
+
+/* Gentle gradient accent ring used on highlighted cards */
+.ring-accent-soft {
+  box-shadow: 0 0 0 1px var(--color-accent-light), 0 8px 24px -12px var(--color-accent);
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+
+  .animate-list-in,
+  .skeleton,
+  .tap-press,
+  .tap-press-sm,
+  .animate-slide-up-sheet {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ── MagicCard — spotlight-on-hover (Magic UI style, token-driven) ── */
+.magic-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.magic-card__spot {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--spot-opacity, 0);
+  transition: opacity 0.3s ease;
+  background: radial-gradient(var(--spot-size, 220px) circle at var(--mx, 50%) var(--my, 50%),
+      var(--spot-color, var(--color-accent)),
+      transparent 60%);
+}
+
+.magic-card__content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .magic-card__spot {
+    transition: none;
+  }
+}
+
+/* ── Auth / 404 ambient background (grid + soft accent glow) ── */
+.ambient-grid {
+  background-image:
+    linear-gradient(to right, var(--color-border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--color-border) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 40%, transparent 100%);
+  opacity: 0.5;
+}
+
+.ambient-glow {
+  background: radial-gradient(circle at 50% 30%, var(--color-accent), transparent 60%);
+  opacity: 0.12;
+  filter: blur(40px);
+}
+
+@keyframes float-slow {
+
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 6s ease-in-out infinite;
 }

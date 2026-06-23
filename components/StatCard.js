@@ -1,19 +1,23 @@
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import MagicCard from './MagicCard';
 
 export default function StatCard({ title, value, change, changeType, icon: Icon, color = 'accent', trendText = 'vs last week' }) {
   const colorMap = {
-    accent:  { bg: 'bg-accent-light',   text: 'text-accent',   border: 'border-accent/20' },
-    teal:    { bg: 'bg-teal-light',     text: 'text-teal',     border: 'border-teal/20' },
-    purple:  { bg: 'bg-purple-light',   text: 'text-purple',   border: 'border-purple/20' },
-    success: { bg: 'bg-success-light',  text: 'text-success',  border: 'border-success/20' },
-    info:    { bg: 'bg-info-light',     text: 'text-info',     border: 'border-info/20' },
-    pink:    { bg: 'bg-pink-light',     text: 'text-pink',     border: 'border-pink/20' },
+    accent: { bg: 'bg-accent-light', text: 'text-accent', border: 'border-accent/20' },
+    teal: { bg: 'bg-teal-light', text: 'text-teal', border: 'border-teal/20' },
+    purple: { bg: 'bg-purple-light', text: 'text-purple', border: 'border-purple/20' },
+    success: { bg: 'bg-success-light', text: 'text-success', border: 'border-success/20' },
+    info: { bg: 'bg-info-light', text: 'text-info', border: 'border-info/20' },
+    pink: { bg: 'bg-pink-light', text: 'text-pink', border: 'border-pink/20' },
   };
 
   const c = colorMap[color] || colorMap.accent;
 
   return (
-    <div className="glass-card p-3 md:p-5 flex flex-col md:flex-row md:items-start md:justify-between gap-2.5 animate-[slide-up_0.3s_ease-out] cursor-default active:scale-[0.98] transition-transform">
+    <MagicCard
+      className="glass-card p-3 md:p-5 animate-[slide-up_0.3s_ease-out] cursor-default active:scale-[0.98] transition-transform"
+      contentClassName="flex flex-col md:flex-row md:items-start md:justify-between gap-2.5"
+    >
       {/* Mobile: icon row + value stacked */}
       <div className="flex items-center justify-between md:hidden">
         <p className="text-[10px] font-semibold text-muted uppercase tracking-wider leading-tight">{title}</p>
@@ -41,6 +45,6 @@ export default function StatCard({ title, value, change, changeType, icon: Icon,
       <div className={`hidden md:flex p-2.5 rounded-xl ${c.bg} flex-shrink-0`}>
         <Icon className={`w-5 h-5 ${c.text}`} />
       </div>
-    </div>
+    </MagicCard>
   );
 }

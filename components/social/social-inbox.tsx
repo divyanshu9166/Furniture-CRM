@@ -302,15 +302,18 @@ function PlatformPanel({
               </p>
             </div>
           ) : (
-            conversations.map((conv) => (
+            conversations.map((conv, i) => (
               <button
                 key={conv.id}
                 onClick={() => handleSelectConv(conv)}
                 className={cn(
-                  'w-full flex items-start gap-3 px-4 py-3 text-left border-b border-border/50 transition-colors hover:bg-surface-hover',
+                  'w-full flex items-center gap-3 px-4 py-3 min-h-[64px] text-left border-b border-border/50 transition-colors hover:bg-surface-hover tap-press animate-list-in',
                   active?.id === conv.id && 'bg-accent-light border-l-[3px]',
                 )}
-                style={active?.id === conv.id ? { borderLeftColor: brandColor } : {}}
+                style={{
+                  ...(active?.id === conv.id ? { borderLeftColor: brandColor } : {}),
+                  animationDelay: `${Math.min(i, 12) * 30}ms`,
+                }}
               >
                 <div className="relative shrink-0">
                   <Avatar contact={conv.contact} size={40} />
@@ -388,7 +391,7 @@ function PlatformPanel({
             <div className="flex items-center gap-3 px-3 sm:px-4 py-3 border-b border-border shrink-0 bg-background">
               <button
                 onClick={() => setActive(null)}
-                className="lg:hidden flex items-center justify-center size-8 rounded-full hover:bg-surface-hover transition-colors text-muted-foreground"
+                className="lg:hidden flex items-center justify-center size-9 -ml-1 rounded-full hover:bg-surface-hover transition-colors text-muted-foreground tap-press-sm"
                 aria-label="Back to conversations"
               >
                 <ArrowLeft className="size-5" />
@@ -453,7 +456,7 @@ function PlatformPanel({
             )}
 
             {/* Message bubbles */}
-            <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-2">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-2">
               {loadingMsgs ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="size-5 animate-spin" style={{ color: brandColor }} />
@@ -569,11 +572,39 @@ export function SocialInbox({ platform }: { platform?: Platform }) {
   const fbColor = PLATFORM_COLOR.facebook
 
   return (
-    <div className="-m-4 flex flex-col h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden sm:-m-6">
+    // Mobile: subtract the fixed bottom nav (~60px + 16px pad + safe-area) so the
+    // composer stays reachable above it. Desktop (md+) keeps the original height.
+    <div className="-m-3.5 sm:-m-6 flex flex-col h-[calc(100dvh-3.5rem-76px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden">
 
-      {/* ── Tab bar ──────────────────────────────────────────────────────── */}
+      {/* ── Mobile segmented channel control ─────────────────────────────── */}
       {!platform && (
-        <div className="flex shrink-0 border-b border-border bg-background">
+        <div className="md:hidden shrink-0 border-b border-border bg-background px-3 py-2">
+          <div className="seg-row">
+            <button
+              onClick={() => setActiveTab('instagram')}
+              data-active={activeTab === 'instagram'}
+              className="seg-pill tap-press-sm flex items-center justify-center gap-1.5"
+              style={{ flex: '1 1 0', color: activeTab === 'instagram' ? igColor : undefined }}
+            >
+              <Instagram className="size-4" />
+              <span>Instagram</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('facebook')}
+              data-active={activeTab === 'facebook'}
+              className="seg-pill tap-press-sm flex items-center justify-center gap-1.5"
+              style={{ flex: '1 1 0', color: activeTab === 'facebook' ? fbColor : undefined }}
+            >
+              <Facebook className="size-4" />
+              <span>Facebook</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tab bar (desktop) ────────────────────────────────────────────── */}
+      {!platform && (
+        <div className="hidden md:flex shrink-0 border-b border-border bg-background">
           {/* Instagram tab */}
           <button
             id="social-inbox-tab-instagram"

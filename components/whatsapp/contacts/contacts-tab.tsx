@@ -214,12 +214,12 @@ export function ContactsTab() {
             Manage your contact list. {totalCount > 0 && `${totalCount} total contacts.`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <Button
             variant="outline"
             onClick={handleSyncFromCrm}
             disabled={syncing}
-            className="border-border text-foreground hover:bg-surface-light"
+            className="w-full sm:w-auto border-border text-foreground hover:bg-surface-light"
           >
             <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
             Sync CRM
@@ -228,7 +228,7 @@ export function ContactsTab() {
             variant="outline"
             onClick={handleRemoveSmokeContacts}
             disabled={cleaningSmoke}
-            className="border-border text-foreground hover:bg-surface-light"
+            className="w-full sm:w-auto border-border text-foreground hover:bg-surface-light"
           >
             <Trash2 className="size-4" />
             Remove Smoke Contacts
@@ -236,14 +236,14 @@ export function ContactsTab() {
           <Button
             variant="outline"
             onClick={() => setImportOpen(true)}
-            className="border-border text-foreground hover:bg-surface-light"
+            className="w-full sm:w-auto border-border text-foreground hover:bg-surface-light"
           >
             <Upload className="size-4" />
             Import
           </Button>
           <Button
             onClick={openAddForm}
-            className="bg-accent hover:bg-accent text-foreground"
+            className="w-full sm:w-auto bg-accent hover:bg-accent text-foreground"
           >
             <Plus className="size-4" />
             Add Contact
@@ -267,8 +267,115 @@ export function ContactsTab() {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-lg border border-border overflow-hidden">
+      {/* Mobile: stacked tappable cards */}
+      <div className="space-y-3 md:hidden">
+        {loading ? (
+          <div className="flex flex-col items-center gap-2 py-12">
+            <Loader2 className="size-6 animate-spin text-accent" />
+            <p className="text-sm text-muted">Loading contacts...</p>
+          </div>
+        ) : contacts.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-12">
+            <Users className="size-8 text-muted" />
+            <p className="text-sm text-muted">
+              {search ? 'No contacts match your search.' : 'No contacts yet.'}
+            </p>
+            {!search && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openAddForm}
+                className="mt-2 border-border text-foreground hover:bg-surface-light"
+              >
+                <Plus className="size-3.5" />
+                Add your first contact
+              </Button>
+            )}
+          </div>
+        ) : (
+          contacts.map((contact) => (
+            <div
+              key={contact.id}
+              onClick={() => openDetail(contact.id)}
+              className="m-card tap-press animate-list-in p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-foreground">
+                    {contact.name || <span className="italic text-muted">Unnamed</span>}
+                  </p>
+                  <p className="mt-0.5 font-mono text-xs text-muted">{contact.phone}</p>
+                  {contact.email && (
+                    <p className="mt-0.5 truncate text-xs text-muted">{contact.email}</p>
+                  )}
+                </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="-mr-1 shrink-0 text-muted hover:text-foreground"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    }
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="bg-surface border-border">
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditForm(contact);
+                      }}
+                      className="text-foreground focus:bg-surface-light focus:text-foreground"
+                    >
+                      <Pencil className="size-4" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="bg-surface-light" />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        confirmDelete(contact);
+                      }}
+                    >
+                      <Trash2 className="size-4" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              {contact.tags && contact.tags.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {contact.tags.slice(0, 4).map((tag) => (
+                    <span
+                      key={tag.id}
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium"
+                      style={{
+                        backgroundColor: tag.color + '20',
+                        color: tag.color,
+                      }}
+                    >
+                      {tag.name}
+                    </span>
+                  ))}
+                  {contact.tags.length > 4 && (
+                    <span className="text-[10px] text-muted">
+                      +{contact.tags.length - 4}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Table — desktop */}
+      <div className="hidden rounded-lg border border-border overflow-hidden md:block">
         <Table>
           <TableHeader>
             <TableRow className="border-border hover:bg-transparent">
