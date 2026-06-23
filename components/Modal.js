@@ -58,7 +58,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         </div>
 
         {/* Content */}
-        <div className="px-5 md:px-6 pt-4 md:pt-5 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:pb-6 overflow-y-auto flex-1">
+        <div className="px-5 md:px-6 pt-4 md:pt-5 pb-[calc(env(safe-area-inset-bottom)+2rem+5px)] md:pb-6 overflow-y-auto flex-1">
           {children}
         </div>
       </div>

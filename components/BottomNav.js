@@ -11,11 +11,11 @@ export default function BottomNav() {
           background: 'color-mix(in srgb, var(--color-surface) 92%, transparent)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
-          paddingBottom: 'calc(env(safe-area-inset-bottom) + 16px)',
+          paddingBottom: 'calc(env(safe-area-inset-bottom) + 8px)',
         }}
       >
-        {/* Blank spacer to maintain the exact same height as the old navbar without menus */}
-        <div className="flex items-center justify-around px-1 h-[60px]" />
+        {/* Blank spacer buffer above the device navigation bar */}
+        <div className="flex items-center justify-around px-1 h-[28px]" />
       </div>
     </nav>
   );
