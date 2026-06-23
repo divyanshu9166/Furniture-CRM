@@ -35,7 +35,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         relative w-full ${sizeClasses[size]}
         bg-surface border border-border shadow-2xl
         flex flex-col
-        max-h-[90vh] md:max-h-[85vh]
+        max-h-[92dvh] md:max-h-[85vh]
         rounded-t-3xl md:rounded-2xl
         mx-0 md:mx-4 mb-0 md:mb-0
         animate-[slide-up_0.3s_cubic-bezier(0.32,0.72,0,1)]
@@ -58,7 +58,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         </div>
 
         {/* Content */}
-        <div className="px-5 md:px-6 pt-4 md:pt-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] md:pb-5 overflow-y-auto flex-1">
+        <div className="px-5 md:px-6 pt-4 md:pt-5 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:pb-6 overflow-y-auto flex-1">
           {children}
         </div>
       </div>
