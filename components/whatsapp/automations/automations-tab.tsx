@@ -164,7 +164,7 @@ export function AutomationsTab() {
         </div>
         <Button
           onClick={() => router.push("/automations/new")}
-          className="bg-accent text-foreground hover:bg-accent"
+          className="bg-accent text-white hover:bg-accent-hover"
         >
           <Plus className="h-4 w-4" />
           Create Automation
@@ -184,7 +184,7 @@ export function AutomationsTab() {
                   onClick={() => startFromTemplate(slug)}
                   className="group flex flex-col items-start rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-accent hover:bg-surface"
                 >
-                  <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-accent group-hover:bg-accent">
+                  <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10 text-accent group-hover:bg-accent/15">
                     <Icon className="h-5 w-5" />
                   </div>
                   <div className="text-sm font-semibold text-foreground">{t.name}</div>
@@ -198,7 +198,7 @@ export function AutomationsTab() {
 
       {automations.length === 0 ? (
         <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-surface">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10">
             <Zap className="h-6 w-6 text-accent" />
           </div>
           <p className="mt-3 text-sm font-medium text-foreground">No automations yet</p>
@@ -275,7 +275,7 @@ function AutomationCard({
     <li className="rounded-xl border border-border bg-surface transition-colors hover:border-border">
       <div className="flex items-center gap-4 p-4">
         <div
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-accent"
+          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-accent/10"
           aria-hidden
         >
           <Zap className="h-5 w-5 text-accent" />

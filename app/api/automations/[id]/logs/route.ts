@@ -7,14 +7,14 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const session = await getSession()
     if (!session?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const userId = String(session.id)
-    
+
     const params = await context.params
     const id = params.id
-    
-    const automation = await prisma.waAutomation.findUnique({
+
+    const automation = await prisma.waAutomation.findFirst({
       where: { id, user_id: userId }
     })
-    
+
     if (!automation) {
       return NextResponse.json({ error: 'Automation not found' }, { status: 404 })
     }
