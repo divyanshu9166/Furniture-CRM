@@ -71,14 +71,27 @@ export async function sendTextMessage(opts: {
   recipientId: string
   pageAccessToken: string
   text: string
+  /**
+   * Message tag for sending OUTSIDE the standard 24h window. Follow-up
+   * reminders are typically out-of-window, so they use 'HUMAN_AGENT'
+   * (allows an agent message up to 7 days after the last user message).
+   */
+  tag?: 'HUMAN_AGENT'
 }): Promise<MessengerSendResult> {
-  const { recipientId, pageAccessToken, text } = opts
+  const { recipientId, pageAccessToken, text, tag } = opts
 
-  const data = await graphPost('/me/messages', pageAccessToken, {
+  const payload: Record<string, unknown> = {
     recipient: { id: recipientId },
     message: { text },
-    messaging_type: 'RESPONSE',
-  })
+  }
+  if (tag) {
+    payload.messaging_type = 'MESSAGE_TAG'
+    payload.tag = tag
+  } else {
+    payload.messaging_type = 'RESPONSE'
+  }
+
+  const data = await graphPost('/me/messages', pageAccessToken, payload)
 
   return {
     messageId: data.message_id as string,

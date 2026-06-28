@@ -54,16 +54,17 @@ export const QUEUE_AUTOMATION = 'automation-queue'
 export const QUEUE_BROADCAST_STATUS = 'broadcast-status-queue'
 export const QUEUE_MESSAGE_DELIVERY = 'message-delivery-queue'
 export const QUEUE_AI_AGENT = 'wa-ai-agent'
+export const QUEUE_FOLLOWUP_REMINDERS = 'followup-reminders-queue'
 
 // ── Typed job data shapes ──────────────────────────────────────────────────
 
 export interface AutomationJobData {
   userId: string
   triggerType:
-    | 'new_contact_created'
-    | 'first_inbound_message'
-    | 'new_message_received'
-    | 'keyword_match'
+  | 'new_contact_created'
+  | 'first_inbound_message'
+  | 'new_message_received'
+  | 'keyword_match'
   contactId: string
   context: {
     message_text?: string
@@ -208,5 +209,29 @@ export function createAiAgentWorker(
   return new Worker<AiAgentJobData>(QUEUE_AI_AGENT, handler, {
     connection,
     concurrency: 2,
+  })
+}
+
+// ── Follow-up reminders (daily scheduled sweep) ─────────────────────────────
+let _followUpReminderQueue: Queue | undefined
+export function getFollowUpReminderQueue() {
+  if (!_followUpReminderQueue) {
+    _followUpReminderQueue = new Queue(QUEUE_FOLLOWUP_REMINDERS, {
+      connection,
+      defaultJobOptions: {
+        attempts: 2,
+        backoff: { type: 'fixed', delay: 60_000 },
+        removeOnComplete: { count: 30 },
+        removeOnFail: { count: 50 },
+      },
+    })
+  }
+  return _followUpReminderQueue
+}
+
+export function createFollowUpReminderWorker(handler: WorkerHandler<unknown>): Worker {
+  return new Worker(QUEUE_FOLLOWUP_REMINDERS, handler, {
+    connection,
+    concurrency: 1,
   })
 }

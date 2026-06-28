@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, ChevronRight, Bot, Clock, Trash2, Store, Building2 } from 'lucide-react';
+import { Search, Plus, MessageSquare, Instagram, Facebook, Globe, Phone, Mail, ChevronRight, Bot, Clock, Trash2, Store, Building2, CalendarClock } from 'lucide-react';
 import { getLeads, createLead, updateLeadStatus, addFollowUp } from '@/app/actions/leads';
+import { convertLeadToFollowUp } from '@/app/actions/follow-ups';
 import { moveLeadToDraft } from '@/app/actions/drafts';
 import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
@@ -69,6 +70,12 @@ export default function LeadsPage() {
   const { notify } = useAlertToast();
   const [leadToDraft, setLeadToDraft] = useState(null);
   const [deletingLead, setDeletingLead] = useState(false);
+  // Convert-to-follow-up: hold the lead in its own state and CLOSE the detail
+  // modal when opening, so the convert form isn't hidden behind it (both use
+  // the same z-index).
+  const [leadToConvert, setLeadToConvert] = useState(null);
+  const [convertForm, setConvertForm] = useState({ followUpDate: '', priority: 'Medium', reason: '' });
+  const [converting, setConverting] = useState(false);
 
   const refresh = async () => {
     const res = await getLeads();
@@ -163,6 +170,42 @@ export default function LeadsPage() {
       return;
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const openConvert = (lead) => {
+    // Close the detail modal first so the convert modal is the only one open.
+    setSelectedLead(null);
+    setConvertForm({ followUpDate: '', priority: 'Medium', reason: '' });
+    setTimeout(() => setLeadToConvert(lead), 160);
+  };
+
+  const handleConvert = async (e) => {
+    e.preventDefault();
+    if (!leadToConvert) return;
+    if (!convertForm.followUpDate) {
+      notify('Please pick a follow-up date', { variant: 'danger' });
+      return;
+    }
+    setConverting(true);
+    try {
+      const res = await convertLeadToFollowUp({
+        leadId: leadToConvert.id,
+        followUpDate: convertForm.followUpDate,
+        priority: convertForm.priority,
+        reason: convertForm.reason,
+      });
+      if (res.success) {
+        setLeadToConvert(null);
+        await refresh();
+        notify('Lead converted to follow-up', { variant: 'success' });
+      } else {
+        notify(res.error || 'Failed to convert lead', { variant: 'danger' });
+      }
+    } catch (err) {
+      notify(err?.message || 'Failed to convert lead', { variant: 'danger' });
+    } finally {
+      setConverting(false);
+    }
   };
 
   if (loading) {
@@ -330,6 +373,40 @@ export default function LeadsPage() {
         </>
       )}
 
+      <Modal isOpen={!!leadToConvert} onClose={() => setLeadToConvert(null)} title="Convert to Follow-up" size="sm">
+        {leadToConvert && (
+          <form className="space-y-4" onSubmit={handleConvert}>
+            <p className="text-sm text-muted">
+              Schedule a follow-up for <strong className="text-foreground">{leadToConvert.name}</strong>. The lead is kept and linked, so nothing is lost.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Follow-up Date *</label>
+                <input type="date" required value={convertForm.followUpDate}
+                  onChange={e => setConvertForm(f => ({ ...f, followUpDate: e.target.value }))} className="w-full" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Priority</label>
+                <select value={convertForm.priority} onChange={e => setConvertForm(f => ({ ...f, priority: e.target.value }))} className="w-full">
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">When are they buying? (reason)</label>
+              <input value={convertForm.reason} onChange={e => setConvertForm(f => ({ ...f, reason: e.target.value }))}
+                placeholder="e.g. Buying after 2 months / after Diwali" className="w-full" />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button type="button" onClick={() => setLeadToConvert(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
+              <button type="submit" disabled={converting} className="px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-semibold disabled:opacity-50">{converting ? 'Converting...' : 'Create Follow-up'}</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
       <Modal isOpen={!!leadToDraft} onClose={cancelDelete} title="Move Lead to Draft" size="sm">
         {leadToDraft && (
           <div className="space-y-4">
@@ -370,6 +447,13 @@ export default function LeadsPage() {
                   >
                     <MessageSquare className="w-3.5 h-3.5" /> WhatsApp
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => openConvert(selectedLead)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-light text-purple border border-purple/20 hover:bg-purple/20"
+                  >
+                    <CalendarClock className="w-3.5 h-3.5" /> Convert to Follow-up
+                  </button>
                 </div>
               </div>
             </div>
@@ -381,8 +465,8 @@ export default function LeadsPage() {
                 {pipelineStages.map(stage => (
                   <button key={stage} disabled={updatingStatus} onClick={() => handleUpdateStatus(selectedLead.id, stage)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${selectedLead.status === stage
-                        ? `${statusColorMap[stage]} font-bold`
-                        : 'bg-surface border-border text-muted hover:text-foreground'
+                      ? `${statusColorMap[stage]} font-bold`
+                      : 'bg-surface border-border text-muted hover:text-foreground'
                       }`}>
                     {stage}
                   </button>

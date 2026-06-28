@@ -95,6 +95,7 @@ model Contact {
   conversations Conversation[]
   reviews       Review[]
   dailyPayments DailyPayment[]
+  followUpEntries FollowUpEntry[]
 
   @@index([email])
   @@index([emailSubscribed])
@@ -128,6 +129,7 @@ model Lead {
 
   followUps     FollowUp[]
   indiaMartLead IndiaMartLead?
+  followUpEntries FollowUpEntry[]
 
   @@index([status])
   @@index([date])
@@ -144,6 +146,66 @@ model FollowUp {
   date    DateTime
 
   @@index([leadId])
+}
+
+// ─── FOLLOW-UP ENTRIES (interested prospects, future callback) ───
+// A first-class follow-up: a lead/customer who is interested but not
+// ready to buy yet and has given a future date to reconnect (e.g.
+// "call me after 2 months"). Distinct from the per-lead drip FollowUp.
+
+enum FollowUpStatus {
+  PENDING   // scheduled, awaiting the follow-up date
+  REMINDED  // the scheduled WhatsApp template reminder has been sent (fires once)
+  CONTACTED // reached out / engaged
+  CONVERTED // turned into a sale / won
+  LOST      // no longer interested
+}
+
+model FollowUpEntry {
+  id              Int            @id @default(autoincrement())
+  // Channel this follow-up belongs to. WhatsApp follow-ups link a CRM
+  // Contact (phone); Facebook/Instagram follow-ups link a SocialContact
+  // (PSID/IGSID, no phone) and are re-engaged by the chatbot, not a template.
+  channel         String         @default("whatsapp") // whatsapp | facebook | instagram
+  contactId       Int?
+  contact         Contact?       @relation(fields: [contactId], references: [id])
+  socialContactId String?
+  socialContact   SocialContact? @relation(fields: [socialContactId], references: [id])
+  displayName     String? // denormalized name (used for social contacts)
+  leadId          Int? // optional link back to the originating lead
+  lead            Lead?          @relation(fields: [leadId], references: [id])
+  interest        String?
+  budget          String?
+  reason          String? // why they're not buying now (e.g. "buying after 2 months")
+  followUpDate    DateTime // scheduled date to reconnect
+  priority        String         @default("Medium") // Low / Medium / High
+  source          String?
+  status          FollowUpStatus @default(PENDING)
+  assignedToId    Int?
+  assignedTo      Staff?         @relation(fields: [assignedToId], references: [id])
+  lastContactedAt DateTime?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([status])
+  @@index([followUpDate])
+  @@index([contactId])
+  @@index([socialContactId])
+  @@index([leadId])
+  @@index([assignedToId])
+}
+
+// Singleton settings (id = 1) for the scheduled WhatsApp follow-up reminder.
+// When a follow-up's date arrives, the daily job sends one approved WhatsApp
+// template to the contact and flips the follow-up to REMINDED (fires once).
+model FollowUpReminderConfig {
+  id           Int      @id @default(1)
+  enabled      Boolean  @default(false)
+  templateName String? // approved Meta template name (HSM)
+  language     String   @default("en_US")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 // ─── PRODUCTS & INVENTORY ────────────────────────────
@@ -592,6 +654,7 @@ model Staff {
   expenses         Expense[]         @relation("StaffExpenses")
   productionOrders ProductionOrder[] @relation("ProductionOrderAssignedStaff")
   receivedPayments DailyPayment[]
+  followUpEntries  FollowUpEntry[]
 
   @@index([email])
 }
@@ -2387,6 +2450,7 @@ model SocialContact {
   updated_at   DateTime @updatedAt
 
   conversations SocialConversation[]
+  followUpEntries FollowUpEntry[]
 
   @@unique([user_id, platform, platform_id])
   @@index([user_id, platform])

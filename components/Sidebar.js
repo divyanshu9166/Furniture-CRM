@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Users,
   Calendar,
+  CalendarClock,
   Package,
   ShoppingCart,
   Megaphone,
@@ -48,6 +49,7 @@ const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/walkins', label: 'Walk-ins', icon: UserPlus },
   { href: '/leads', label: 'Leads', icon: Users },
+  { href: '/follow-ups', label: 'Follow-ups', icon: CalendarClock },
   { href: '/indiamart-leads', label: 'IndiaMART Leads', icon: Building2, roles: ['ADMIN', 'MANAGER'] },
   { href: '/staff', label: 'Staff', icon: UsersRound, roles: ['ADMIN', 'MANAGER'] },
   { href: '/appointments', label: 'Appointments', icon: Calendar },
@@ -162,8 +164,8 @@ export default function Sidebar() {
                 href={item.href}
                 onClick={() => setSidebarOpen(false)}
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive
-                    ? 'bg-white/15 text-white'
-                    : 'text-white/50 hover:text-white/80 hover:bg-white/5'
+                  ? 'bg-white/15 text-white'
+                  : 'text-white/50 hover:text-white/80 hover:bg-white/5'
                   }`}
                 title={collapsed && !sidebarOpen ? item.label : undefined}
               >

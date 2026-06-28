@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db'
 import { publishEvent } from '@/lib/redis'
 import { getAutomationQueue, getAiAgentQueue } from '@/lib/queues/jobs'
 import { WHATSAPP_INQUIRY_SOURCE } from '@/lib/lead-sources'
+import { maybeCreateFollowUpFromMessage } from '@/lib/follow-up-auto'
 import {
   sendInquiryWelcomeMessage,
   sendProductInfoMessage,
@@ -331,11 +332,11 @@ async function handleStatusUpdate(status: {
     }
 
     const s = (k: string) => countByStatus[k] ?? 0
-    const sent_count      = s('sent') + s('delivered') + s('read') + s('replied')
+    const sent_count = s('sent') + s('delivered') + s('read') + s('replied')
     const delivered_count = s('delivered') + s('read') + s('replied')
-    const read_count      = s('read') + s('replied')
-    const replied_count   = s('replied')
-    const failed_count    = s('failed')
+    const read_count = s('read') + s('replied')
+    const replied_count = s('replied')
+    const failed_count = s('failed')
 
     await prisma.waBroadcast.update({
       where: { id: broadcastId },
@@ -390,11 +391,11 @@ async function flagBroadcastReplyIfAny(userId: string, contactId: string) {
     await prisma.waBroadcast.update({
       where: { id: broadcastId },
       data: {
-        sent_count:      s('sent') + s('delivered') + s('read') + s('replied'),
+        sent_count: s('sent') + s('delivered') + s('read') + s('replied'),
         delivered_count: s('delivered') + s('read') + s('replied'),
-        read_count:      s('read') + s('replied'),
-        replied_count:   s('replied'),
-        failed_count:    s('failed'),
+        read_count: s('read') + s('replied'),
+        replied_count: s('replied'),
+        failed_count: s('failed'),
       },
     })
   } catch (err) {
@@ -611,6 +612,17 @@ async function processMessage(
     name: contactName,
     messageText: inboundText,
   })
+
+  // ── Auto-convert "call me after N days / next month" into a follow-up ────
+  // Fire-and-forget: the chatbot keeps handling the live chat; this just
+  // schedules a future reminder when the customer asks to be contacted later.
+  if (inboundText) {
+    maybeCreateFollowUpFromMessage({
+      phone: senderPhone,
+      name: contactName,
+      messageText: inboundText,
+    }).catch((err) => console.error('[webhook] follow-up auto-create failed:', err))
+  }
 
   // ── Send 3-button inquiry welcome to brand-new contacts ─────────────────
   // isFirstInboundMessage is true when the contact has NEVER messaged us.
@@ -998,11 +1010,11 @@ async function syncInboundInquiryToCrm({
     const candidates = await prisma.contact.findMany({
       where: last10
         ? {
-            OR: [
-              { phone: normalizedPhone },
-              { phone: { contains: last10 } },
-            ],
-          }
+          OR: [
+            { phone: normalizedPhone },
+            { phone: { contains: last10 } },
+          ],
+        }
         : { phone: normalizedPhone },
       select: { id: true, phone: true, name: true, source: true },
       take: 10,

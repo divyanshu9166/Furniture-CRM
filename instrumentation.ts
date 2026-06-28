@@ -19,6 +19,9 @@ export async function register() {
 
     const { startAiAgentWorker } = await import('./lib/queues/ai-agent-worker')
     startAiAgentWorker()
+
+    const { startFollowUpReminderWorker } = await import('./lib/queues/follow-up-reminders-worker')
+    startFollowUpReminderWorker()
   }
 }
 

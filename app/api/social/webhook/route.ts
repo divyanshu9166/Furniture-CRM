@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 import { getAiAgentQueue } from '@/lib/queues/jobs'
+import { maybeCreateSocialFollowUp } from '@/lib/social/social-follow-up-auto'
 import {
   sendTextMessage,
   setTypingOn,
@@ -287,6 +288,18 @@ async function processMessagingEvent(
 
   // Mark as seen + show typing indicator (fire-and-forget)
   markSeen({ recipientId: senderId, pageAccessToken }).catch(() => null)
+
+  // ── Auto-convert "contact me after N days" into a follow-up ──────────────
+  // Fire-and-forget. On the due date the reminder engine re-engages this
+  // contact via the chatbot (Messenger), not a WhatsApp template.
+  if (messageText.trim()) {
+    maybeCreateSocialFollowUp({
+      socialContactId: contact.id,
+      platform,
+      name: contact.name,
+      messageText,
+    }).catch((err) => console.error('[social-webhook] follow-up auto-create failed:', err))
+  }
 
   // ── Human handoff check ─────────────────────────────────────────────────
   const lowerText = messageText.toLowerCase()

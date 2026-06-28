@@ -31,7 +31,9 @@ function shouldRefreshPrismaClient(client: PrismaClient | undefined) {
     typeof (client as any).customOrderInventory === 'undefined' ||
     // If production/manufacturing models were added/changed, ensure we recreate the client
     typeof (client as any).productionOrder === 'undefined' ||
-    typeof (client as any).customOrder === 'undefined'
+    typeof (client as any).customOrder === 'undefined' ||
+    typeof (client as any).followUpEntry === 'undefined' ||
+    typeof (client as any).followUpReminderConfig === 'undefined'
 }
 
 let prismaClient: PrismaClient = globalForPrisma.prisma ?? createPrismaClient()
