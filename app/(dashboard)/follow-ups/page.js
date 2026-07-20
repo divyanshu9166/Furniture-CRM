@@ -71,6 +71,7 @@ export default function FollowUpsPage() {
     const [counts, setCounts] = useState({ overdue: 0, dueToday: 0, upcoming: 0, converted: 0 });
     const [staff, setStaff] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState(null);
     const [tab, setTab] = useState('OPEN');
     const [search, setSearch] = useState('');
     const [showAdd, setShowAdd] = useState(false);
@@ -116,18 +117,33 @@ export default function FollowUpsPage() {
     };
 
     const refresh = async (t = tab) => {
-        const [res, c] = await Promise.all([getFollowUps(t), getFollowUpCounts()]);
-        if (res.success) setItems(res.data);
-        if (c.success) setCounts(c.data);
+        try {
+            const [res, c] = await Promise.all([getFollowUps(t), getFollowUpCounts()]);
+            if (res.success) setItems(res.data);
+            if (c.success) setCounts(c.data);
+        } catch (err) {
+            notify(err?.message || 'Could not refresh follow-ups', { variant: 'danger' });
+        }
     };
 
     useEffect(() => {
+        let active = true;
         setLoading(true);
-        getFollowUps(tab).then(res => {
-            if (res.success) setItems(res.data);
-            setLoading(false);
-        });
-        getFollowUpCounts().then(c => { if (c.success) setCounts(c.data); });
+        setLoadError(null);
+        // A single failing action must never leave the page stuck on the
+        // loading skeleton — always clear `loading`, and surface a retry.
+        Promise.all([getFollowUps(tab), getFollowUpCounts()])
+            .then(([res, c]) => {
+                if (!active) return;
+                if (res.success) setItems(res.data);
+                else setLoadError(res.error || 'Failed to load follow-ups');
+                if (c.success) setCounts(c.data);
+            })
+            .catch(err => {
+                if (active) setLoadError(err?.message || 'Failed to load follow-ups');
+            })
+            .finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
     }, [tab]);
 
     useEffect(() => {
@@ -213,6 +229,28 @@ export default function FollowUpsPage() {
                 <div className="h-8 w-48 bg-surface rounded-lg" />
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-surface rounded-2xl" />)}</div>
                 <div className="h-64 bg-surface rounded-2xl" />
+            </div>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <div className="space-y-6 animate-[fade-in_0.4s_ease-out]">
+                <div>
+                    <h1 className="text-xl md:text-2xl font-bold text-foreground">Follow-ups</h1>
+                    <p className="text-xs md:text-sm text-muted mt-1">Interested customers to reconnect with on a future date</p>
+                </div>
+                <div className="glass-card py-16 text-center">
+                    <AlertTriangle className="w-10 h-10 mx-auto mb-3 text-danger opacity-70" />
+                    <p className="text-sm font-medium text-foreground">Couldn&apos;t load follow-ups</p>
+                    <p className="text-xs text-muted mt-1 max-w-md mx-auto">{loadError}</p>
+                    <button
+                        onClick={() => { setLoading(true); setLoadError(null); refresh().finally(() => setLoading(false)); }}
+                        className="tap-press-sm mt-4 inline-flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
+                    >
+                        <RefreshCw className="w-4 h-4" /> Retry
+                    </button>
+                </div>
             </div>
         );
     }
