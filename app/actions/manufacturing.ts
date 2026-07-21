@@ -648,6 +648,54 @@ export async function getScrapInventory() {
   return { success: true, data: entries }
 }
 
+// Act on a scrap lot: either return reusable offcuts back to raw-material stock,
+// or mark the lot as disposed/used. A scrap lot can only be actioned once (while
+// IN_STOCK) so its quantity can never be returned to stock twice.
+//   action 'REUSE'   → adds the scrap quantity back to the raw material's stock,
+//                       flips status to USED (it has left the scrap pile).
+//   action 'DISPOSE' → marks the lot WASTE/DISPOSED, no stock movement.
+export async function updateScrapDisposition(scrapId: number, action: 'REUSE' | 'DISPOSE') {
+  // Scrap disposition (returning stock / writing off waste) is a manager action,
+  // not a toggleable staff permission.
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+
+  const scrap = await prisma.scrapInventory.findUnique({ where: { id: scrapId } })
+  if (!scrap) return { success: false, error: 'Scrap lot not found' }
+  if (scrap.status !== 'IN_STOCK') {
+    return { success: false, error: 'This scrap lot has already been actioned' }
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (action === 'REUSE') {
+        // Return the offcut quantity to the raw material's usable stock.
+        await adjustManufacturingStockWithTx(tx, scrap.rawMaterialId, roundQty(scrap.quantity), 'RETURN', {
+          referenceType: 'Scrap',
+          referenceId: scrap.id,
+          notes: `Reusable scrap returned to stock (lot #${scrap.id})`,
+          createdBy: 'Manufacturing',
+        })
+        await tx.scrapInventory.update({
+          where: { id: scrapId },
+          data: { status: 'USED', disposition: 'REUSABLE' },
+        })
+      } else {
+        await tx.scrapInventory.update({
+          where: { id: scrapId },
+          data: { status: 'DISPOSED', disposition: 'WASTE' },
+        })
+      }
+    })
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Failed to update scrap lot' }
+  }
+
+  revalidatePath('/manufacturing')
+  revalidatePath('/inventory')
+  revalidatePath('/godowns')
+  return { success: true }
+}
+
 export async function getCustomOrderInventory() {
   try { await requireManufacturingPermission('staffCustomInventory') } catch { return { success: true, data: [] } }
   const entries = await prisma.customOrderInventory.findMany({
@@ -1064,7 +1112,8 @@ export async function completeProduction(data: unknown) {
         actualQty,
         totalMaterialCost,
         totalLabourCost: roundedLabourCost,
-        overheadCost: (machineCost ?? 0) + overheadCost, // store combined overhead
+        machineCost: machineCost ?? 0,      // stored as its own cost category
+        overheadCost,                        // other expenses only (no longer folded)
         totalCost,
         costPerUnit,
         actualMins: refreshedOrder?.actualMins || 0,
@@ -1165,6 +1214,7 @@ export async function getManufacturingStats() {
   const totalProduced = completed.reduce((s, o) => s + (o.actualQty || 0), 0)
   const totalMaterialCost = completed.reduce((s, o) => s + (o.totalMaterialCost || 0), 0)
   const totalLabourCost = completed.reduce((s, o) => s + (o.totalLabourCost || 0), 0)
+  const totalMachineCost = completed.reduce((s, o) => s + (o.machineCost || 0), 0)
   const totalOverhead = completed.reduce((s, o) => s + (o.overheadCost || 0), 0)
   const totalScrap = completed.reduce((s, o) => s + (o.scrapQty || 0), 0)
   const totalMaterialScrapQty = scrapEntries.reduce((s, e) => s + (e.quantity || 0), 0)
@@ -1227,8 +1277,9 @@ export async function getManufacturingStats() {
         qualityRate,
         totalMaterialCost,
         totalLabourCost,
+        totalMachineCost,
         totalOverhead,
-        totalCost: totalMaterialCost + totalLabourCost + totalOverhead,
+        totalCost: totalMaterialCost + totalLabourCost + totalMachineCost + totalOverhead,
       },
       topProducts,
       monthlyTrend: Object.entries(monthlyMap)
