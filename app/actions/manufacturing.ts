@@ -254,7 +254,7 @@ export async function getBOMs() {
     include: {
       finishedProduct: { select: { name: true, sku: true, price: true, costPrice: true, image: true } },
       items: {
-        include: { rawMaterial: { select: { name: true, sku: true, stock: true, unitOfMeasure: true, costPrice: true, image: true } } },
+        include: { rawMaterial: { select: { name: true, sku: true, stock: true, unitOfMeasure: true, costPrice: true, image: true, description: true } } },
       },
       steps: {
         include: { workCenter: { select: { name: true, type: true } } },
