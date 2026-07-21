@@ -15,9 +15,15 @@ const loginUsernameSchema = z.union([
     }, 'Login username must be a valid email or username'),
 ])
 
+// Access level = the login account's UserRole. Only STAFF and MANAGER are
+// assignable from the team UI (ADMIN is the store owner, not created here).
+// MANAGER gets full access; STAFF is restricted per the permission toggles.
+export const accessLevelSchema = z.enum(['STAFF', 'MANAGER'])
+
 export const createStaffSchema = z.object({
   name: z.string().min(1),
   role: z.string().min(1),
+  accessLevel: accessLevelSchema.default('STAFF'),
   phone: z.string().min(10),
   email: z.string().email(),
   joinDate: z.string(),
@@ -29,6 +35,7 @@ export const updateStaffSchema = z.object({
   id: z.number().int().positive(),
   name: z.string().min(1),
   role: z.string().min(1),
+  accessLevel: accessLevelSchema.default('STAFF'),
   phone: z.string().min(10),
   email: z.string().email(),
   status: z.string().min(1),

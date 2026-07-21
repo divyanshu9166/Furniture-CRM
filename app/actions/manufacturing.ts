@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { unstable_noStore } from 'next/cache'
-import { requireRole } from '@/lib/auth-helpers'
+import { requireRole, requireManufacturingPermission } from '@/lib/auth-helpers'
 import {
   createWorkCenterSchema,
   createBOMSchema,
@@ -217,7 +217,7 @@ export async function getWorkCenters() {
 }
 
 export async function createWorkCenter(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireManufacturingPermission('staffCreateWorkCenter') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createWorkCenterSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -252,9 +252,9 @@ export async function getBOMs() {
   const boms = await prisma.billOfMaterials.findMany({
     orderBy: { name: 'asc' },
     include: {
-      finishedProduct: { select: { name: true, sku: true, price: true, costPrice: true } },
+      finishedProduct: { select: { name: true, sku: true, price: true, costPrice: true, image: true } },
       items: {
-        include: { rawMaterial: { select: { name: true, sku: true, stock: true, unitOfMeasure: true, costPrice: true } } },
+        include: { rawMaterial: { select: { name: true, sku: true, stock: true, unitOfMeasure: true, costPrice: true, image: true } } },
       },
       steps: {
         include: { workCenter: { select: { name: true, type: true } } },
@@ -267,7 +267,7 @@ export async function getBOMs() {
 }
 
 export async function createBOM(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireManufacturingPermission('staffCreateBom') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createBOMSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -464,6 +464,7 @@ export async function deleteBomTemplate(id: number) {
 // ─── MRP ANALYSIS ────────────────────────────────────
 
 export async function getMRPAnalysis(bomId: number, qty: number) {
+  try { await requireManufacturingPermission('staffMrpPlanner') } catch { return { success: false, error: 'Access denied' } }
   const bom = await prisma.billOfMaterials.findUnique({
     where: { id: bomId },
     include: {
@@ -648,6 +649,7 @@ export async function getScrapInventory() {
 }
 
 export async function getCustomOrderInventory() {
+  try { await requireManufacturingPermission('staffCustomInventory') } catch { return { success: true, data: [] } }
   const entries = await prisma.customOrderInventory.findMany({
     orderBy: { createdAt: 'desc' },
     include: {
@@ -660,7 +662,7 @@ export async function getCustomOrderInventory() {
 }
 
 export async function createProductionOrder(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireManufacturingPermission('staffCreateProductionOrder') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductionOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -826,8 +828,11 @@ export async function cancelProductionOrder(id: number, reason: string) {
   if (order.status === 'COMPLETED') return { success: false, error: 'Cannot cancel a completed order' }
 
   await prisma.$transaction(async (tx) => {
-    // If materials were already issued (order was IN_PROGRESS or ON_HOLD),
-    // return them back to stock — industry standard for order cancellation.
+    // This module uses a backflush model: raw materials are deducted from stock
+    // only at completion (see completeProduction), so a cancelled order normally
+    // has issuedQty = 0 and nothing to return. This block is a safety net — if a
+    // partial issue ever recorded issuedQty > 0, it is returned to stock on
+    // cancellation. It intentionally no-ops in the common case.
     if ((order.status === 'IN_PROGRESS' || order.status === 'ON_HOLD') && order.consumptions.length > 0) {
       for (const c of order.consumptions) {
         const issued = roundQty(c.issuedQty || 0)
@@ -1106,6 +1111,23 @@ export async function recordQualityCheck(data: unknown) {
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const { productionOrderId, qualityStatus, qualityNotes, scrapQty, scrapReason } = parsed.data
+
+  // Guard: a quality check only makes sense once work has begun. Block QC on
+  // PLANNED (nothing produced yet) or CANCELLED (abandoned) orders so the
+  // qualityStatus can't be set on an order that was never worked.
+  const existing = await prisma.productionOrder.findUnique({
+    where: { id: productionOrderId },
+    select: { status: true, actualQty: true },
+  })
+  if (!existing) return { success: false, error: 'Production order not found' }
+  if (existing.status === 'PLANNED' || existing.status === 'CANCELLED') {
+    return { success: false, error: 'Quality check is only allowed on orders that are in progress or completed' }
+  }
+  // Scrap can never exceed what was actually produced.
+  if ((scrapQty || 0) > (existing.actualQty || 0)) {
+    return { success: false, error: 'Scrap quantity cannot exceed the produced quantity' }
+  }
+
   await prisma.productionOrder.update({
     where: { id: productionOrderId },
     data: { qualityStatus, qualityNotes, scrapQty, scrapReason },
@@ -1343,6 +1365,28 @@ export async function staffUpdateProductionProgress(staffId: number, orderId: nu
   if (notes !== undefined) updateData.notes = notes
 
   await prisma.productionOrder.update({ where: { id: orderId }, data: updateData })
+  revalidatePath('/staff-portal')
+  revalidatePath('/manufacturing')
+  return { success: true }
+}
+
+// The assigned staff member starts their own PLANNED order. Ownership-checked
+// (same pattern as the other staff* actions) rather than role-gated — an admin
+// assigning the order is the authorization; no separate manager "start" is
+// needed. Only moves PLANNED → IN_PROGRESS so it can't disturb other states.
+export async function staffStartProduction(staffId: number, orderId: number) {
+  const order = await prisma.productionOrder.findUnique({
+    where: { id: orderId },
+    select: { assignedStaffId: true, status: true },
+  })
+  if (!order) return { success: false, error: 'Order not found' }
+  if (order.assignedStaffId !== staffId) return { success: false, error: 'You are not assigned to this order' }
+  if (order.status !== 'PLANNED') return { success: false, error: 'Only a planned order can be started' }
+
+  await prisma.productionOrder.update({
+    where: { id: orderId },
+    data: { status: 'IN_PROGRESS', startDate: new Date() },
+  })
   revalidatePath('/staff-portal')
   revalidatePath('/manufacturing')
   return { success: true }

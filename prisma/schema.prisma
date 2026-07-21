@@ -230,6 +230,10 @@ model Product {
   categoryId    Int
   category      Category   @relation(fields: [categoryId], references: [id])
   price         Int
+  // Optional bulk/wholesale price shown alongside the normal single-quantity
+  // price. Purely informational for inventory — intentionally NOT read by BOM,
+  // the price calculator, quotations, orders, or invoices.
+  bulkPrice     Int?
   stock         Float      @default(0)
   sold          Int        @default(0)
   reorderLevel  Int        @default(5)
@@ -913,6 +917,23 @@ model StoreSettings {
   smtpSecure     Boolean  @default(false) // true for port 465 (SSL), false for 587 (STARTTLS)
   smtpConfigured Boolean  @default(false) // true once test email succeeds
   updatedAt      DateTime @updatedAt
+}
+
+// ─── MANUFACTURING PERMISSIONS ───────────────────────
+// Singleton (id = 1). Admin-controlled feature grants for STAFF-level logins
+// in the manufacturing module. ADMIN and MANAGER always have full access
+// regardless of these flags; these toggles ONLY widen access for STAFF.
+// All default to false → STAFF is locked out of these features until an
+// admin explicitly enables them in Settings → Permissions.
+model ManufacturingPermissions {
+  id                         Int      @id @default(1)
+  staffCreateBom             Boolean  @default(false)
+  staffCreateProductionOrder Boolean  @default(false)
+  staffCreateWorkCenter      Boolean  @default(false)
+  staffMrpPlanner            Boolean  @default(false)
+  staffCustomInventory       Boolean  @default(false)
+  staffJobCosting            Boolean  @default(false)
+  updatedAt                  DateTime @updatedAt
 }
 
 // ─── IN-APP NOTIFICATIONS ───────────────────────────

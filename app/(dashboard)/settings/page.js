@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText } from 'lucide-react';
+import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText, ShieldCheck, Factory } from 'lucide-react';
 import Image from 'next/image';
-import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings';
+import { getStoreSettings, updateStoreSettings, getManufacturingPermissions, updateManufacturingPermissions } from '@/app/actions/settings';
 import { getStaff, createStaff, assignStaffLogin, updateStaffMember } from '@/app/actions/staff';
 import { getChannelConfigs, upsertChannelConfig } from '@/app/actions/channels';
 import { testSmtp, sendSmtpTestEmail } from '@/app/actions/email-campaigns';
@@ -81,9 +81,22 @@ const staffRoleOptions = [
   'Warehouse Manager',
 ];
 
+// Manufacturing features that are OFF for STAFF by default. Managers/admins
+// always have access; these toggles only grant extra access to STAFF logins.
+// Keys map 1:1 to the ManufacturingPermissions columns.
+const PERMISSION_ITEMS = [
+  { key: 'staffCreateBom', label: 'Create BOMs', desc: 'Allow staff to create and manage Bills of Materials' },
+  { key: 'staffCreateProductionOrder', label: 'Create Production Orders', desc: 'Allow staff to create new production orders' },
+  { key: 'staffCreateWorkCenter', label: 'Create Work Centers', desc: 'Allow staff to add and manage work centers' },
+  { key: 'staffMrpPlanner', label: 'MRP Planner', desc: 'Allow staff to run material requirement planning' },
+  { key: 'staffCustomInventory', label: 'Custom Inventory', desc: 'Allow staff to view the custom-order inventory' },
+  { key: 'staffJobCosting', label: 'Job Costing', desc: 'Allow staff to view job-costing figures' },
+];
+
 const getInitialInviteForm = () => ({
   name: '',
   role: 'Sales Executive',
+  accessLevel: 'STAFF',
   phone: '',
   email: '',
   joinDate: new Date().toISOString().split('T')[0],
@@ -95,6 +108,7 @@ const getInitialEditForm = () => ({
   id: '',
   name: '',
   role: 'Sales Executive',
+  accessLevel: 'STAFF',
   phone: '',
   email: '',
   status: 'Active',
@@ -131,6 +145,12 @@ export default function SettingsPage() {
   const [gpsDetected, setGpsDetected] = useState(null); // { lat, lng, address }
   const [stockCheckRunning, setStockCheckRunning] = useState(false);
   const [stockCheckResult, setStockCheckResult] = useState(null);
+
+  // Manufacturing permissions (STAFF access toggles)
+  const [permissions, setPermissions] = useState(null);
+  const [permSaving, setPermSaving] = useState(false);
+  const [permSuccess, setPermSuccess] = useState('');
+  const [permError, setPermError] = useState('');
 
   const [accountForm, setAccountForm] = useState({
     currentPassword: '',
@@ -181,11 +201,42 @@ export default function SettingsPage() {
     loginUsername: s.loginUsername || '',
     hasLogin: !!s.hasLogin,
     loginActive: !!s.loginActive,
+    accessLevel: s.accessLevel || 'STAFF',
   });
 
   const refreshTeamMembers = async () => {
     const staffRes = await getStaff();
     if (staffRes.success) setTeamMembers(staffRes.data.map(mapTeamMember));
+  };
+
+  const refreshPermissions = async () => {
+    const res = await getManufacturingPermissions();
+    if (res.success) setPermissions(res.data);
+  };
+
+  const handleTogglePermission = async (key) => {
+    if (!permissions) return;
+    const prev = permissions;
+    const next = { ...permissions, [key]: !permissions[key] };
+    setPermissions(next); // optimistic
+    setPermSaving(true);
+    setPermError('');
+    setPermSuccess('');
+    try {
+      const res = await updateManufacturingPermissions({ [key]: next[key] });
+      if (res.success) {
+        setPermissions(res.data);
+        setPermSuccess('Permissions updated');
+      } else {
+        setPermissions(prev); // revert
+        setPermError(res.error || 'Failed to update permissions');
+      }
+    } catch (err) {
+      setPermissions(prev); // revert
+      setPermError('Failed to update permissions');
+    } finally {
+      setPermSaving(false);
+    }
   };
 
   const handleInviteMember = async (e) => {
@@ -269,6 +320,7 @@ export default function SettingsPage() {
       id: String(member.id),
       name: member.name,
       role: member.role,
+      accessLevel: member.accessLevel || 'STAFF',
       phone: member.phone || '',
       email: member.email || '',
       status: member.status || 'Active',
@@ -291,6 +343,7 @@ export default function SettingsPage() {
         id: Number(editForm.id),
         name: editForm.name,
         role: editForm.role,
+        accessLevel: editForm.accessLevel,
         phone: editForm.phone,
         email: editForm.email,
         status: editForm.status,
@@ -413,6 +466,7 @@ export default function SettingsPage() {
         });
       }
       if (staffRes.success) setTeamMembers(staffRes.data.map(mapTeamMember));
+      refreshPermissions();
       if (channelsRes.success) {
         const configMap = {};
         const formMap = {};
@@ -530,6 +584,7 @@ export default function SettingsPage() {
     { key: 'store', label: 'Store Profile', icon: Store },
     { key: 'account', label: 'Account', icon: User },
     { key: 'team', label: 'Team', icon: Users },
+    { key: 'permissions', label: 'Permissions', icon: ShieldCheck },
     { key: 'integrations', label: 'Integrations', icon: Link2 },
     { key: 'email', label: 'Email Setup', icon: Mail },
     { key: 'notifications', label: 'Notifications', icon: Bell },
@@ -873,7 +928,7 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted mb-1.5">Role</label>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Role <span className="text-muted font-normal">(job title)</span></label>
                       <input
                         list="staff-role-options"
                         value={inviteForm.role}
@@ -881,6 +936,18 @@ export default function SettingsPage() {
                         placeholder="e.g. Sales Executive"
                         className="w-full"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Access Level</label>
+                      <select
+                        value={inviteForm.accessLevel}
+                        onChange={e => setInviteForm(prev => ({ ...prev, accessLevel: e.target.value }))}
+                        className="w-full"
+                      >
+                        <option value="STAFF">Staff — restricted access</option>
+                        <option value="MANAGER">Manager — full access</option>
+                      </select>
+                      <p className="text-[11px] text-muted mt-1">Managers get complete access. Staff access is limited and configured under the Permissions tab.</p>
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Phone</label>
@@ -1048,6 +1115,14 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
+                      <label className="block text-xs font-medium text-muted mb-1.5">Access Level</label>
+                      <select value={editForm.accessLevel} onChange={e => setEditForm(prev => ({ ...prev, accessLevel: e.target.value }))} className="w-full">
+                        <option value="STAFF">Staff (restricted)</option>
+                        <option value="MANAGER">Manager (full access)</option>
+                      </select>
+                      <p className="text-[10px] text-muted mt-1">Managers get complete access. Staff access is limited — grant extra manufacturing features under the Permissions tab.</p>
+                    </div>
+                    <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Status</label>
                       <select value={editForm.status} onChange={e => setEditForm(prev => ({ ...prev, status: e.target.value }))} className="w-full">
                         <option value="Active">Active</option>
@@ -1110,7 +1185,10 @@ export default function SettingsPage() {
                     <tr key={m.id}>
                       <td className="font-medium text-foreground">{m.name}</td>
                       <td className="text-muted">{m.email}</td>
-                      <td><span className="badge bg-accent-light text-accent">{m.role}</span></td>
+                      <td>
+                        <span className="badge bg-accent-light text-accent">{m.role}</span>
+                        {m.accessLevel === 'MANAGER' && <span className="badge bg-warning-light text-warning ml-1">Manager Access</span>}
+                      </td>
                       <td>
                         {m.hasLogin ? (
                           <div className="flex flex-col">
@@ -1155,6 +1233,7 @@ export default function SettingsPage() {
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <span className="badge bg-accent-light text-accent">{m.role}</span>
+                      {m.accessLevel === 'MANAGER' && <span className="badge bg-warning-light text-warning">Manager Access</span>}
                       <span className={`badge ${m.status === 'Active' ? 'bg-success-light text-success' : 'bg-info-light text-info'}`}>{m.status}</span>
                       <button
                         onClick={() => openEditMemberForm(m)}
@@ -1592,6 +1671,43 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <button className="flex items-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"><Save className="w-4 h-4" /> Save AI Settings</button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'permissions' && (
+            <div className="glass-card p-4 sm:p-6">
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-lg font-semibold text-foreground">Manufacturing Access</h2>
+                {permSaving && <span className="text-xs text-muted flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>}
+                {!permSaving && permSuccess && <span className="text-xs text-success flex items-center gap-1.5"><Check className="w-3.5 h-3.5" /> {permSuccess}</span>}
+              </div>
+              <p className="text-xs text-muted mb-5 max-w-2xl">
+                Control which manufacturing features your <strong>Staff</strong> can use. Everything is off by default — turn on only what you want staff to access. Managers and admins always have full access.
+              </p>
+              {permError && <p className="mb-3 text-xs text-danger">{permError}</p>}
+              <div className="space-y-3 max-w-2xl">
+                {permissions === null ? (
+                  <p className="text-sm text-muted">Loading…</p>
+                ) : (
+                  PERMISSION_ITEMS.map(item => (
+                    <div key={item.key} className="flex items-center justify-between gap-4 p-3.5 rounded-xl bg-surface border border-border">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{item.label}</p>
+                        <p className="text-xs text-muted mt-0.5">{item.desc}</p>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={!!permissions[item.key]}
+                        onClick={() => handleTogglePermission(item.key)}
+                        className={`w-11 h-6 rounded-full flex items-center transition-all flex-shrink-0 ${permissions[item.key] ? 'bg-accent justify-end' : 'bg-surface-hover justify-start border border-border'}`}
+                      >
+                        <div className="w-5 h-5 m-0.5 bg-white rounded-full shadow" />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}

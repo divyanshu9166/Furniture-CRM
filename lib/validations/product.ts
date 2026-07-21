@@ -5,6 +5,9 @@ export const createProductSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
   category: z.string().min(1, 'Category is required'),
   price: z.number().min(0, 'Price must be positive'),
+  // Optional bulk / wholesale price. Independent of `price` — never used by
+  // BOM, the price calculator, quotations, orders or invoices.
+  bulkPrice: z.number().min(0).optional(),
   costPrice: z.number().min(0).default(0),
   stock: z.number().min(0).default(0),
   reorderLevel: z.number().min(0).default(5),

@@ -242,3 +242,53 @@ export async function getStoreCampaigns() {
     })),
   }
 }
+
+// ─── Manufacturing permissions (STAFF access, admin-configurable) ────────────
+
+const MFG_PERMISSION_KEYS = [
+  'staffCreateBom',
+  'staffCreateProductionOrder',
+  'staffCreateWorkCenter',
+  'staffMrpPlanner',
+  'staffCustomInventory',
+  'staffJobCosting',
+] as const
+
+// Readable by any authenticated user — the manufacturing page consults these
+// flags to decide which tabs/buttons to show to STAFF. Enforcement still happens
+// server-side in the manufacturing actions.
+export async function getManufacturingPermissions() {
+  const { getManufacturingPermissionFlags } = await import('@/lib/manufacturing-permissions')
+  const flags = await getManufacturingPermissionFlags()
+  return { success: true, data: flags }
+}
+
+// ADMIN-only. Accepts a partial map of the permission flags to update.
+export async function updateManufacturingPermissions(data: Record<string, boolean>) {
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+
+  const patch: Record<string, boolean> = {}
+  for (const key of MFG_PERMISSION_KEYS) {
+    if (typeof data[key] === 'boolean') patch[key] = data[key]
+  }
+
+  const row = await prisma.manufacturingPermissions.upsert({
+    where: { id: 1 },
+    update: patch,
+    create: { id: 1, ...patch },
+  })
+
+  revalidatePath('/settings')
+  revalidatePath('/manufacturing')
+  return {
+    success: true,
+    data: {
+      staffCreateBom: row.staffCreateBom,
+      staffCreateProductionOrder: row.staffCreateProductionOrder,
+      staffCreateWorkCenter: row.staffCreateWorkCenter,
+      staffMrpPlanner: row.staffMrpPlanner,
+      staffCustomInventory: row.staffCustomInventory,
+      staffJobCosting: row.staffJobCosting,
+    },
+  }
+}

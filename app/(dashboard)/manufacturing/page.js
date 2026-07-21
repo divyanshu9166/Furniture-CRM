@@ -23,7 +23,9 @@ import {
   getMRPAnalysis, getManufacturingStats, updateProductionStep,
   getManufacturingCustomOrders, getScrapInventory, getCustomOrderInventory,
 } from '@/app/actions/manufacturing'
+import { getManufacturingPermissions } from '@/app/actions/settings'
 import { getProducts, createProduct, deleteRawMaterial, updateProduct, updateStock, bulkImportRawMaterials } from '@/app/actions/products'
+import { useSession } from '@/components/AuthProvider'
 import Modal from '@/components/Modal'
 import * as XLSX from 'xlsx'
 
@@ -98,6 +100,15 @@ export default function ManufacturingPage() {
   const [customOrders, setCustomOrders] = useState([])
   const [scrapInventory, setScrapInventory] = useState([])
   const [customInventory, setCustomInventory] = useState([])
+
+  // Role + manufacturing permissions (ADMIN/MANAGER get everything; STAFF only
+  // what the admin has enabled in Settings → Permissions).
+  const { data: session } = useSession()
+  const userRole = session?.user?.role || 'STAFF'
+  const isPrivileged = userRole === 'ADMIN' || userRole === 'MANAGER'
+  const [perms, setPerms] = useState(null)
+  // can(feature): privileged users always true; staff only when the flag is on.
+  const can = (feature) => isPrivileged || !!perms?.[feature]
 
   // Modals
   const [showBOMModal, setShowBOMModal] = useState(false)
@@ -234,6 +245,14 @@ export default function ManufacturingPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData()
   }, [loadData])
+
+  // Load the STAFF permission flags (managers/admins bypass, but we still fetch
+  // so `can()` resolves the same way for everyone once loaded).
+  useEffect(() => {
+    getManufacturingPermissions().then(res => {
+      if (res.success) setPerms(res.data)
+    })
+  }, [])
 
   // Auto-refresh production data every 30s so admin sees staff progress updates
   useEffect(() => {
@@ -806,7 +825,14 @@ export default function ManufacturingPage() {
     )
   }, [products, rmSearch])
 
-  const TABS = [
+  // Tabs gated for STAFF. `tabPerm` maps a tab to the permission that unlocks it;
+  // tabs without an entry are visible to everyone. Managers/admins see all.
+  const TAB_PERMISSION = {
+    mrp: 'staffMrpPlanner',
+    customInventory: 'staffCustomInventory',
+    costing: 'staffJobCosting',
+  }
+  const ALL_TABS = [
     { id: 'production', label: 'Production Orders', icon: Factory },
     { id: 'bom', label: 'Bill of Materials', icon: Layers },
     { id: 'materials', label: 'Raw Materials', icon: Package },
@@ -818,6 +844,13 @@ export default function ManufacturingPage() {
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'costing', label: 'Job Costing', icon: Activity },
   ]
+  const TABS = ALL_TABS.filter(t => !TAB_PERMISSION[t.id] || can(TAB_PERMISSION[t.id]))
+
+  // If the active tab became hidden (e.g. staff without permission), fall back.
+  useEffect(() => {
+    if (!TABS.some(t => t.id === tab)) setTab('production')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perms])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -837,7 +870,7 @@ export default function ManufacturingPage() {
           <p className="text-muted text-sm mt-0.5">BOM · Production Orders · Work Centers · MRP · Quality · Costing</p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          {tab === 'bom' && (
+          {tab === 'bom' && can('staffCreateBom') && (
             <>
               <button onClick={() => setShowTemplateModal(true)} className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
                 <FileText className="w-4 h-4" /> Templates
@@ -847,12 +880,12 @@ export default function ManufacturingPage() {
               </button>
             </>
           )}
-          {tab === 'production' && (
+          {tab === 'production' && can('staffCreateProductionOrder') && (
             <button onClick={() => setShowProdModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2">
               <Plus className="w-4 h-4" /> New Production Order
             </button>
           )}
-          {tab === 'workcenters' && (
+          {tab === 'workcenters' && can('staffCreateWorkCenter') && (
             <button onClick={() => setShowWCModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2">
               <Plus className="w-4 h-4" /> New Work Center
             </button>

@@ -35,7 +35,7 @@ const staffPortalInclude: Prisma.StaffInclude = {
   activities: { orderBy: { date: 'desc' }, take: 10 },
   fieldVisits: { orderBy: { date: 'desc' }, take: 5 },
   stockUpdates: { orderBy: { date: 'desc' }, take: 5 },
-  user: { select: { email: true, isActive: true } },
+  user: { select: { email: true, isActive: true, role: true } },
   _count: { select: { leads: true, invoices: true, customOrders: true } },
 }
 
@@ -48,6 +48,9 @@ const mapStaffForPortal = (s: any) => ({
   loginUsername: s.user?.email || null,
   hasLogin: !!s.user,
   loginActive: s.user?.isActive ?? false,
+  // Access level of the login account (ADMIN/MANAGER/STAFF). Drives RBAC.
+  // Null when the member has no login account yet.
+  accessLevel: s.user?.role ?? null,
   status: s.status,
   joinDate: s.joinDate ? s.joinDate.toISOString().split('T')[0] : null,
   avatar: s.avatar,
@@ -137,9 +140,15 @@ export async function getStaffMember(id: number) {
 }
 
 export async function createStaff(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  let session
+  try { session = await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const parsed = createStaffSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  // Only an ADMIN may grant MANAGER access — a manager cannot create another
+  // manager (privilege-escalation guard). Fall back to STAFF otherwise.
+  const accessLevel: UserRole =
+    parsed.data.accessLevel === 'MANAGER' && session.user.role === 'ADMIN' ? 'MANAGER' : 'STAFF'
 
   const loginUsername = parsed.data.loginUsername?.trim() || undefined
   const loginPassword = parsed.data.loginPassword?.trim() || undefined
@@ -175,7 +184,7 @@ export async function createStaff(data: unknown) {
           email: loginUsername,
           name: parsed.data.name,
           hashedPassword,
-          role: 'STAFF' as UserRole,
+          role: accessLevel,
           staffId: createdStaff.id,
         },
       })
@@ -247,16 +256,26 @@ export async function verifyStaffPortalPassword(staffId: number, password: strin
 }
 
 export async function updateStaffMember(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  let session
+  try { session = await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
 
   const parsed = updateStaffSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const existing = await prisma.staff.findUnique({
     where: { id: parsed.data.id },
-    include: { user: { select: { id: true, email: true } } },
+    include: { user: { select: { id: true, email: true, role: true } } },
   })
   if (!existing) return { success: false, error: 'Staff not found' }
+
+  // Only an ADMIN may grant/keep MANAGER access (privilege-escalation guard).
+  // A manager editing a member cannot promote them to manager, and cannot
+  // change an existing manager — preserve the current role in that case.
+  const requestedManager = parsed.data.accessLevel === 'MANAGER'
+  const accessLevel: UserRole =
+    session.user.role === 'ADMIN'
+      ? (requestedManager ? 'MANAGER' : 'STAFF')
+      : ((existing.user?.role as UserRole) ?? 'STAFF') // manager can't change access level
 
   const loginUsername = parsed.data.loginUsername?.trim() || undefined
   const loginPassword = parsed.data.loginPassword?.trim() || undefined
@@ -294,8 +313,9 @@ export async function updateStaffMember(data: unknown) {
     })
 
     if (existing.user) {
-      const userData: { name: string; email?: string; hashedPassword?: string } = {
+      const userData: { name: string; email?: string; hashedPassword?: string; role?: UserRole } = {
         name: parsed.data.name,
+        role: accessLevel,
       }
 
       if (loginUsername) userData.email = loginUsername
@@ -308,7 +328,7 @@ export async function updateStaffMember(data: unknown) {
           email: loginUsername,
           name: parsed.data.name,
           hashedPassword: await bcrypt.hash(loginPassword, 12),
-          role: 'STAFF' as UserRole,
+          role: accessLevel,
           staffId: parsed.data.id,
         },
       })

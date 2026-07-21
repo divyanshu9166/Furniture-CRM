@@ -139,6 +139,7 @@ export default function InventoryPage() {
     setEditForm({
       name: product.name || '',
       price: product.price || 0,
+      bulkPrice: product.bulkPrice ?? '',
       costPrice: product.costPrice || 0,
       reorderLevel: product.reorderLevel || 5,
       material: product.material || '',
@@ -182,6 +183,9 @@ export default function InventoryPage() {
       const updateData = {
         name: editForm.name,
         price: Number(editForm.price) || 0,
+        bulkPrice: editForm.bulkPrice === '' || editForm.bulkPrice === null || editForm.bulkPrice === undefined
+          ? null
+          : Number(editForm.bulkPrice) || 0,
         costPrice: Number(editForm.costPrice) || 0,
         reorderLevel: Number(editForm.reorderLevel) || 0,
         material: editForm.material || '',
@@ -649,7 +653,9 @@ export default function InventoryPage() {
                         {product.isRawMaterial ? (
                           <span className="text-base font-bold text-accent">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted">/ {product.unitOfMeasure || 'PCS'}</span></span>
                         ) : (
-                          <span className="text-base font-bold text-accent">₹{product.price.toLocaleString()}</span>
+                          <span className="text-base font-bold text-accent">₹{product.price.toLocaleString()}
+                            {product.bulkPrice ? <span className="block text-[10px] font-normal text-muted">Bulk: ₹{product.bulkPrice.toLocaleString()}</span> : null}
+                          </span>
                         )}
                         <span className={`badge text-[10px] ${badge.cls}`}>{badge.text}</span>
                       </div>
@@ -1493,6 +1499,7 @@ export default function InventoryPage() {
             sku: f.sku.value,
             category: isRawMode ? 'Raw Material' : f.category.value,
             price: isRawMode ? 0 : Number(f.price.value),
+            bulkPrice: isRawMode ? 0 : Number(f.bulkPrice?.value || 0),
             costPrice: isRawMode ? Number(f.costPrice?.value || 0) : 0,
             material: f.material?.value || '',
             color: f.color?.value || '',
@@ -1581,6 +1588,10 @@ export default function InventoryPage() {
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Price (₹) *</label>
                 <input type="number" name="price" required placeholder="0" className="w-full" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Bulk Price (₹)</label>
+                <input type="number" name="bulkPrice" min="0" placeholder="Price for bulk quantity" className="w-full" />
               </div>
             </div>
           )}
@@ -2010,6 +2021,17 @@ export default function InventoryPage() {
                   onChange={e => setEditForm(f => ({ ...f, price: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
                   placeholder="0"
+                  min="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted mb-1.5">Bulk Price (₹)</label>
+                <input
+                  type="number"
+                  value={editForm.bulkPrice ?? ''}
+                  onChange={e => setEditForm(f => ({ ...f, bulkPrice: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
+                  placeholder="Optional — price for bulk quantity"
                   min="0"
                 />
               </div>

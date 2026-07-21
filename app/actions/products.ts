@@ -48,6 +48,7 @@ export async function getProducts() {
       categoryId: p.categoryId,
       isRawMaterial: p.category.name === 'Raw Material',
       price: p.price,
+      bulkPrice: p.bulkPrice,
       costPrice: p.costPrice,
       brand: p.brand,
       hsnCode: p.hsnCode,
@@ -340,7 +341,7 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
 }
 
 export async function updateProduct(id: number, data: Partial<{
-  name: string; price: number; stock: number; reorderLevel: number;
+  name: string; price: number; bulkPrice: number | null; stock: number; reorderLevel: number;
   material: string; brand: string; color: string; description: string; image: string; unitSize: number; unitOfMeasure: string;
 }>) {
   const product = await prisma.product.update({

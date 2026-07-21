@@ -20,7 +20,7 @@ import { getStaff, getStaffPortalProfile, clockIn as serverClockIn, clockOut as 
 import { getStaffVisits, updateFieldVisit, logSelfVisit, getSelfVisits, updateSelfVisitPhotos } from '@/app/actions/custom-orders';
 import { moveSelfVisitToDraft } from '@/app/actions/drafts';
 import { getProducts } from '@/app/actions/products';
-import { getStaffProductionOrders, staffUpdateProductionStep, staffUpdateProductionProgress, staffAddStepNote } from '@/app/actions/manufacturing';
+import { getStaffProductionOrders, staffUpdateProductionStep, staffUpdateProductionProgress, staffAddStepNote, staffStartProduction } from '@/app/actions/manufacturing';
 
 const activityIcons = {
   call: { icon: Phone, color: 'bg-blue-500/10 text-blue-700', label: 'Call' },
@@ -1061,7 +1061,21 @@ export default function StaffPortalPage() {
                     {/* Status messages for non-active orders */}
                     {order.status === 'PLANNED' && (
                       <div className="px-4 py-3 bg-gray-500/5">
-                        <p className="text-xs text-muted text-center">⏳ Waiting for manager to start this production order</p>
+                        <button
+                          disabled={stepUpdating === `start-${order.id}`}
+                          onClick={async () => {
+                            setStepUpdating(`start-${order.id}`);
+                            const res = await staffStartProduction(loggedInStaff.id, order.id);
+                            if (res.success) {
+                              const refresh = await getStaffProductionOrders(loggedInStaff.id);
+                              if (refresh.success) setProductionOrders(refresh.data);
+                            } else { alert(res.error); }
+                            setStepUpdating(null);
+                          }}
+                          className="w-full py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:bg-accent-hover active:scale-[0.99] disabled:opacity-50 transition-all"
+                        >
+                          {stepUpdating === `start-${order.id}` ? 'Starting…' : '▶ Start Production'}
+                        </button>
                       </div>
                     )}
                     {order.status === 'ON_HOLD' && (
