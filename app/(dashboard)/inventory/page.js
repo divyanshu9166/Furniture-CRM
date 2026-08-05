@@ -496,30 +496,30 @@ export default function InventoryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="overflow-x-auto hide-scrollbar -mx-3.5 md:mx-0">
+      <div className="overflow-x-auto overscroll-x-contain touch-pan-x hide-scrollbar -mx-3.5 md:mx-0">
         <div className="flex bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit mx-3.5 md:mx-0">
-          <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Package className="w-3.5 h-3.5" /> Products
           </button>
-          <button onClick={() => setTab('location')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'location' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('location')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'location' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <MapPin className="w-3.5 h-3.5" /> Location
           </button>
-          <button onClick={() => setTab('alerts')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('alerts')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'alerts' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Bell className="w-3.5 h-3.5" /> Alerts
             {needsReorder.length > 0 && (
               <span className="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">{needsReorder.length}</span>
             )}
           </button>
-          <button onClick={() => setTab('ledger')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'ledger' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('ledger')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'ledger' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <FileText className="w-3.5 h-3.5" /> Ledger
           </button>
-          <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('stockGroups')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'stockGroups' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Layers className="w-3.5 h-3.5" /> Groups
           </button>
-          <button onClick={() => setTab('batches')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('batches')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'batches' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Boxes className="w-3.5 h-3.5" /> Batches
           </button>
-          <button onClick={() => setTab('aging')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
+          <button onClick={() => setTab('aging')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'aging' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Timer className="w-3.5 h-3.5" /> Aging
           </button>
         </div>
@@ -529,11 +529,11 @@ export default function InventoryPage() {
       {tab === 'products' && (
         <>
           {/* Product Type Sub-Tabs */}
-          <div className="flex items-center gap-2">
-            <div className="flex bg-surface border border-border rounded-xl p-1 gap-0.5">
+          <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x hide-scrollbar pb-1">
+            <div className="flex w-max min-w-full md:w-fit md:min-w-0 bg-surface border border-border rounded-xl p-1 gap-0.5">
               <button
                 onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'finished'
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'finished'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
                   }`}
@@ -545,7 +545,7 @@ export default function InventoryPage() {
               </button>
               <button
                 onClick={() => { setProductType('rawMaterial'); setCategory('All'); setSearch(''); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'rawMaterial'
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'rawMaterial'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
                   }`}
@@ -557,7 +557,7 @@ export default function InventoryPage() {
               </button>
               <button
                 onClick={() => { setProductType('consumable'); setCategory('All'); setSearch(''); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'consumable'
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'consumable'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
                   }`}
@@ -568,7 +568,6 @@ export default function InventoryPage() {
                   }`}>{consumables.length}</span>
               </button>
             </div>
-
           </div>
 
           {/* Stats */}
