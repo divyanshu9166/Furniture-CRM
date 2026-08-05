@@ -149,8 +149,10 @@ function LoginContent() {
         {mode === null && (
           <div className="grid grid-cols-2 gap-3">
             <button
+              type="button"
               onClick={() => { setMode('admin'); setError(''); }}
-              className="tap-press group flex flex-col items-center gap-3 p-5 rounded-2xl border border-border hover:border-accent/50 hover:bg-accent-light transition-all"
+              aria-label="Sign in as admin"
+              className="tap-press group flex min-h-28 cursor-pointer select-none touch-manipulation flex-col items-center gap-3 p-5 rounded-2xl border border-border hover:border-accent/50 hover:bg-accent-light transition-all"
             >
               <div className="w-12 h-12 rounded-xl bg-accent/10 text-accent flex items-center justify-center group-hover:scale-105 transition-transform">
                 <Shield className="w-6 h-6" />
@@ -162,8 +164,10 @@ function LoginContent() {
             </button>
 
             <button
+              type="button"
               onClick={() => { setMode('staff'); setError(''); }}
-              className="tap-press group flex flex-col items-center gap-3 p-5 rounded-2xl border border-border hover:border-teal/50 hover:bg-teal-light transition-all"
+              aria-label="Sign in as staff"
+              className="tap-press group flex min-h-28 cursor-pointer select-none touch-manipulation flex-col items-center gap-3 p-5 rounded-2xl border border-border hover:border-teal/50 hover:bg-teal-light transition-all"
             >
               <div className="w-12 h-12 rounded-xl bg-teal/10 text-teal flex items-center justify-center group-hover:scale-105 transition-transform">
                 <Users className="w-6 h-6" />

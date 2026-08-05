@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { getSession, createSession } from '@/lib/session'
+import { getSession, setSessionCookie } from '@/lib/session'
 import { prisma } from '@/lib/db'
 
 export async function POST(request: Request) {
@@ -66,15 +66,7 @@ export async function POST(request: Request) {
     },
   })
 
-  await createSession({
-    id: String(updated.id),
-    email: updated.email,
-    name: updated.name,
-    role: updated.role,
-    staffId: updated.staffId,
-  })
-
-  return NextResponse.json({
+  const response = NextResponse.json({
     user: {
       id: String(updated.id),
       email: updated.email,
@@ -84,5 +76,15 @@ export async function POST(request: Request) {
       created_at: updated.createdAt.toISOString(),
     },
   })
+
+  await setSessionCookie(response, {
+    id: String(updated.id),
+    email: updated.email,
+    name: updated.name,
+    role: updated.role,
+    staffId: updated.staffId,
+  })
+
+  return response
 }
 

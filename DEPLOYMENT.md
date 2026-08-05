@@ -115,3 +115,20 @@ docker compose logs -f app
 
 If the AI calling UI reports "LiveKit not configured", confirm the VPS `.env` includes
 `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`, then redeploy.
+
+## 5. Local Client Demo via ngrok
+
+For a temporary client-facing link to your local dev environment on Windows, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\start-local-ngrok.ps1
+```
+
+This starts PostgreSQL if needed, launches `next dev`, and opens an ngrok tunnel to `http://localhost:3000`.
+When you are done, stop both processes with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\stop-local-ngrok.ps1
+```
+
+If you share the tunnel with clients, set `NEXT_PUBLIC_APP_URL` to the ngrok URL for any links the app generates outside the current browser session.

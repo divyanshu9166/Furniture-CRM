@@ -1728,7 +1728,7 @@ export default function QuotationsPage() {
                           >
                             <option value="">Select from inventory</option>
                             <option value="custom">Custom item (manual)</option>
-                            {products.map(product => (
+                            {products.filter(product => product.isSellable !== false).map(product => (
                               <option key={product.id} value={product.id}>
                                 {product.name} ({product.sku}) - Stock: {product.stock}
                               </option>

@@ -373,7 +373,7 @@ export default function BillingPage() {
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
 
-  const saleProducts = products.filter(p => p.category !== 'Raw Material');
+  const saleProducts = products.filter(p => p.isSellable !== false);
 
   const filteredProducts = saleProducts.filter(p =>
     p.name.toLowerCase().includes(productSearch.toLowerCase()) ||

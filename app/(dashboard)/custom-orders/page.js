@@ -1230,8 +1230,9 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
   };
 
   const filteredProducts = useMemo(() => {
-    if (!productSearch) return products.slice(0, 10);
-    return products.filter(p =>
+    const sellableProducts = products.filter(p => p.isSellable !== false);
+    if (!productSearch) return sellableProducts.slice(0, 10);
+    return sellableProducts.filter(p =>
       p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
       p.sku.toLowerCase().includes(productSearch.toLowerCase())
     ).slice(0, 10);

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import bcrypt from 'bcryptjs'
-import { createSession } from '@/lib/session'
+import { setSessionCookie } from '@/lib/session'
 
 export async function POST(req: Request) {
   try {
@@ -27,7 +27,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
       }
 
-      await createSession({
+      const response = NextResponse.json({ success: true })
+      await setSessionCookie(response, {
         id: String(user.id),
         email: user.email,
         name: user.name,
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
         staffId: user.staffId,
       })
 
-      return NextResponse.json({ success: true })
+      return response
     }
 
     if (type === 'staff-credentials') {
@@ -76,7 +77,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Invalid staff credentials' }, { status: 401 })
       }
 
-      await createSession({
+      const response = NextResponse.json({ success: true })
+      await setSessionCookie(response, {
         id: String(staff.user.id),
         email: staff.user.email,
         name: staff.user.name,
@@ -84,7 +86,7 @@ export async function POST(req: Request) {
         staffId: staff.id,
       })
 
-      return NextResponse.json({ success: true })
+      return response
     }
 
     if (type === 'staff-pin') {

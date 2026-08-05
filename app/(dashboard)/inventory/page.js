@@ -23,6 +23,13 @@ const stockBadge = (stock, reorderLevel) => {
   return { text: 'In Stock', cls: 'bg-success-light text-success' };
 };
 
+const isStockOnlyType = (type) => type === 'rawMaterial' || type === 'consumable';
+const getTypeCopy = (type) => {
+  if (type === 'rawMaterial') return { plural: 'Raw Materials', singular: 'raw material', title: 'Raw Material', category: 'Raw Material' };
+  if (type === 'consumable') return { plural: 'Consumable Items', singular: 'consumable item', title: 'Consumable Item', category: 'Consumable' };
+  return { plural: 'Finished Goods', singular: 'finished good', title: 'Finished Good', category: '' };
+};
+
 export default function InventoryPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState(['All']);
@@ -35,7 +42,7 @@ export default function InventoryPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(null);
   const [tab, setTab] = useState('products');
-  const [productType, setProductType] = useState('finished'); // 'finished' | 'rawMaterial'
+  const [productType, setProductType] = useState('finished'); // 'finished' | 'rawMaterial' | 'consumable'
   const [productImages, setProductImages] = useState([]);
   const [addingProduct, setAddingProduct] = useState(false);
 
@@ -398,7 +405,9 @@ export default function InventoryPage() {
 
   const filtered = useMemo(() => {
     const base = products.filter(p =>
-      (productType === 'finished' ? !p.isRawMaterial : p.isRawMaterial) &&
+      (productType === 'finished'
+        ? p.isSellable !== false
+        : productType === 'rawMaterial' ? p.isRawMaterial : p.isConsumable) &&
       (category === 'All' || p.category === category) &&
       (warehouseFilter === 'All' || p.warehouse === warehouseFilter) &&
       (p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
@@ -407,11 +416,16 @@ export default function InventoryPage() {
   }, [category, warehouseFilter, search, products, productType]);
 
   // Derived slices for stats
-  const finishedGoods = useMemo(() => products.filter(p => !p.isRawMaterial), [products]);
+  const finishedGoods = useMemo(() => products.filter(p => p.isSellable !== false), [products]);
   const rawMaterials = useMemo(() => products.filter(p => p.isRawMaterial), [products]);
-  const activeProducts = productType === 'finished' ? finishedGoods : rawMaterials;
+  const consumables = useMemo(() => products.filter(p => p.isConsumable), [products]);
+  const activeProducts = productType === 'finished'
+    ? finishedGoods
+    : productType === 'rawMaterial' ? rawMaterials : consumables;
+  const typeCopy = getTypeCopy(productType);
+  const isManualInventoryMode = isStockOnlyType(productType);
 
-  // Categories relevant to current type (excluding 'Raw Material' from finished goods list)
+  // Categories relevant to the active inventory type
   const relevantCategories = useMemo(() => {
     const unique = [...new Set(activeProducts.map(p => p.category))];
     return ['All', ...unique.sort()];
@@ -437,7 +451,7 @@ export default function InventoryPage() {
   const totalStock = activeProducts.reduce((sum, p) => sum + p.stock, 0);
   const lowStockItems = activeProducts.filter(p => p.stock > 0 && p.stock <= p.reorderLevel);
   const outOfStockItems = activeProducts.filter(p => p.stock === 0);
-  const totalValue = activeProducts.reduce((sum, p) => sum + ((p.isRawMaterial ? p.costPrice : p.price) * p.stock), 0);
+  const totalValue = activeProducts.reduce((sum, p) => sum + ((isManualInventoryMode ? p.costPrice : p.price) * p.stock), 0);
   const needsReorder = [...lowStockItems, ...outOfStockItems].sort((a, b) => a.stock - b.stock);
 
   if (loading) {
@@ -457,7 +471,7 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Inventory & Warehouse</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
-            {finishedGoods.length} finished goods · {rawMaterials.length} raw materials · {godowns.length || 1} location{godowns.length !== 1 ? 's' : ''}
+            {finishedGoods.length} finished goods · {rawMaterials.length} raw materials · {consumables.length} consumable items · {godowns.length || 1} location{godowns.length !== 1 ? 's' : ''}
           </p>
         </div>
         <div className="flex items-center gap-2 w-full md:w-auto">
@@ -475,7 +489,7 @@ export default function InventoryPage() {
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 md:py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all tap-press-sm"
             >
               <Plus className="w-4 h-4" />
-              Add Product
+              {tab === 'products' && productType === 'consumable' ? 'Add Consumable Item' : 'Add Product'}
             </button>
           )}
         </div>
@@ -539,7 +553,19 @@ export default function InventoryPage() {
                 <Boxes className="w-3.5 h-3.5" />
                 Raw Materials
                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${productType === 'rawMaterial' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
-                  }`}>{rawMaterials.length}</span>
+                }`}>{rawMaterials.length}</span>
+              </button>
+              <button
+                onClick={() => { setProductType('consumable'); setCategory('All'); setSearch(''); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all ${productType === 'consumable'
+                  ? 'bg-accent text-white shadow-sm'
+                  : 'text-muted hover:text-foreground hover:bg-surface-hover'
+                  }`}
+              >
+                <Package className="w-3.5 h-3.5" />
+                Consumable Items
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${productType === 'consumable' ? 'bg-white/20 text-white' : 'bg-surface-hover text-muted'
+                  }`}>{consumables.length}</span>
               </button>
             </div>
 
@@ -548,18 +574,18 @@ export default function InventoryPage() {
           {/* Stats */}
           <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
-              <div className={`p-2.5 rounded-xl ${productType === 'rawMaterial' ? 'bg-accent-light' : 'bg-accent-light'}`}>
-                {productType === 'rawMaterial' ? <Boxes className="w-5 h-5 text-accent" /> : <Package className="w-5 h-5 text-accent" />}
+              <div className="p-2.5 rounded-xl bg-accent-light">
+                {isManualInventoryMode ? <Boxes className="w-5 h-5 text-accent" /> : <Package className="w-5 h-5 text-accent" />}
               </div>
               <div>
-                <p className="text-xs text-muted">{productType === 'rawMaterial' ? 'Raw Materials' : 'Finished Goods'}</p>
+                <p className="text-xs text-muted">{typeCopy.plural}</p>
                 <p className="text-lg font-bold text-foreground">{activeProducts.length}</p>
               </div>
             </div>
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
               <div className="p-2.5 rounded-xl bg-success-light"><TrendingUp className="w-5 h-5 text-success" /></div>
               <div>
-                <p className="text-xs text-muted">{productType === 'rawMaterial' ? 'Material Value' : 'Inventory Value'}</p>
+                <p className="text-xs text-muted">{productType === 'rawMaterial' ? 'Material Value' : productType === 'consumable' ? 'Consumable Value' : 'Inventory Value'}</p>
                 <p className="text-lg font-bold text-foreground">₹{(totalValue / 100000).toFixed(1)}L</p>
               </div>
             </div>
@@ -581,7 +607,7 @@ export default function InventoryPage() {
           <div className="flex flex-col md:flex-row md:items-center gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-              <input type="text" placeholder={`Search ${productType === 'rawMaterial' ? 'raw materials' : 'products'} by name or SKU...`} value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
+              <input type="text" placeholder={`Search ${typeCopy.plural.toLowerCase()} by name or SKU...`} value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
             </div>
             <div className="flex gap-1 overflow-x-auto hide-scrollbar">
               {relevantCategories.map(cat => (
@@ -598,7 +624,7 @@ export default function InventoryPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filtered.map(product => {
                 const badge = stockBadge(product.stock, product.reorderLevel);
-                const isBestSeller = !product.isRawMaterial && product.sold >= 30;
+                const isBestSeller = product.isSellable !== false && product.sold >= 30;
                 // Get godown distribution for this product
                 const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                 return (
@@ -609,7 +635,7 @@ export default function InventoryPage() {
                       ) : product.image ? (
                         <img src={product.image.split(',')[0]} alt={product.name} className="w-full h-full object-cover" />
                       ) : (
-                        product.isRawMaterial ? <Boxes className="w-10 h-10 text-accent/40" /> : <Package className="w-10 h-10 text-muted/30" />
+                        product.isRawMaterial || product.isConsumable ? <Boxes className="w-10 h-10 text-accent/40" /> : <Package className="w-10 h-10 text-muted/30" />
                       )}
                       {isBestSeller && (
                         <span className="absolute top-2 left-2 badge bg-accent text-white text-[10px]">Best Seller</span>
@@ -617,8 +643,20 @@ export default function InventoryPage() {
                       {product.isRawMaterial && (
                         <span className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-accent/90 text-white">RAW MAT</span>
                       )}
+                      {product.isConsumable && (
+                        <span className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white">CONSUMABLE</span>
+                      )}
                       <span className="absolute top-2 right-12 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
-                      {!product.isRawMaterial && (
+                      {product.isConsumable && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
+                          className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
+                          title="Edit Consumable Item"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {product.isSellable !== false && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
                           className="absolute top-10 right-2 p-1.5 rounded-md bg-blue-50 text-blue-600"
@@ -650,7 +688,7 @@ export default function InventoryPage() {
                       )}
 
                       <div className="flex items-center justify-between">
-                        {product.isRawMaterial ? (
+                        {isManualInventoryMode ? (
                           <span className="text-base font-bold text-accent">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] font-normal text-muted">/ {product.unitOfMeasure || 'PCS'}</span></span>
                         ) : (
                           <span className="text-base font-bold text-accent">₹{product.price.toLocaleString()}
@@ -661,7 +699,7 @@ export default function InventoryPage() {
                       </div>
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-border">
                         <span className="text-xs text-muted">{product.stock} {product.unitOfMeasure || 'PCS'} in stock</span>
-                        {product.isRawMaterial ? (
+                        {isManualInventoryMode ? (
                           <span className="text-xs text-muted">Reorder @ {product.reorderLevel}</span>
                         ) : (
                           <span className="text-xs text-muted">{product.sold} sold</span>
@@ -673,15 +711,17 @@ export default function InventoryPage() {
               })}
               {filtered.length === 0 && (
                 <div className="col-span-full glass-card p-12 text-center">
-                  {productType === 'rawMaterial'
+                  {isManualInventoryMode
                     ? <Boxes className="w-10 h-10 text-accent/30 mx-auto mb-3" />
                     : <Package className="w-10 h-10 text-muted/30 mx-auto mb-3" />}
                   <p className="text-foreground font-medium">
-                    No {productType === 'rawMaterial' ? 'raw materials' : 'finished goods'} found
+                    No {typeCopy.plural.toLowerCase()} found
                   </p>
                   <p className="text-xs text-muted mt-1">
                     {productType === 'rawMaterial'
                       ? 'Add raw materials from the Manufacturing module.'
+                      : productType === 'consumable'
+                        ? 'Click “Add Consumable Item” to record daily-use supplies manually.'
                       : 'Click “Add Product” to add your first product.'}
                   </p>
                 </div>
@@ -693,7 +733,7 @@ export default function InventoryPage() {
               <div className="md:hidden space-y-2.5">
                 {filtered.length === 0 && (
                   <div className="glass-card py-12 text-center text-sm text-muted">
-                    No {productType === 'rawMaterial' ? 'raw materials' : 'finished goods'} found
+                    No {typeCopy.plural.toLowerCase()} found
                   </div>
                 )}
                 {filtered.map((product, i) => {
@@ -725,10 +765,15 @@ export default function InventoryPage() {
                         </div>
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-sm font-bold text-accent">
-                            ₹{(product.isRawMaterial ? (product.costPrice || 0) : product.price).toLocaleString()}
+                            ₹{(isManualInventoryMode ? (product.costPrice || 0) : product.price).toLocaleString()}
                           </span>
                           <div className="flex items-center gap-1.5 ml-auto" onClick={(e) => e.stopPropagation()}>
-                            {!product.isRawMaterial && (
+                            {product.isConsumable && (
+                              <button onClick={(e) => openEditModal(product, e)} className="tap-press-sm w-11 h-11 flex items-center justify-center rounded-lg bg-accent/10 text-accent" aria-label="Edit consumable item">
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            )}
+                            {product.isSellable !== false && (
                               <button onClick={(e) => openEditModal(product, e)} className="tap-press-sm w-11 h-11 flex items-center justify-center rounded-lg bg-accent/10 text-accent" aria-label="Edit product">
                                 <Pencil className="w-4 h-4" />
                               </button>
@@ -750,14 +795,14 @@ export default function InventoryPage() {
                   <table className="crm-table">
                     <thead>
                       <tr>
-                        <th>{productType === 'rawMaterial' ? 'Material' : 'Product'}</th>
+                        <th>{isManualInventoryMode ? 'Item' : 'Product'}</th>
                         <th>SKU</th>
                         <th>Category</th>
-                        <th>{productType === 'rawMaterial' ? 'Cost / Unit' : 'Price'}</th>
+                        <th>{isManualInventoryMode ? 'Cost / Unit' : 'Price'}</th>
                         <th>Stock</th>
                         <th>Godown Split</th>
                         <th>Reorder At</th>
-                        {productType === 'rawMaterial' ? <th>UOM</th> : <th>Sold</th>}
+                        {isManualInventoryMode ? <th>UOM</th> : <th>Sold</th>}
                         <th>Status</th>
                         <th>Actions</th>
                       </tr>
@@ -787,7 +832,7 @@ export default function InventoryPage() {
                             </td>
                             <td className="font-mono text-xs text-muted">{product.sku}</td>
                             <td>{product.category}</td>
-                            {product.isRawMaterial ? (
+                            {isManualInventoryMode ? (
                               <td className="text-accent font-semibold">₹{(product.costPrice || 0).toLocaleString()} <span className="text-[10px] text-muted font-normal">/{product.unitOfMeasure || 'PCS'}</span></td>
                             ) : (
                               <td className="text-accent font-semibold">₹{product.price.toLocaleString()}</td>
@@ -801,7 +846,7 @@ export default function InventoryPage() {
                               </div>
                             </td>
                             <td className="text-muted">{product.reorderLevel}</td>
-                            {product.isRawMaterial ? (
+                            {isManualInventoryMode ? (
                               <td className="text-muted text-xs">{product.unitOfMeasure || 'PCS'}</td>
                             ) : (
                               <td>{product.sold}</td>
@@ -812,7 +857,12 @@ export default function InventoryPage() {
                                 <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
                                   Update Stock
                                 </button>
-                                {!product.isRawMaterial && (
+                                {product.isConsumable && (
+                                  <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
+                                    <Pencil className="w-3 h-3" /> Edit
+                                  </button>
+                                )}
+                                {product.isSellable !== false && (
                                   <button onClick={(e) => openEditModal(product, e)} className="px-2 py-1 rounded-lg bg-blue-50 text-xs text-blue-600 hover:bg-blue-100 transition-colors flex items-center gap-1">
                                     <Pencil className="w-3 h-3" /> Edit
                                   </button>
@@ -1464,17 +1514,19 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Add Product / Raw Material Modal */}
+      {/* Add Product / Raw Material / Consumable Modal */}
       <Modal
         isOpen={showAddModal}
         onClose={() => { setShowAddModal(false); setProductImages([]); }}
-        title={tab === 'products' && productType === 'rawMaterial' ? 'Add Raw Material' : 'Add New Product'}
+        title={tab === 'products' && isStockOnlyType(productType) ? `Add ${getTypeCopy(productType).title}` : 'Add New Product'}
       >
         <form className="space-y-4" onSubmit={async (e) => {
           e.preventDefault();
           setAddingProduct(true);
           const f = e.target;
           const isRawMode = tab === 'products' && productType === 'rawMaterial';
+          const isConsumableMode = tab === 'products' && productType === 'consumable';
+          const isManualMode = isRawMode || isConsumableMode;
           // Upload images first
           let imageUrl = '';
           if (productImages.length > 0) {
@@ -1497,15 +1549,15 @@ export default function InventoryPage() {
           const res = await createProduct({
             name: f.productName.value,
             sku: f.sku.value,
-            category: isRawMode ? 'Raw Material' : f.category.value,
-            price: isRawMode ? 0 : Number(f.price.value),
-            bulkPrice: isRawMode ? 0 : Number(f.bulkPrice?.value || 0),
-            costPrice: isRawMode ? Number(f.costPrice?.value || 0) : 0,
+            category: isManualMode ? getTypeCopy(productType).category : f.category.value,
+            price: isManualMode ? 0 : Number(f.price.value),
+            bulkPrice: isManualMode ? 0 : Number(f.bulkPrice?.value || 0),
+            costPrice: isManualMode ? Number(f.costPrice?.value || 0) : 0,
             material: f.material?.value || '',
             color: f.color?.value || '',
             stock: Number(f.stock.value),
             reorderLevel: Number(f.reorderLevel.value),
-            unitOfMeasure: isRawMode ? (f.unitOfMeasure?.value || 'PCS') : 'PCS',
+            unitOfMeasure: isManualMode ? (f.unitOfMeasure?.value || 'PCS') : 'PCS',
             warehouse: f.warehouse?.value || '',
             description: f.description.value,
             image: imageUrl || '',
@@ -1516,11 +1568,15 @@ export default function InventoryPage() {
           setAddingProduct(false);
         }}>
 
-          {/* Mode indicator for raw materials */}
-          {tab === 'products' && productType === 'rawMaterial' && (
-            <div className="flex items-center gap-2 p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl">
-              <Boxes className="w-4 h-4 text-orange-500 flex-shrink-0" />
-              <p className="text-xs text-orange-600">Raw materials are tracked for manufacturing use and are not listed for sale.</p>
+          {/* Mode indicator for manually tracked inventory */}
+          {tab === 'products' && isStockOnlyType(productType) && (
+            <div className={`flex items-center gap-2 p-3 rounded-xl ${productType === 'consumable' ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-orange-500/10 border border-orange-500/20'}`}>
+              <Boxes className={`w-4 h-4 flex-shrink-0 ${productType === 'consumable' ? 'text-emerald-600' : 'text-orange-500'}`} />
+              <p className={`text-xs ${productType === 'consumable' ? 'text-emerald-700' : 'text-orange-600'}`}>
+                {productType === 'consumable'
+                  ? 'Consumables are entered manually for daily use and are not listed for sale or manufacturing BOMs.'
+                  : 'Raw materials are tracked for manufacturing use and are not listed for sale.'}
+              </p>
             </div>
           )}
 
@@ -1555,25 +1611,25 @@ export default function InventoryPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">
-                {tab === 'products' && productType === 'rawMaterial' ? 'Material Name' : 'Product Name'} *
+                {tab === 'products' && productType === 'rawMaterial' ? 'Material Name' : productType === 'consumable' ? 'Consumable Name' : 'Product Name'} *
               </label>
               <input type="text" name="productName" required
-                placeholder={tab === 'products' && productType === 'rawMaterial' ? 'e.g., Sheesham Wood Plank' : 'e.g., Royal L-Shaped Sofa'}
+                placeholder={tab === 'products' && productType === 'rawMaterial' ? 'e.g., Sheesham Wood Plank' : productType === 'consumable' ? 'e.g., Wood Polish, Gloves, Packing Tape' : 'e.g., Royal L-Shaped Sofa'}
                 className="w-full" />
             </div>
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">SKU Code *</label>
               <input type="text" name="sku" required
-                placeholder={tab === 'products' && productType === 'rawMaterial' ? 'e.g., RM-001' : 'e.g., SOF-005'}
+                placeholder={tab === 'products' && productType === 'rawMaterial' ? 'e.g., RM-001' : productType === 'consumable' ? 'e.g., CON-001' : 'e.g., SOF-005'}
                 className="w-full" />
             </div>
           </div>
 
-          {/* Category — hidden/fixed for raw materials */}
-          {tab === 'products' && productType === 'rawMaterial' ? (
+          {/* Category — hidden/fixed for manually tracked inventory */}
+          {tab === 'products' && isStockOnlyType(productType) ? (
             <div className="p-2.5 bg-surface rounded-xl border border-border flex items-center gap-2">
               <span className="text-xs text-muted">Category:</span>
-              <span className="text-xs font-semibold text-orange-500">Raw Material</span>
+              <span className={`text-xs font-semibold ${productType === 'consumable' ? 'text-emerald-600' : 'text-orange-500'}`}>{getTypeCopy(productType).category}</span>
               <span className="text-[10px] text-muted ml-auto">(auto-assigned)</span>
             </div>
           ) : (
@@ -1582,7 +1638,7 @@ export default function InventoryPage() {
                 <label className="block text-xs font-medium text-muted mb-1.5">Category *</label>
                 <input type="text" name="category" required placeholder="e.g., Sofas, Beds, Tables" className="w-full" list="categoryList" />
                 <datalist id="categoryList">
-                  {categories.filter(c => c !== 'All' && c !== 'Raw Material').map(c => <option key={c} value={c} />)}
+                  {categories.filter(c => c !== 'All' && c !== 'Raw Material' && c !== 'Consumable').map(c => <option key={c} value={c} />)}
                 </datalist>
               </div>
               <div>
@@ -1596,8 +1652,8 @@ export default function InventoryPage() {
             </div>
           )}
 
-          {/* Cost price + UOM for raw materials */}
-          {tab === 'products' && productType === 'rawMaterial' && (
+          {/* Cost price + UOM for manually tracked inventory */}
+          {tab === 'products' && isStockOnlyType(productType) && (
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Cost Price (₹/unit)</label>
@@ -1674,12 +1730,14 @@ export default function InventoryPage() {
               disabled={addingProduct}
               className={`px-6 py-2.5 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-all flex items-center gap-2 ${tab === 'products' && productType === 'rawMaterial'
                 ? 'bg-orange-500 hover:bg-orange-600'
+                : tab === 'products' && productType === 'consumable'
+                  ? 'bg-emerald-600 hover:bg-emerald-700'
                 : 'bg-accent hover:bg-accent-hover'
                 }`}
             >
               {addingProduct
                 ? <><RefreshCw className="w-4 h-4 animate-spin" /> Adding...</>
-                : tab === 'products' && productType === 'rawMaterial' ? 'Add Raw Material' : 'Add Product'
+                : tab === 'products' && productType === 'rawMaterial' ? 'Add Raw Material' : productType === 'consumable' ? 'Add Consumable Item' : 'Add Product'
               }
             </button>
           </div>

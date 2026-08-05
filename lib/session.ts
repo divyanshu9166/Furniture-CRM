@@ -2,6 +2,12 @@ import { cookies } from 'next/headers'
 
 const SESSION_SECRET = process.env.SESSION_SECRET || 'default-secret-at-least-32-chars-long'
 const COOKIE_NAME = 'session'
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+}
 
 export interface SessionPayload {
   id: string
@@ -94,16 +100,29 @@ export async function decrypt(session: string | undefined): Promise<SessionPaylo
 }
 
 export async function createSession(user: Omit<SessionPayload, 'expiresAt'>) {
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-  const session = await encrypt({ ...user, expiresAt })
+  const { value: session, expiresAt } = await buildSessionCookie(user)
   const cookieStore = await cookies()
 
   cookieStore.set(COOKIE_NAME, session, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    ...COOKIE_OPTIONS,
     expires: expiresAt,
-    sameSite: 'lax',
-    path: '/',
+  })
+}
+
+export async function buildSessionCookie(user: Omit<SessionPayload, 'expiresAt'>) {
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+  const value = await encrypt({ ...user, expiresAt })
+  return { value, expiresAt }
+}
+
+export async function setSessionCookie(
+  response: { cookies: { set: (name: string, value: string, options: Record<string, unknown>) => void } },
+  user: Omit<SessionPayload, 'expiresAt'>,
+) {
+  const { value, expiresAt } = await buildSessionCookie(user)
+  response.cookies.set(COOKIE_NAME, value, {
+    ...COOKIE_OPTIONS,
+    expires: expiresAt,
   })
 }
 
@@ -116,4 +135,10 @@ export async function getSession() {
 export async function deleteSession() {
   const cookieStore = await cookies()
   cookieStore.delete(COOKIE_NAME)
+}
+
+export function clearSessionCookie(
+  response: { cookies: { delete: (name: string) => void } },
+) {
+  response.cookies.delete(COOKIE_NAME)
 }

@@ -749,7 +749,7 @@ function OrdersPageInner() {
                 setOrderQty(1);
               }}>
               <option value="">— Select a product —</option>
-              {products.map(p => (
+              {products.filter(p => p.isSellable !== false).map(p => (
                 <option key={p.id} value={p.id}>{p.name} — ₹{p.price.toLocaleString()} ({p.stock} in stock)</option>
               ))}
             </select>

@@ -6,6 +6,11 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  allowedDevOrigins: [
+    '*.ngrok-free.dev',
+    '*.ngrok.app',
+    '*.ngrok.io',
+  ],
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -22,7 +27,14 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
-      allowedOrigins: ['localhost:3000', '*.github.dev', 'crm.kosmicfurniture.com']
+      allowedOrigins: [
+        'localhost:3000',
+        '*.github.dev',
+        'crm.kosmicfurniture.com',
+        '*.ngrok-free.app',
+        '*.ngrok.app',
+        '*.ngrok.io',
+      ]
     }
   },
   // Rewrite /uploads/* → /api/uploads/* so images stored with old paths still work

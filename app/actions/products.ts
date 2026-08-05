@@ -40,30 +40,36 @@ export async function getProducts() {
 
   return {
     success: true,
-    data: products.map(p => ({
-      id: p.id,
-      sku: p.sku,
-      name: p.name,
-      category: p.category.name,
-      categoryId: p.categoryId,
-      isRawMaterial: p.category.name === 'Raw Material',
-      price: p.price,
-      bulkPrice: p.bulkPrice,
-      costPrice: p.costPrice,
-      brand: p.brand,
-      hsnCode: p.hsnCode,
-      unitOfMeasure: p.unitOfMeasure,
-      unitSize: p.unitSize,
-      stock: p.stock,
-      sold: p.sold,
-      reorderLevel: p.reorderLevel,
-      image: p.image,
-      material: p.material,
-      color: p.color,
-      description: p.description,
-      warehouse: p.warehouse?.name || 'Unassigned',
-      lastRestocked: p.lastRestocked?.toISOString().split('T')[0] || null,
-    })),
+    data: products.map(p => {
+      const isRawMaterial = p.category.name === 'Raw Material'
+      const isConsumable = p.category.name === 'Consumable'
+      return {
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category.name,
+        categoryId: p.categoryId,
+        isRawMaterial,
+        isConsumable,
+        isSellable: !isRawMaterial && !isConsumable,
+        price: p.price,
+        bulkPrice: p.bulkPrice,
+        costPrice: p.costPrice,
+        brand: p.brand,
+        hsnCode: p.hsnCode,
+        unitOfMeasure: p.unitOfMeasure,
+        unitSize: p.unitSize,
+        stock: p.stock,
+        sold: p.sold,
+        reorderLevel: p.reorderLevel,
+        image: p.image,
+        material: p.material,
+        color: p.color,
+        description: p.description,
+        warehouse: p.warehouse?.name || 'Unassigned',
+        lastRestocked: p.lastRestocked?.toISOString().split('T')[0] || null,
+      }
+    }),
   }
 }
 

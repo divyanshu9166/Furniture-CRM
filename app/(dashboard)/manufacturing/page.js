@@ -196,7 +196,7 @@ export default function ManufacturingPage() {
   const [templateForm, setTemplateForm] = useState({ name: '', description: '', steps: [] })
 
   const finishedProducts = useMemo(() => {
-    return products.filter(p => p.category !== 'Raw Material')
+    return products.filter(p => p.isSellable !== false)
   }, [products])
 
   const selectedFinishedProduct = useMemo(() => {
