@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { getProducts, getCategories, getWarehouses, createProduct, updateStock, bulkImportProducts } from '@/app/actions/products';
 import { moveProductToDraft } from '@/app/actions/drafts';
-import { getStockGroups, createStockGroup } from '@/app/actions/stock-groups';
+import { getStockGroups, createStockGroup, updateStockGroup, deleteStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
@@ -51,6 +51,9 @@ export default function InventoryPage() {
   const [batches, setBatches] = useState([]);
   const [agingData, setAgingData] = useState([]);
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [groupError, setGroupError] = useState('');
+  const [groupSaving, setGroupSaving] = useState(false);
+  const [groupDeleting, setGroupDeleting] = useState(null);
 
   const { notify } = useAlertToast();
 
@@ -109,9 +112,10 @@ export default function InventoryPage() {
     setProductToDelete(null);
   };
   const [showBatchModal, setShowBatchModal] = useState(false);
-  const [groupForm, setGroupForm] = useState({ name: '', parentId: '' });
+  const [groupForm, setGroupForm] = useState({ id: null, name: '', parentId: '' });
   const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
   const [deepLoading, setDeepLoading] = useState(false);
+  const [groupLoadError, setGroupLoadError] = useState('');
 
   // Location view state
   const [godownStocks, setGodownStocks] = useState([]);
@@ -132,11 +136,82 @@ export default function InventoryPage() {
       if (gdRes.success) setGodowns(gdRes.data);
       setLoading(false);
     });
+    getStockGroups().then((res) => {
+      if (res.success) setStockGroups(res.data);
+    });
   }, []);
 
   const refreshProducts = async () => {
     const res = await getProducts();
     if (res.success) setProducts(res.data);
+  };
+
+  const openGroupModal = (group = null) => {
+    setGroupError('');
+    setGroupForm({
+      id: group?.id ?? null,
+      name: group?.name ?? '',
+      parentId: group?.parentId ? String(group.parentId) : '',
+    });
+    setShowGroupModal(true);
+  };
+
+  const closeGroupModal = () => {
+    setShowGroupModal(false);
+    setGroupError('');
+    setGroupForm({ id: null, name: '', parentId: '' });
+  };
+
+  const handleGroupSubmit = async () => {
+    const name = groupForm.name.trim();
+    if (!name) {
+      setGroupError('Group name is required');
+      return;
+    }
+
+    setGroupSaving(true);
+    setGroupError('');
+    const isEditing = Boolean(groupForm.id);
+    try {
+      const payload = {
+        name,
+        parentId: groupForm.parentId ? Number(groupForm.parentId) : null,
+      };
+      const res = groupForm.id
+        ? await updateStockGroup(groupForm.id, payload)
+        : await createStockGroup(payload);
+
+      if (!res.success) {
+        setGroupError(res.error || 'Unable to save stock group');
+        return;
+      }
+
+      closeGroupModal();
+      await loadDeepInventory();
+      notify(isEditing ? 'Stock group updated' : 'Stock group created', { variant: 'success' });
+    } catch (error) {
+      setGroupError(error?.message || 'Unable to save stock group');
+    } finally {
+      setGroupSaving(false);
+    }
+  };
+
+  const handleGroupDelete = async (group) => {
+    if (!window.confirm(`Delete stock group "${group.name}"?`)) return;
+    setGroupDeleting(group.id);
+    try {
+      const res = await deleteStockGroup(group.id);
+      if (!res.success) {
+        notify(res.error || 'Unable to delete stock group', { variant: 'danger' });
+        return;
+      }
+      await loadDeepInventory();
+      notify('Stock group deleted', { variant: 'success' });
+    } catch (error) {
+      notify(error?.message || 'Unable to delete stock group', { variant: 'danger' });
+    } finally {
+      setGroupDeleting(null);
+    }
   };
 
   // ─── EDIT PRODUCT HANDLERS ────────────────────────
@@ -154,6 +229,7 @@ export default function InventoryPage() {
       description: product.description || '',
       brand: product.brand || '',
       unitOfMeasure: product.unitOfMeasure || 'PCS',
+      stockGroupId: product.stockGroupId ? String(product.stockGroupId) : '',
     });
     setEditImageFile(null);
     setEditImagePreview(product.image ? product.image.split(',')[0] : null);
@@ -200,6 +276,7 @@ export default function InventoryPage() {
         description: editForm.description || '',
         brand: editForm.brand || '',
         unitOfMeasure: editForm.unitOfMeasure || 'PCS',
+        stockGroupId: editForm.stockGroupId ? Number(editForm.stockGroupId) : null,
         image: imageUrl,
       };
 
@@ -366,11 +443,30 @@ export default function InventoryPage() {
 
   const loadDeepInventory = useCallback(async () => {
     setDeepLoading(true);
-    const [sgRes, bRes, aRes] = await Promise.all([getStockGroups(), getBatches(), getAgingAnalysis()]);
-    if (sgRes.success) setStockGroups(sgRes.data);
-    if (bRes.success) setBatches(bRes.data);
-    if (aRes.success) setAgingData(aRes.data);
-    setDeepLoading(false);
+    setGroupLoadError('');
+    try {
+      // Keep each deep-inventory panel independent. A broken batches/aging
+      // query must not make the Groups panel unusable.
+      const results = await Promise.allSettled([getStockGroups(), getBatches(), getAgingAnalysis()]);
+      const [sgResult, batchesResult, agingResult] = results;
+
+      if (sgResult.status === 'fulfilled' && sgResult.value.success) {
+        setStockGroups(sgResult.value.data);
+      } else {
+        const message = sgResult.status === 'fulfilled' ? (sgResult.value.error || 'Groups could not be loaded') : 'Groups could not be loaded';
+        setGroupLoadError(message);
+      }
+
+      if (batchesResult.status === 'fulfilled' && batchesResult.value.success) setBatches(batchesResult.value.data);
+
+      if (agingResult.status === 'fulfilled' && agingResult.value.success) setAgingData(agingResult.value.data);
+
+    } catch (error) {
+      console.error('Failed to load deep inventory:', error);
+      setGroupLoadError('Unable to load inventory groups right now. Please retry.');
+    } finally {
+      setDeepLoading(false);
+    }
   }, []);
 
   const loadLocationData = useCallback(async () => {
@@ -673,6 +769,9 @@ export default function InventoryPage() {
                         <h3 className="text-sm font-semibold text-foreground leading-tight">{product.name}</h3>
                       </div>
                       <p className="text-xs text-muted mb-1">{product.category}{product.brand ? ` · ${product.brand}` : product.material ? ` · ${product.material}` : ''}</p>
+                      {product.stockGroupName && (
+                        <p className="text-[10px] text-accent mb-1 flex items-center gap-1"><Layers className="w-3 h-3" /> {product.stockGroupName}</p>
+                      )}
                       <p className="text-[10px] text-muted mb-2 flex items-center gap-1"><Warehouse className="w-3 h-3" /> {product.warehouse}</p>
 
                       {/* Godown distribution */}
@@ -762,6 +861,7 @@ export default function InventoryPage() {
                           <span className="text-xs text-muted font-mono truncate">{product.sku}</span>
                           <span className="text-xs text-muted flex-shrink-0">· {product.stock} {product.unitOfMeasure || 'PCS'} in stock</span>
                         </div>
+                        {product.stockGroupName && <p className="text-[10px] text-accent mt-1 truncate flex items-center gap-1"><Layers className="w-3 h-3 flex-shrink-0" /> {product.stockGroupName}</p>}
                         <div className="flex items-center gap-2 mt-1.5">
                           <span className="text-sm font-bold text-accent">
                             ₹{(isManualInventoryMode ? (product.costPrice || 0) : product.price).toLocaleString()}
@@ -1179,14 +1279,32 @@ export default function InventoryPage() {
       {tab === 'stockGroups' && (
         <div className="space-y-4">
           <div className="flex justify-end">
-            <button onClick={() => setShowGroupModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Stock Group</button>
+            <button onClick={() => openGroupModal()} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Stock Group</button>
           </div>
+          {groupLoadError && (
+            <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-sm text-red-600">
+              <span>{groupLoadError}</span>
+              <button type="button" onClick={loadDeepInventory} className="flex-shrink-0 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 font-medium">Retry</button>
+            </div>
+          )}
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {stockGroups.map(g => (
                 <div key={g.id} className="glass-card p-5">
-                  <h3 className="font-semibold text-foreground">{g.name}</h3>
-                  <p className="text-xs text-muted mt-1">Parent: {g.parent?.name || 'Root'}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-foreground truncate">{g.name}</h3>
+                      <p className="text-xs text-muted mt-1">Parent: {g.parent?.name || 'Root'}</p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button type="button" onClick={() => openGroupModal(g)} className="p-2 rounded-lg text-muted hover:text-accent hover:bg-accent/10" aria-label={`Edit ${g.name}`} title="Edit group">
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button type="button" onClick={() => handleGroupDelete(g)} disabled={groupDeleting === g.id} className="p-2 rounded-lg text-muted hover:text-danger hover:bg-danger-light disabled:opacity-50" aria-label={`Delete ${g.name}`} title="Delete group">
+                        {groupDeleting === g.id ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
                   <div className="flex items-center gap-4 mt-3 text-sm text-muted">
                     <span>{g._count?.products || 0} products</span>
                     <span>{g._count?.children || 0} sub-groups</span>
@@ -1196,24 +1314,24 @@ export default function InventoryPage() {
               {stockGroups.length === 0 && <div className="col-span-full text-center py-12 text-muted">No stock groups created yet</div>}
             </div>
           )}
-          <Modal isOpen={showGroupModal} onClose={() => setShowGroupModal(false)} title="Add Stock Group">
+          <Modal isOpen={showGroupModal} onClose={closeGroupModal} title={groupForm.id ? 'Edit Stock Group' : 'Add Stock Group'}>
             <div className="space-y-4">
               <div>
                 <label className="text-sm text-muted mb-1 block">Group Name *</label>
-                <input value={groupForm.name} onChange={e => setGroupForm(p => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                <input value={groupForm.name} onChange={e => setGroupForm(p => ({ ...p, name: e.target.value }))} maxLength={80} autoFocus className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <div>
                 <label className="text-sm text-muted mb-1 block">Parent Group</label>
                 <select value={groupForm.parentId} onChange={e => setGroupForm(p => ({ ...p, parentId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
                   <option value="">None (Root)</option>
-                  {stockGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  {stockGroups.filter(g => g.id !== groupForm.id).map(g => <option key={g.id} value={g.id}>{g.parent?.name ? `${g.parent.name} / ` : ''}{g.name}</option>)}
                 </select>
               </div>
-              <button onClick={async () => {
-                const res = await createStockGroup({ name: groupForm.name, parentId: groupForm.parentId ? Number(groupForm.parentId) : undefined });
-                if (res.success) { setShowGroupModal(false); setGroupForm({ name: '', parentId: '' }); loadDeepInventory(); }
-                else alert(res.error);
-              }} disabled={!groupForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">Create Stock Group</button>
+              {groupError && <p className="text-xs text-red-600 bg-red-500/10 border border-red-500/20 rounded-lg p-2.5">{groupError}</p>}
+              <button type="button" onClick={handleGroupSubmit} disabled={groupSaving || !groupForm.name.trim()} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50 flex items-center justify-center gap-2">
+                {groupSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                {groupSaving ? 'Saving...' : groupForm.id ? 'Save Changes' : 'Create Stock Group'}
+              </button>
             </div>
           </Modal>
         </div>
@@ -1558,6 +1676,7 @@ export default function InventoryPage() {
             reorderLevel: Number(f.reorderLevel.value),
             unitOfMeasure: isManualMode ? (f.unitOfMeasure?.value || 'PCS') : 'PCS',
             warehouse: f.warehouse?.value || '',
+            stockGroupId: f.stockGroupId?.value ? Number(f.stockGroupId.value) : null,
             description: f.description.value,
             image: imageUrl || '',
             godownId: selectedGodownId,
@@ -1666,8 +1785,36 @@ export default function InventoryPage() {
                   ))}
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-muted mb-1.5">Stock Group</label>
+                <select
+                  value={editForm.stockGroupId || ''}
+                  onChange={e => setEditForm(f => ({ ...f, stockGroupId: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
+                >
+                  <option value="">No stock group</option>
+                  {stockGroups.map(group => (
+                    <option key={group.id} value={group.id}>
+                      {group.parent?.name ? `${group.parent.name} / ` : ''}{group.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
+
+          <div>
+            <label className="block text-xs font-medium text-muted mb-1.5">Stock Group</label>
+            <select name="stockGroupId" defaultValue="" className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
+              <option value="">No stock group</option>
+              {stockGroups.map(group => (
+                <option key={group.id} value={group.id}>
+                  {group.parent?.name ? `${group.parent.name} / ` : ''}{group.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-[10px] text-muted mt-1">Use groups to organize products, raw materials, and consumables.</p>
+          </div>
 
           {tab !== 'products' || productType !== 'rawMaterial' ? (
             <div className="grid grid-cols-2 gap-4">

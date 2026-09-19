@@ -1,26 +1,16 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Plus, Send, Calendar, Eye, Users, MousePointerClick, Mail, MessageSquare, Smartphone, Upload, FileSpreadsheet, CheckCircle2, AlertCircle, X, Download, ChevronDown } from 'lucide-react';
-import { getCampaigns, createCampaign } from '@/app/actions/campaigns';
+import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import {
+  ArrowRight, CheckCircle2, Download, FileSpreadsheet, History, Mail,
+  Megaphone, MessageSquare, RefreshCw, Upload, Users,
+} from 'lucide-react';
+import { getCampaigns } from '@/app/actions/campaigns';
 import { bulkImportContacts } from '@/app/actions/contacts';
 import Modal from '@/components/Modal';
 
-const channelOptions = ['WhatsApp', 'Email', 'SMS'];
-
-const channelIcons = { WhatsApp: MessageSquare, Email: Mail, SMS: Smartphone };
-const channelColors = {
-  WhatsApp: 'text-success bg-success-light',
-  Email: 'text-info bg-info-light',
-  SMS: 'text-purple bg-purple-light',
-};
-const statusColors = {
-  Draft: 'bg-surface-hover text-muted border border-border',
-  Scheduled: 'bg-info-light text-info',
-  Sent: 'bg-success-light text-success',
-};
-
-// Expected columns for bulk import (flexible mapping)
+const MAX_IMPORT_ROWS = 5000;
 const COLUMN_ALIASES = {
   name: ['name', 'full name', 'customer name', 'contact name', 'naam'],
   phone: ['phone', 'mobile', 'phone number', 'mobile number', 'contact', 'number', 'mob', 'ph'],
@@ -32,449 +22,167 @@ const COLUMN_ALIASES = {
 };
 
 function mapColumns(headers) {
-  const map = {};
-  headers.forEach((h, i) => {
-    const lower = h.toLowerCase().trim();
+  return headers.reduce((map, header, index) => {
+    const value = String(header).trim().toLowerCase();
     for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-      if (aliases.includes(lower) && !(field in map)) {
-        map[field] = i;
-      }
+      if (aliases.includes(value) && map[field] === undefined) map[field] = index;
     }
-  });
-  return map;
+    return map;
+  }, {});
 }
+
+function toContact(row, columns) {
+  const value = (field) => columns[field] === undefined ? '' : String(row[columns[field]] ?? '').trim();
+  return {
+    name: value('name'), phone: value('phone'), email: value('email') || undefined,
+    address: value('address') || undefined, city: value('city') || undefined,
+    source: value('source') || undefined, notes: value('notes') || undefined,
+  };
+}
+
+const legacyStatusClass = {
+  Draft: 'bg-surface-hover text-muted border border-border',
+  Scheduled: 'bg-amber-500/10 text-amber-600',
+  Sent: 'bg-success-light text-success',
+};
 
 export default function MarketingPage() {
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedCampaign, setSelectedCampaign] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ name: '', channel: 'WhatsApp', audience: '', template: '', scheduledDate: '', saveAsDraft: false });
-  // Bulk import state
-  const [showImportModal, setShowImportModal] = useState(false);
+  const [pageError, setPageError] = useState('');
+  const [showImport, setShowImport] = useState(false);
   const [importRows, setImportRows] = useState([]);
-  const [importHeaders, setImportHeaders] = useState([]);
-  const [importColMap, setImportColMap] = useState({});
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState(null);
+  const [headers, setHeaders] = useState([]);
+  const [columns, setColumns] = useState({});
   const [importError, setImportError] = useState('');
-  const fileInputRef = useRef(null);
+  const [importResult, setImportResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const inputRef = useRef(null);
 
-  const refresh = async () => {
-    const res = await getCampaigns();
-    if (res.success) setCampaigns(res.data);
+  const loadCampaigns = async () => {
+    setPageError('');
+    const result = await getCampaigns();
+    if (result.success) setCampaigns(result.data);
+    else setPageError(result.error || 'Unable to load campaign history.');
   };
 
   useEffect(() => {
-    getCampaigns().then(res => {
-      if (res.success) setCampaigns(res.data);
+    let cancelled = false;
+    async function loadInitialCampaigns() {
+      const result = await getCampaigns();
+      if (cancelled) return;
+      if (result.success) setCampaigns(result.data);
+      else setPageError(result.error || 'Unable to load campaign history.');
       setLoading(false);
-    });
+    }
+    void loadInitialCampaigns();
+    return () => { cancelled = true; };
   }, []);
 
-  const totalSent = campaigns.reduce((s, c) => s + c.sent, 0);
-  const totalOpened = campaigns.reduce((s, c) => s + c.opened, 0);
-  const totalClicked = campaigns.reduce((s, c) => s + c.clicked, 0);
-
-  const handleCreate = async (saveAsDraft) => {
-    if (!form.name || !form.template) return;
-    setSubmitting(true);
-    try {
-      const res = await createCampaign({
-        name: form.name,
-        channel: form.channel,
-        audience: form.audience ? parseInt(form.audience) : 0,
-        template: form.template,
-        scheduledDate: form.scheduledDate || undefined,
-      });
-      if (res.success) {
-        setShowCreateModal(false);
-        setForm({ name: '', channel: 'WhatsApp', audience: '', template: '', scheduledDate: '' });
-        await refresh();
-      } else {
-        alert(res.error || 'Failed to create campaign');
-      }
-    } finally {
-      setSubmitting(false);
-    }
+  const openImport = () => {
+    setImportRows([]); setHeaders([]); setColumns({}); setImportError(''); setImportResult(null); setShowImport(true);
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0];
     if (!file) return;
-    setImportError('');
-    setImportResult(null);
-    setImportRows([]);
-    setImportHeaders([]);
+    setImportError(''); setImportResult(null); setImportRows([]); setHeaders([]); setColumns({});
 
     try {
-      const XLSX = (await import('xlsx')).default;
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      if (file.size > 10 * 1024 * 1024) throw new Error('Choose a file smaller than 10 MB.');
+      const xlsxModule = await import('xlsx');
+      const XLSX = xlsxModule.default ?? xlsxModule;
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      if (!Array.isArray(data) || data.length < 2) throw new Error('The file needs a header row and at least one contact.');
 
-      if (rawData.length < 2) {
-        setImportError('File is empty or has no data rows');
-        return;
+      const nextHeaders = data[0].map((cell) => String(cell).trim());
+      const nextRows = data.slice(1).filter((row) => row.some((cell) => String(cell).trim()));
+      if (nextRows.length > MAX_IMPORT_ROWS) throw new Error(`Import up to ${MAX_IMPORT_ROWS.toLocaleString()} contacts at a time.`);
+      const nextColumns = mapColumns(nextHeaders);
+      if (nextColumns.name === undefined || nextColumns.phone === undefined) {
+        throw new Error('Required columns missing: include both Name and Phone.');
       }
-
-      const headers = rawData[0].map(h => String(h));
-      const rows = rawData.slice(1).filter(row => row.some(cell => String(cell).trim()));
-      const colMap = mapColumns(headers);
-
-      if (!('name' in colMap) && !('phone' in colMap)) {
-        setImportError('Could not find "Name" or "Phone" columns. Please check your file headers.');
-        return;
-      }
-
-      setImportHeaders(headers);
-      setImportRows(rows);
-      setImportColMap(colMap);
-    } catch (err) {
-      setImportError('Failed to parse file. Please use .xlsx, .xls, or .csv format.');
+      setHeaders(nextHeaders); setImportRows(nextRows); setColumns(nextColumns);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Unable to read this file. Use CSV, XLS, or XLSX.');
+    } finally {
+      if (inputRef.current) inputRef.current.value = '';
     }
-    // Reset file input
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleImportSubmit = async () => {
-    if (importRows.length === 0) return;
-    setImportLoading(true);
-    setImportError('');
-    try {
-      const contacts = importRows.map(row => ({
-        name: String(row[importColMap.name] ?? '').trim(),
-        phone: String(row[importColMap.phone] ?? '').trim(),
-        email: importColMap.email !== undefined ? String(row[importColMap.email] ?? '').trim() || undefined : undefined,
-        address: importColMap.address !== undefined ? String(row[importColMap.address] ?? '').trim() || undefined : undefined,
-        city: importColMap.city !== undefined ? String(row[importColMap.city] ?? '').trim() || undefined : undefined,
-        source: importColMap.source !== undefined ? String(row[importColMap.source] ?? '').trim() || undefined : undefined,
-        notes: importColMap.notes !== undefined ? String(row[importColMap.notes] ?? '').trim() || undefined : undefined,
-      })).filter(c => c.name || c.phone);
-
-      const res = await bulkImportContacts(contacts);
-      if (res.success) {
-        setImportResult(res.data);
-        setImportRows([]);
-        setImportHeaders([]);
-      } else {
-        setImportError(res.error || 'Import failed');
-      }
-    } catch {
-      setImportError('Import failed. Please try again.');
-    }
-    setImportLoading(false);
+  const submitImport = async () => {
+    setImporting(true); setImportError('');
+    const result = await bulkImportContacts(importRows.map((row) => toContact(row, columns)));
+    setImporting(false);
+    if (result.success) {
+      setImportResult(result.data); setImportRows([]); setHeaders([]); setColumns({});
+    } else setImportError(result.error || 'Unable to import contacts.');
   };
 
   const downloadTemplate = () => {
-    const csv = 'Name,Phone,Email,Address,City,Source,Notes\nRahul Sharma,9876543210,rahul@example.com,"123 MG Road","Mumbai","Walk-in","VIP customer"';
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'contacts_import_template.csv';
-    a.click();
+    const csv = 'Name,Phone,Email,Address,City,Source,Notes\nRahul Sharma,9876543210,rahul@example.com,123 MG Road,Mumbai,Walk-in,VIP customer';
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'contacts_import_template.csv'; anchor.click();
     URL.revokeObjectURL(url);
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-6 animate-pulse">
-        <div className="h-8 w-64 bg-surface rounded-lg" />
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">{[1,2,3,4].map(i => <div key={i} className="h-20 bg-surface rounded-2xl" />)}</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">{[1,2,3].map(i => <div key={i} className="h-48 bg-surface rounded-2xl" />)}</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+    <div className="space-y-6 animate-[fade-in_0.35s_ease-out]">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Marketing & Campaigns</h1>
-          <p className="text-sm text-muted mt-1">{campaigns.length} campaigns · {totalSent.toLocaleString()} messages sent</p>
+          <h1 className="text-2xl font-bold text-foreground">Marketing Hub</h1>
+          <p className="mt-1 text-sm text-muted">Create and send campaigns from the connected channel workspace.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => { setShowImportModal(true); setImportRows([]); setImportHeaders([]); setImportResult(null); setImportError(''); }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-surface border border-border hover:border-accent/30 text-foreground rounded-xl text-sm font-semibold transition-all">
-            <Upload className="w-4 h-4" /> Import Contacts
-          </button>
-          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-            <Plus className="w-4 h-4" /> Create Campaign
-          </button>
-        </div>
+        <button onClick={openImport} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:border-accent/30 hover:bg-surface-hover">
+          <Upload className="h-4 w-4" /> Import contacts
+        </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="glass-card p-4 flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-accent-light"><Send className="w-5 h-5 text-accent" /></div>
-          <div><p className="text-xs text-muted">Total Sent</p><p className="text-lg font-bold text-foreground">{totalSent.toLocaleString()}</p></div>
-        </div>
-        <div className="glass-card p-4 flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-info-light"><Eye className="w-5 h-5 text-info" /></div>
-          <div><p className="text-xs text-muted">Total Opened</p><p className="text-lg font-bold text-foreground">{totalOpened.toLocaleString()}</p></div>
-        </div>
-        <div className="glass-card p-4 flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-success-light"><MousePointerClick className="w-5 h-5 text-success" /></div>
-          <div><p className="text-xs text-muted">Total Clicked</p><p className="text-lg font-bold text-foreground">{totalClicked.toLocaleString()}</p></div>
-        </div>
-        <div className="glass-card p-4 flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-purple-light"><Users className="w-5 h-5 text-purple" /></div>
-          <div><p className="text-xs text-muted">Avg Open Rate</p><p className="text-lg font-bold text-foreground">{totalSent > 0 ? Math.round((totalOpened / totalSent) * 100) : 0}%</p></div>
-        </div>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <ChannelCard href="/email-marketing" icon={Mail} title="Email campaigns" description="Create email templates, choose subscribed recipients, send campaigns, and review delivery engagement." action="Open Email Marketing" tone="bg-info-light text-info" />
+        <ChannelCard href="/whatsapp-marketing?tab=broadcasts" icon={MessageSquare} title="WhatsApp broadcasts" description="Use approved WhatsApp templates, audience filters, delivery status, and message automation in one workspace." action="Open WhatsApp Marketing" tone="bg-success-light text-success" />
       </div>
 
-      {/* Campaign Cards */}
-      {campaigns.length === 0 ? (
-        <div className="glass-card py-16 text-center text-muted">
-          <Send className="w-12 h-12 mx-auto mb-3 opacity-20" />
-          <p className="font-medium">No campaigns yet</p>
-          <p className="text-sm mt-1">Create your first campaign to reach customers</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {campaigns.map(campaign => {
-            const ChannelIcon = channelIcons[campaign.channel];
-            const openRate = campaign.sent > 0 ? Math.round((campaign.opened / campaign.sent) * 100) : 0;
-            const clickRate = campaign.sent > 0 ? Math.round((campaign.clicked / campaign.sent) * 100) : 0;
-            return (
-              <div key={campaign.id} onClick={() => setSelectedCampaign(campaign)}
-                className="glass-card overflow-hidden hover:scale-[1.01] transition-transform cursor-pointer">
-                <div className="p-5">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="text-base font-semibold text-foreground mb-1">{campaign.name}</h3>
-                      <div className="flex items-center gap-2">
-                        <div className={`w-6 h-6 rounded-lg flex items-center justify-center ${channelColors[campaign.channel]}`}>
-                          <ChannelIcon className="w-3.5 h-3.5" />
-                        </div>
-                        <span className="text-xs text-muted">{campaign.channel}</span>
-                        <span className={`badge text-[10px] ${statusColors[campaign.status]}`}>{campaign.status}</span>
-                      </div>
-                    </div>
-                  </div>
-                  {campaign.scheduledDate && (
-                    <div className="flex items-center gap-1.5 text-xs text-muted mb-3">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {campaign.status === 'Sent' ? 'Sent on' : 'Scheduled for'} {campaign.scheduledDate}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-1.5 text-xs text-muted mb-4">
-                    <Users className="w-3.5 h-3.5" />{campaign.audience.toLocaleString()} audience
-                  </div>
-                  {campaign.sent > 0 ? (
-                    <div className="grid grid-cols-3 gap-3 pt-3 border-t border-border">
-                      <div className="text-center"><p className="text-xs text-muted">Sent</p><p className="text-sm font-bold text-foreground">{campaign.sent.toLocaleString()}</p></div>
-                      <div className="text-center"><p className="text-xs text-muted">Opened</p><p className="text-sm font-bold text-info">{openRate}%</p></div>
-                      <div className="text-center"><p className="text-xs text-muted">Clicked</p><p className="text-sm font-bold text-success">{clickRate}%</p></div>
-                    </div>
-                  ) : (
-                    <div className="pt-3 border-t border-border">
-                      <p className="text-xs text-muted text-center">Not yet sent</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <InfoCard icon={Megaphone} title="Channel-first delivery" text="Every send happens through its configured Email or WhatsApp integration." />
+        <InfoCard icon={Users} title="Consent-aware audiences" text="Email campaigns target subscribed contacts only; WhatsApp uses its own contact audience." />
+        <InfoCard icon={History} title="Existing data preserved" text={`${campaigns.length} legacy campaign record${campaigns.length === 1 ? '' : 's'} remain available below.`} />
+      </div>
 
-      {/* Campaign Detail Modal */}
-      <Modal isOpen={!!selectedCampaign} onClose={() => setSelectedCampaign(null)} title="Campaign Details" size="lg">
-        {selectedCampaign && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-foreground">{selectedCampaign.name}</h3>
-              <span className={`badge ${statusColors[selectedCampaign.status]}`}>{selectedCampaign.status}</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="p-3 rounded-xl bg-surface text-center"><p className="text-xs text-muted">Channel</p><p className="text-sm font-medium text-foreground">{selectedCampaign.channel}</p></div>
-              <div className="p-3 rounded-xl bg-surface text-center"><p className="text-xs text-muted">Audience</p><p className="text-sm font-medium text-foreground">{selectedCampaign.audience.toLocaleString()}</p></div>
-              <div className="p-3 rounded-xl bg-surface text-center"><p className="text-xs text-muted">Sent</p><p className="text-sm font-medium text-foreground">{selectedCampaign.sent.toLocaleString()}</p></div>
-              <div className="p-3 rounded-xl bg-surface text-center"><p className="text-xs text-muted">Opened</p><p className="text-sm font-medium text-foreground">{selectedCampaign.opened.toLocaleString()}</p></div>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-muted mb-2">Message Template</p>
-              <div className="p-4 rounded-xl bg-surface border border-border">
-                <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed">{selectedCampaign.template}</pre>
-              </div>
-            </div>
-          </div>
+      <section className="glass-card overflow-hidden">
+        <div className="flex flex-col gap-2 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><h2 className="font-semibold text-foreground">Legacy campaign history</h2><p className="mt-1 text-xs text-muted">Records created by the previous planner. They are kept for reference; new sends belong in the channel workspaces above.</p></div>
+          <button onClick={() => { setLoading(true); loadCampaigns().finally(() => setLoading(false)); }} className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-accent hover:underline sm:self-auto"><RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
+        </div>
+        {pageError ? <div className="p-5 text-sm text-red-600">{pageError}</div> : loading ? (
+          <div className="space-y-3 p-5 animate-pulse"><div className="h-12 rounded-xl bg-surface" /><div className="h-12 rounded-xl bg-surface" /></div>
+        ) : campaigns.length === 0 ? (
+          <div className="px-5 py-12 text-center"><History className="mx-auto mb-3 h-9 w-9 text-muted/40" /><p className="text-sm font-medium text-foreground">No legacy campaigns</p><p className="mt-1 text-xs text-muted">Start a new campaign from Email Marketing or WhatsApp Marketing.</p></div>
+        ) : (
+          <div className="divide-y divide-border">{campaigns.map((campaign) => <div key={campaign.id} className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><p className="truncate text-sm font-semibold text-foreground">{campaign.name}</p><p className="mt-1 text-xs text-muted">{campaign.channel} · {campaign.audience.toLocaleString()} planned audience{campaign.scheduledDate ? ` · ${campaign.scheduledDate}` : ''}</p></div><span className={`badge w-fit text-[11px] ${legacyStatusClass[campaign.status] || legacyStatusClass.Draft}`}>{campaign.status}</span></div>)}</div>
         )}
-      </Modal>
+      </section>
 
-      {/* Bulk Import Contacts Modal */}
-      <Modal isOpen={showImportModal} onClose={() => setShowImportModal(false)} title="Import Contacts from Excel / CSV" size="lg">
+      <Modal isOpen={showImport} onClose={() => !importing && setShowImport(false)} title="Import contacts" size="lg">
         <div className="space-y-4">
-          {/* Instructions */}
-          <div className="flex items-start gap-3 p-3 bg-info-light/30 border border-info/20 rounded-xl">
-            <FileSpreadsheet className="w-4 h-4 text-info mt-0.5 flex-shrink-0" />
-            <div className="text-xs text-muted">
-              <p className="font-medium text-foreground mb-1">Supported formats: .xlsx, .xls, .csv, Google Sheets (export as CSV/Excel)</p>
-              <p>Required columns: <strong>Name</strong>, <strong>Phone</strong>. Optional: Email, Address, City, Source, Notes</p>
-            </div>
-          </div>
-
-          {/* Download Template */}
-          <button onClick={downloadTemplate}
-            className="flex items-center gap-2 text-xs text-accent hover:underline">
-            <Download className="w-3.5 h-3.5" /> Download sample template
-          </button>
-
-          {/* File Input */}
-          {!importResult && (
-            <div>
-              <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleFileUpload} className="hidden" />
-              <button onClick={() => fileInputRef.current?.click()}
-                className="w-full border-2 border-dashed border-border hover:border-accent/40 rounded-xl p-8 text-center transition-colors group">
-                <Upload className="w-8 h-8 text-muted group-hover:text-accent mx-auto mb-2 transition-colors" />
-                <p className="text-sm font-medium text-foreground">Click to upload file</p>
-                <p className="text-xs text-muted mt-1">.xlsx, .xls, or .csv</p>
-              </button>
-            </div>
-          )}
-
-          {/* Error */}
-          {importError && (
-            <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-700">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              {importError}
-            </div>
-          )}
-
-          {/* Success Result */}
-          {importResult && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 p-4 bg-success-light border border-success/20 rounded-xl">
-                <CheckCircle2 className="w-5 h-5 text-success flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-semibold text-success">Import successful!</p>
-                  <p className="text-xs text-muted">{importResult.created} contacts added · {importResult.skipped} skipped (already exist)</p>
-                </div>
-              </div>
-              <button onClick={() => { setShowImportModal(false); setImportResult(null); }}
-                className="w-full py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-                Done
-              </button>
-            </div>
-          )}
-
-          {/* Preview Table */}
-          {importRows.length > 0 && !importResult && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-foreground">{importRows.length} rows found</p>
-                <button onClick={() => { setImportRows([]); setImportHeaders([]); }} className="text-xs text-muted hover:text-foreground">Clear</button>
-              </div>
-
-              {/* Column mapping info */}
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(importColMap).map(([field, idx]) => (
-                  <span key={field} className="px-2 py-1 bg-accent/10 text-accent text-[11px] rounded-lg font-medium">
-                    {field} → &quot;{importHeaders[idx]}&quot;
-                  </span>
-                ))}
-                {!('name' in importColMap) && (
-                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No &quot;Name&quot; column</span>
-                )}
-                {!('phone' in importColMap) && (
-                  <span className="px-2 py-1 bg-red-500/10 text-red-700 text-[11px] rounded-lg font-medium">⚠ No &quot;Phone&quot; column</span>
-                )}
-              </div>
-
-              {/* Preview rows */}
-              <div className="max-h-48 overflow-y-auto border border-border rounded-xl">
-                <table className="w-full text-xs">
-                  <thead className="bg-surface sticky top-0">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium text-muted">#</th>
-                      {importHeaders.slice(0, 6).map((h, i) => (
-                        <th key={i} className="px-3 py-2 text-left font-medium text-muted truncate max-w-[100px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importRows.slice(0, 10).map((row, i) => (
-                      <tr key={i} className="border-t border-border hover:bg-surface-hover">
-                        <td className="px-3 py-2 text-muted">{i + 1}</td>
-                        {row.slice(0, 6).map((cell, j) => (
-                          <td key={j} className="px-3 py-2 truncate max-w-[120px] text-foreground">{String(cell)}</td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {importRows.length > 10 && (
-                  <p className="text-center text-xs text-muted py-2 border-t border-border">+{importRows.length - 10} more rows</p>
-                )}
-              </div>
-
-              <div className="flex gap-3">
-                <button onClick={handleImportSubmit} disabled={importLoading || !('name' in importColMap) || !('phone' in importColMap)}
-                  className="flex-1 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                  {importLoading ? <><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Importing...</> : <><Upload className="w-4 h-4" /> Import {importRows.length} Contacts</>}
-                </button>
-                <button onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2.5 text-sm text-muted hover:text-foreground hover:bg-surface rounded-xl transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* Create Campaign Modal */}
-      <Modal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create Campaign">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">Campaign Name *</label>
-            <input type="text" placeholder="e.g., Diwali Mega Sale 🪔" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Channel</label>
-              <select value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50">
-                {channelOptions.map(c => <option key={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Audience Size</label>
-              <input type="number" min="0" placeholder="0" value={form.audience} onChange={e => setForm(f => ({ ...f, audience: e.target.value }))}
-                className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">Schedule Date (optional)</label>
-            <input type="date" value={form.scheduledDate} onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-muted mb-1.5">Message Template *</label>
-            <textarea rows={6} placeholder="Write your campaign message..." value={form.template} onChange={e => setForm(f => ({ ...f, template: e.target.value }))}
-              className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm resize-none focus:outline-none focus:border-accent/50" />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setShowCreateModal(false)}
-              className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
-            <button onClick={() => handleCreate(true)} disabled={submitting || !form.name || !form.template}
-              className="px-5 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50">
-              Save as Draft
-            </button>
-            <button onClick={() => handleCreate(false)} disabled={submitting || !form.name || !form.template}
-              className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
-              {submitting ? 'Saving...' : 'Schedule'}
-            </button>
-          </div>
+          <div className="rounded-xl border border-info/20 bg-info-light/30 p-3 text-xs text-muted"><div className="flex items-start gap-2"><FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-info" /><div><p className="font-medium text-foreground">CSV, XLS, and XLSX supported</p><p className="mt-1">Name and Phone are required. Phone numbers must be valid 10-digit Indian mobile numbers. Import up to 5,000 contacts per file.</p></div></div></div>
+          <button onClick={downloadTemplate} className="inline-flex items-center gap-2 text-xs font-medium text-accent hover:underline"><Download className="h-3.5 w-3.5" /> Download sample template</button>
+          {!importResult && importRows.length === 0 && <><input ref={inputRef} type="file" accept=".csv,.xls,.xlsx" onChange={handleFile} className="hidden" /><button onClick={() => inputRef.current?.click()} className="w-full rounded-xl border-2 border-dashed border-border p-8 text-center transition-colors hover:border-accent/40"><Upload className="mx-auto mb-2 h-7 w-7 text-muted" /><p className="text-sm font-medium text-foreground">Choose contact file</p><p className="mt-1 text-xs text-muted">Maximum file size: 10 MB</p></button></>}
+          {importError && <p role="alert" className="rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-700">{importError}</p>}
+          {importRows.length > 0 && !importResult && <div className="space-y-3"><div className="flex items-center justify-between"><p className="text-sm font-medium text-foreground">{importRows.length.toLocaleString()} contacts ready to validate</p><button onClick={() => { setImportRows([]); setHeaders([]); setColumns({}); }} disabled={importing} className="text-xs text-muted hover:text-foreground">Clear</button></div><div className="overflow-x-auto rounded-xl border border-border"><table className="min-w-full text-xs"><thead className="bg-surface"><tr>{headers.slice(0, 5).map((header, index) => <th key={`${header}-${index}`} className="whitespace-nowrap px-3 py-2 text-left font-medium text-muted">{header}</th>)}</tr></thead><tbody>{importRows.slice(0, 5).map((row, index) => <tr key={index} className="border-t border-border">{row.slice(0, 5).map((cell, cellIndex) => <td key={cellIndex} className="max-w-36 truncate px-3 py-2 text-foreground">{String(cell)}</td>)}</tr>)}</tbody></table></div><button onClick={submitImport} disabled={importing} className="inline-flex w-full min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50">{importing ? <><RefreshCw className="h-4 w-4 animate-spin" /> Importing...</> : <><Upload className="h-4 w-4" /> Import contacts</>}</button></div>}
+          {importResult && <div className="space-y-3"><div className="flex items-start gap-3 rounded-xl border border-success/20 bg-success-light p-4"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" /><div><p className="text-sm font-semibold text-foreground">Import complete</p><p className="mt-1 text-xs text-muted">{importResult.created} added · {importResult.skipped} skipped due to invalid or duplicate data.</p></div></div><button onClick={() => setShowImport(false)} className="w-full rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white hover:bg-accent-hover">Done</button></div>}
         </div>
       </Modal>
     </div>
   );
+}
+
+function ChannelCard({ href, icon: Icon, title, description, action, tone }) {
+  return <Link href={href} className="glass-card group block p-6 transition-all hover:-translate-y-0.5 hover:border-accent/30"><div className={`mb-5 flex h-11 w-11 items-center justify-center rounded-xl ${tone}`}><Icon className="h-5 w-5" /></div><h2 className="text-lg font-semibold text-foreground">{title}</h2><p className="mt-2 min-h-10 text-sm leading-6 text-muted">{description}</p><span className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-accent">{action}<ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></span></Link>;
+}
+
+function InfoCard({ icon: Icon, title, text }) {
+  return <div className="glass-card flex gap-3 p-4"><Icon className="mt-0.5 h-5 w-5 shrink-0 text-accent" /><div><p className="text-sm font-semibold text-foreground">{title}</p><p className="mt-1 text-xs leading-5 text-muted">{text}</p></div></div>;
 }

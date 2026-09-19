@@ -22,6 +22,8 @@ export async function register() {
 
     const { startFollowUpReminderWorker } = await import('./lib/queues/follow-up-reminders-worker')
     startFollowUpReminderWorker()
+
+    const { startEmailCampaignScheduler } = await import('./lib/email-campaign-runner')
+    startEmailCampaignScheduler()
   }
 }
-

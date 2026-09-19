@@ -11,7 +11,7 @@ import {
 import Modal from '@/components/Modal';
 import {
   getEmailCampaigns, createEmailCampaign, updateEmailCampaign, deleteEmailCampaign,
-  sendEmailCampaign, duplicateCampaign, getCampaignAnalytics,
+  sendEmailCampaign, duplicateCampaign, getCampaignAnalytics, setEmailAutomationActive,
   getEmailTemplates, createEmailTemplate, deleteEmailTemplate,
   getAudienceStats, getEmailConfigStatus,
 } from '@/app/actions/email-campaigns';
@@ -35,8 +35,7 @@ const audienceOptions = [
 
 const triggerOptions = [
   { value: 'new_lead', label: 'New Lead Created', desc: 'Send when a new lead is captured', delay: 1 },
-  { value: 'post_visit', label: 'After Store Visit', desc: 'Follow-up after walk-in or appointment', delay: 24 },
-  { value: 'abandoned_quote', label: 'Abandoned Quote', desc: 'Re-engage when quote has no follow-up (3 days)', delay: 72 },
+  { value: 'post_visit', label: 'After Visit', desc: 'Follow-up after a walk-in or appointment', delay: 24 },
   { value: 'post_purchase', label: 'Post Purchase', desc: 'Thank you & review request after order delivery', delay: 48 },
 ];
 
@@ -156,7 +155,20 @@ export default function EmailMarketingPage() {
   };
 
   useEffect(() => {
-    refresh().then(() => setLoading(false));
+    let cancelled = false;
+    async function loadInitialData() {
+      const [cRes, tRes, aRes, ecRes] = await Promise.all([
+        getEmailCampaigns(), getEmailTemplates(), getAudienceStats(), getEmailConfigStatus(),
+      ]);
+      if (cancelled) return;
+      if (cRes.success) setCampaigns(cRes.data);
+      if (tRes.success) setTemplates(tRes.data);
+      if (aRes.success) setAudienceStats(aRes.data);
+      if (ecRes.success) setEmailConfig(ecRes);
+      setLoading(false);
+    }
+    void loadInitialData();
+    return () => { cancelled = true; };
   }, []);
 
   // Computed stats
@@ -181,11 +193,14 @@ export default function EmailMarketingPage() {
     if (!campaignForm.name || !campaignForm.subject || !campaignForm.body) return;
     setSubmitting(true);
     try {
+      const isAutomated = !asDraft && campaignForm.isAutomated;
       const payload = {
         ...campaignForm,
         templateId: campaignForm.templateId ? parseInt(campaignForm.templateId) : undefined,
         triggerDelay: campaignForm.triggerDelay ? parseInt(campaignForm.triggerDelay) : undefined,
-        scheduledAt: asDraft ? undefined : campaignForm.scheduledAt || undefined,
+        isAutomated,
+        triggerType: isAutomated ? campaignForm.triggerType || undefined : undefined,
+        scheduledAt: asDraft || isAutomated || !campaignForm.scheduledAt ? undefined : new Date(campaignForm.scheduledAt).toISOString(),
       };
       const res = await createEmailCampaign(payload);
       if (res.success) {
@@ -217,7 +232,7 @@ export default function EmailMarketingPage() {
     setSubmitting(true);
     const res = await sendEmailCampaign(id);
     if (res.success) {
-      alert(`Campaign sent to ${res.data.recipientCount} recipients!`);
+      alert(`Campaign finished: ${res.data.sent} sent, ${res.data.failed} failed out of ${res.data.recipientCount} recipients.`);
       await refresh();
     } else alert(res.error);
     setSubmitting(false);
@@ -225,14 +240,17 @@ export default function EmailMarketingPage() {
 
   const handleDeleteCampaign = async (id) => {
     if (!confirm('Delete this campaign permanently?')) return;
-    await deleteEmailCampaign(id);
-    setSelectedCampaign(null);
-    await refresh();
+    const res = await deleteEmailCampaign(id);
+    if (res.success) {
+      setSelectedCampaign(null);
+      await refresh();
+    } else alert(res.error || 'Unable to delete campaign');
   };
 
   const handleDuplicate = async (id) => {
-    await duplicateCampaign(id);
-    await refresh();
+    const res = await duplicateCampaign(id);
+    if (res.success) await refresh();
+    else alert(res.error || 'Unable to duplicate campaign');
   };
 
   const handleDeleteTemplate = async (id) => {
@@ -247,7 +265,13 @@ export default function EmailMarketingPage() {
     if (res.success) {
       setCampaignAnalytics(res.data);
       setShowAnalytics(true);
-    }
+    } else alert(res.error || 'Unable to load campaign analytics');
+  };
+
+  const handleAutomationState = async (campaign, active) => {
+    const res = await setEmailAutomationActive(campaign.id, active);
+    if (res.success) await refresh();
+    else alert(res.error || 'Unable to update automation');
   };
 
   const handleUseTemplate = (template) => {
@@ -326,6 +350,12 @@ export default function EmailMarketingPage() {
         <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-success-light/50 text-success text-sm">
           <CheckCircle2 className="w-4 h-4" />
           Sending from <strong>{emailConfig.fromName}</strong> ({emailConfig.smtpUser})
+        </div>
+      )}
+      {emailConfig?.configured && !emailConfig.trackingConfigured && (
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          <p className="text-xs text-muted">Set <code>NEXT_PUBLIC_SITE_URL</code> to your HTTPS domain before sending. Campaign delivery is protected until unsubscribe and tracking links can be generated safely.</p>
         </div>
       )}
 
@@ -530,7 +560,7 @@ export default function EmailMarketingPage() {
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-1">
               <Bot className="w-5 h-5 text-accent" /> Automated Follow-up Campaigns
             </h3>
-            <p className="text-sm text-muted mb-5">Set up campaigns that trigger automatically based on customer actions. Keep buyers engaged without manual effort.</p>
+                  <p className="text-sm text-muted mb-5">Active automations are checked every minute on the CRM server and send once per eligible contact after the selected delay.</p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {triggerOptions.map(trigger => {
@@ -551,11 +581,11 @@ export default function EmailMarketingPage() {
                         </div>
                       </div>
                       {existing ? (
-                        <span className="badge text-[10px] bg-success-light text-success">Active</span>
+                        <span className={`badge text-[10px] ${existing.status === 'SCHEDULED' ? 'bg-success-light text-success' : 'bg-surface-hover text-muted'}`}>{existing.status === 'SCHEDULED' ? 'Active' : 'Paused'}</span>
                       ) : (
                         <button
                           onClick={() => {
-                            setCampaignForm(f => ({ ...f, isAutomated: true, triggerType: trigger.value, triggerDelay: String(trigger.delay) }));
+                            setCampaignForm(f => ({ ...f, scheduledAt: '', isAutomated: true, triggerType: trigger.value, triggerDelay: String(trigger.delay) }));
                             setShowCreateCampaign(true);
                           }}
                           className="text-xs text-accent hover:text-accent-hover font-medium flex items-center gap-1 whitespace-nowrap"
@@ -571,7 +601,10 @@ export default function EmailMarketingPage() {
                           <span>Opened: <strong className="text-info">{existing.opened}</strong></span>
                           <span>Clicked: <strong className="text-success">{existing.clicked}</strong></span>
                         </div>
-                        <button onClick={() => handleViewAnalytics(existing)} className="text-xs text-accent hover:underline">View Stats</button>
+                        <div className="flex items-center gap-3">
+                          <button onClick={() => handleAutomationState(existing, existing.status !== 'SCHEDULED')} className="text-xs text-accent hover:underline">{existing.status === 'SCHEDULED' ? 'Pause' : 'Resume'}</button>
+                          <button onClick={() => handleViewAnalytics(existing)} className="text-xs text-accent hover:underline">View Stats</button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -770,9 +803,7 @@ export default function EmailMarketingPage() {
               {/* Email Preview */}
               <div>
                 <p className="text-xs font-medium text-muted mb-2">Email Preview</p>
-                <div className="p-4 rounded-xl bg-white border border-border max-h-[300px] overflow-y-auto">
-                  <div dangerouslySetInnerHTML={{ __html: c.body }} />
-                </div>
+                <iframe title={`${c.name} email preview`} sandbox="" srcDoc={c.body} className="w-full h-[300px] rounded-xl border border-border bg-white" />
               </div>
 
               {/* Actions */}
@@ -792,7 +823,7 @@ export default function EmailMarketingPage() {
                       <BarChart3 className="w-3.5 h-3.5" /> View Analytics
                     </button>
                   )}
-                  {(c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
+                  {!c.isAutomated && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
                     <button onClick={() => handleSendCampaign(c.id)} disabled={submitting}
                       className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover text-white rounded-lg font-semibold flex items-center gap-1 disabled:opacity-50">
                       <Send className="w-3.5 h-3.5" /> Send Now
@@ -1089,7 +1120,7 @@ export default function EmailMarketingPage() {
             </button>
             <button onClick={() => handleCreateCampaign(false)} disabled={submitting || !campaignForm.name || !campaignForm.subject || !campaignForm.body}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2">
-              <Send className="w-3.5 h-3.5" /> {campaignForm.scheduledAt ? 'Schedule' : 'Create Campaign'}
+              <Send className="w-3.5 h-3.5" /> {campaignForm.isAutomated ? 'Activate Automation' : campaignForm.scheduledAt ? 'Schedule' : 'Create Campaign'}
             </button>
           </div>
         </div>
@@ -1153,9 +1184,7 @@ export default function EmailMarketingPage() {
           {templateForm.body && (
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Preview</label>
-              <div className="p-4 rounded-xl bg-white border border-border max-h-[200px] overflow-y-auto">
-                <div dangerouslySetInnerHTML={{ __html: templateForm.body }} />
-              </div>
+                <iframe title="Template preview" sandbox="" srcDoc={templateForm.body} className="w-full h-[200px] rounded-xl border border-border bg-white" />
             </div>
           )}
 

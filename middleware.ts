@@ -26,6 +26,7 @@ const routePermissions: Record<string, string[]> = {
   '/drafts': ['ADMIN', 'MANAGER'],
   '/whatsapp-marketing': ['ADMIN', 'MANAGER'],
   '/email-marketing': ['ADMIN', 'MANAGER'],
+  '/marketing': ['ADMIN', 'MANAGER'],
 }
 
 export async function middleware(req: NextRequest) {

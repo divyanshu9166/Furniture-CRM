@@ -34,7 +34,11 @@ const toRequiredNumber = (value: unknown) => {
 
 export async function getProducts() {
   const products = await prisma.product.findMany({
-    include: { category: true, warehouse: true },
+    include: {
+      category: true,
+      warehouse: true,
+      stockGroup: { select: { id: true, name: true } },
+    },
     orderBy: { name: 'asc' },
   })
 
@@ -49,6 +53,8 @@ export async function getProducts() {
         name: p.name,
         category: p.category.name,
         categoryId: p.categoryId,
+        stockGroupId: p.stockGroupId,
+        stockGroupName: p.stockGroup?.name || null,
         isRawMaterial,
         isConsumable,
         isSellable: !isRawMaterial && !isConsumable,
@@ -87,7 +93,12 @@ export async function createProduct(data: unknown) {
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { category, warehouse, unitOfMeasure, unitSize, godownId, ...rest } = parsed.data
+  const { category, warehouse, unitOfMeasure, unitSize, godownId, stockGroupId, ...rest } = parsed.data
+
+  if (stockGroupId) {
+    const group = await prisma.stockGroup.findUnique({ where: { id: stockGroupId }, select: { id: true } })
+    if (!group) return { success: false, error: 'Selected stock group was not found' }
+  }
 
   // Find or create category
   const cat = await prisma.category.upsert({
@@ -127,6 +138,7 @@ export async function createProduct(data: unknown) {
         unitSize: normalizedUnitSize,
         categoryId: cat.id,
         warehouseId,
+        stockGroupId: stockGroupId ?? null,
       },
     })
   } catch (err: any) {
@@ -349,7 +361,12 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
 export async function updateProduct(id: number, data: Partial<{
   name: string; price: number; bulkPrice: number | null; stock: number; reorderLevel: number;
   material: string; brand: string; color: string; description: string; image: string; unitSize: number; unitOfMeasure: string;
+  stockGroupId: number | null;
 }>) {
+  if (data.stockGroupId !== undefined && data.stockGroupId !== null) {
+    const group = await prisma.stockGroup.findUnique({ where: { id: data.stockGroupId }, select: { id: true } })
+    if (!group) return { success: false, error: 'Selected stock group was not found' }
+  }
   const product = await prisma.product.update({
     where: { id },
     data,

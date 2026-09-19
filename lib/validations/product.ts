@@ -17,6 +17,7 @@ export const createProductSchema = z.object({
   description: z.string().optional(),
   warehouse: z.string().optional(),
   image: z.string().optional(),
+  stockGroupId: z.number().int().positive().nullable().optional(),
   unitOfMeasure: z.string().default('PCS'),
   unitSize: z.number().positive().default(1),
   godownId: z.number().optional(), // Which godown receives the initial stock

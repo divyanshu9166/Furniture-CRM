@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import { prisma } from '@/lib/db'
+import { addTrackingToEmail } from '@/lib/email-tracking'
 
 export interface SmtpConfig {
   smtpHost: string
@@ -56,18 +57,7 @@ export async function sendEmail(options: {
   if (!config) return { success: false, error: 'SMTP not configured. Go to Settings → Email Setup.' }
 
   const transporter = createTransporter(config)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
-
-  // Inject tracking pixel if recipientId provided
-  let html = options.html
-  if (options.recipientId) {
-    const trackPixel = `<img src="${appUrl}/api/email-track?rid=${options.recipientId}&t=open" width="1" height="1" style="display:none;" alt="" />`
-    // Add unsubscribe link
-    const unsubLink = `<div style="text-align:center;margin-top:30px;padding-top:20px;border-top:1px solid #eee;font-size:11px;color:#999;">
-      <a href="${appUrl}/api/email-track?rid=${options.recipientId}&t=click&url=${encodeURIComponent(appUrl + '/unsubscribe?rid=' + options.recipientId)}" style="color:#999;">Unsubscribe</a>
-    </div>`
-    html = html + unsubLink + trackPixel
-  }
+  const html = options.recipientId ? addTrackingToEmail(options.html, options.recipientId) : options.html
 
   try {
     const result = await transporter.sendMail({
@@ -90,16 +80,21 @@ export async function sendBulkEmails(emails: {
   subject: string
   html: string
   recipientId: number
-}[]): Promise<{ sent: number; failed: number; errors: string[] }> {
+}[]): Promise<{ sent: number; failed: number; errors: string[]; results: Array<{ recipientId: number; success: boolean; error?: string }> }> {
   const config = await getSmtpConfig()
-  if (!config) return { sent: 0, failed: emails.length, errors: ['SMTP not configured'] }
+  if (!config) return {
+    sent: 0,
+    failed: emails.length,
+    errors: ['SMTP not configured'],
+    results: emails.map(email => ({ recipientId: email.recipientId, success: false, error: 'SMTP not configured' })),
+  }
 
   const transporter = createTransporter(config)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
 
   let sent = 0
   let failed = 0
   const errors: string[] = []
+  const deliveryResults: Array<{ recipientId: number; success: boolean; error?: string }> = []
 
   // Send in batches of 5 with 1 second delay between batches
   const batchSize = 5
@@ -108,30 +103,28 @@ export async function sendBulkEmails(emails: {
 
     const results = await Promise.allSettled(
       batch.map(async (email) => {
-        // Inject tracking pixel and unsubscribe link
-        const trackPixel = `<img src="${appUrl}/api/email-track?rid=${email.recipientId}&t=open" width="1" height="1" style="display:none;" alt="" />`
-        const unsubLink = `<div style="text-align:center;margin-top:30px;padding-top:20px;border-top:1px solid #eee;font-size:11px;color:#999;">
-          <a href="${appUrl}/api/email-track?rid=${email.recipientId}&t=click&url=${encodeURIComponent(appUrl + '/unsubscribe?rid=' + email.recipientId)}" style="color:#999;">Unsubscribe</a>
-        </div>`
-        const html = email.html + unsubLink + trackPixel
-
-        return transporter.sendMail({
+        await transporter.sendMail({
           from: `"${config.smtpFromName}" <${config.smtpUser}>`,
           to: email.to,
           subject: email.subject,
-          html,
+          html: addTrackingToEmail(email.html, email.recipientId),
         })
+        return email.recipientId
       })
     )
 
-    for (const result of results) {
+    results.forEach((result, index) => {
+      const recipientId = batch[index].recipientId
       if (result.status === 'fulfilled') {
         sent++
+        deliveryResults.push({ recipientId, success: true })
       } else {
         failed++
-        errors.push(result.reason?.message || 'Unknown error')
+        const error = result.reason?.message || 'Unknown error'
+        errors.push(error)
+        deliveryResults.push({ recipientId, success: false, error })
       }
-    }
+    })
 
     // Throttle: wait 1 second between batches to avoid rate limits
     if (i + batchSize < emails.length) {
@@ -139,7 +132,7 @@ export async function sendBulkEmails(emails: {
     }
   }
 
-  return { sent, failed, errors: [...new Set(errors)] }
+  return { sent, failed, errors: [...new Set(errors)], results: deliveryResults }
 }
 
 // ─── TEST SMTP CONNECTION ───────────────────────────

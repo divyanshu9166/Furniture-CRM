@@ -746,10 +746,12 @@ export default function StaffPortalPage() {
                 <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center"><Package className="w-5 h-5 text-amber-700" /></div>
                 <span className="text-xs font-medium text-foreground">Update Stock</span>
               </button>
-              <button onClick={() => router.push('/marketing')} className="flex flex-col items-center gap-2 p-4 rounded-xl bg-surface border border-border hover:border-accent/30 hover:bg-surface-hover transition-all">
-                <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center"><Megaphone className="w-5 h-5 text-orange-700" /></div>
-                <span className="text-xs font-medium text-foreground">Marketing</span>
-              </button>
+              {userRole !== 'STAFF' && (
+                <button onClick={() => router.push('/marketing')} className="flex flex-col items-center gap-2 p-4 rounded-xl bg-surface border border-border hover:border-accent/30 hover:bg-surface-hover transition-all">
+                  <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center"><Megaphone className="w-5 h-5 text-orange-700" /></div>
+                  <span className="text-xs font-medium text-foreground">Marketing</span>
+                </button>
+              )}
               <button onClick={() => setShowLogVisit(true)} className="flex flex-col items-center gap-2 p-4 rounded-xl bg-surface border border-border hover:border-accent/30 hover:bg-surface-hover transition-all">
                 <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center"><MapPin className="w-5 h-5 text-indigo-700" /></div>
                 <span className="text-xs font-medium text-foreground">Log Visit</span>
