@@ -194,9 +194,11 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       })
 
       if (!config) {
-        console.error('No config found for phone_number_id:', phoneNumberId)
+        console.error('[webhook] no config found for incoming phone_number_id:', phoneNumberId)
         continue
       }
+
+      console.log(`[webhook] received ${value.messages.length} inbound message(s) for phone_number_id ${phoneNumberId}`)
 
       const decryptedAccessToken = decrypt(config.access_token)
 
@@ -498,11 +500,12 @@ async function processMessage(
   const contactRecord = contactOutcome.contact
 
   // Find or create conversation
-  const conversation = await findOrCreateConversation(
+  const conversationOutcome = await findOrCreateConversation(
     userId,
     contactRecord.id
   )
-  if (!conversation) return
+  if (!conversationOutcome) return
+  const { conversation, wasCreated: conversationWasCreated } = conversationOutcome
 
   if (message.type === 'reaction') {
     await handleReaction(message, conversation.id, contactRecord.id)
@@ -649,9 +652,17 @@ async function processMessage(
       },
       select: {
         id: true,
+        user_id: true,
+        contact_id: true,
+        status: true,
+        needs_human: true,
+        assigned_agent_id: true,
         last_message_text: true,
         last_message_at: true,
         unread_count: true,
+        created_at: true,
+        updated_at: true,
+        contact: true,
       },
     })
   } catch (error) {
@@ -661,6 +672,15 @@ async function processMessage(
   // ── Real-time: publish UI events to Redis Pub/Sub ────────────────────────
   // These are fire-and-forget: a dropped event only means the browser
   // doesn't update until the next poll — the message is already in DB.
+  if (updatedConversation && conversationWasCreated) {
+    await publishEvent('chat_events', {
+      type: 'new_conversation',
+      userId,
+      conversationId: conversation.id,
+      payload: { conversation: updatedConversation },
+    })
+  }
+
   if (createdMessage) {
     await publishEvent('chat_events', {
       type: 'new_message',
@@ -968,23 +988,27 @@ async function findOrCreateContact(
   return { contact: newContact, wasCreated: true }
 }
 
-async function findOrCreateConversation(userId: string, contactId: string) {
+async function findOrCreateConversation(
+  userId: string,
+  contactId: string,
+): Promise<{ conversation: ContactRow; wasCreated: boolean } | null> {
   // Look for existing conversation
   try {
     const existing = await prisma.waConversation.findFirst({
       where: { user_id: userId, contact_id: contactId },
     })
 
-    if (existing) return existing
+    if (existing) return { conversation: existing, wasCreated: false }
   } catch (error) {
     console.error('Error fetching conversation:', error)
   }
 
   // Create new conversation
   try {
-    return await prisma.waConversation.create({
+    const conversation = await prisma.waConversation.create({
       data: { user_id: userId, contact_id: contactId },
     })
+    return { conversation, wasCreated: true }
   } catch (error) {
     console.error('Error creating conversation:', error)
     return null

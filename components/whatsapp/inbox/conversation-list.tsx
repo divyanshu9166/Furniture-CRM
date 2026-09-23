@@ -90,8 +90,14 @@ export function ConversationList({
 
     fetchConversations();
 
+    // WebSocket events make new inbound chats appear immediately. Keep a
+    // lightweight fallback poll as well: a temporary socket outage must not
+    // make a newly-created conversation invisible until the user reloads.
+    const refreshInterval = window.setInterval(fetchConversations, 15_000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(refreshInterval);
     };
   }, []);
 
