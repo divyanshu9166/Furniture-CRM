@@ -7,8 +7,8 @@
  *   1.  Load agent config — abort if disabled
  *   2.  Load last 5 messages for conversation context
  *   3.  Redis cache check — return cached reply if hit
- *   4.  Embed customer message with multilingual-e5-small (local ONNX)
- *   5.  pgvector cosine search → top-3 knowledge chunks
+ *   4.  If knowledge exists, embed customer message with multilingual-e5-small
+ *   5.  Search pgvector for top-3 relevant knowledge chunks (best effort)
  *   6.  Build prompt (system + knowledge + history + message)
  *   7.  Gemini 3.5 Flash-Lite → draft reply
  *   8.  Confidence/handoff check
@@ -43,6 +43,29 @@ export interface AiAgentJobPayload {
 // ── Cache helpers ──────────────────────────────────────────────────────────
 
 const CACHE_TTL_SEC = 2 * 60 * 60  // 2 hours
+const KNOWLEDGE_LOOKUP_TIMEOUT_MS = 12_000
+
+/**
+ * Knowledge retrieval is an optional enhancement. A slow model download or a
+ * unavailable vector index must never prevent the customer from receiving a
+ * normal Gemini response.
+ */
+async function withTimeout<T>(operation: Promise<T>, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${KNOWLEDGE_LOOKUP_TIMEOUT_MS / 1000}s`))
+        }, KNOWLEDGE_LOOKUP_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId)
+  }
+}
 
 function cacheKey(userId: string, text: string): string {
   // Normalise: lowercase + strip extra whitespace so "Hi!" and "hi!" share cache
@@ -83,6 +106,8 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     console.log(`[ai-agent] agent disabled for user ${userId} — skipping`)
     return
   }
+
+  console.log(`[ai-agent] handling ${channel} conversation ${conversationId}`)
 
   const isSocialChannel = channel === 'facebook' || channel === 'instagram'
 
@@ -141,23 +166,39 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
     return
   }
 
-  // ── Step 4: Embed customer message ───────────────────────────────────────
-  let queryEmbedding: number[]
+  // ── Step 4–5: Retrieve knowledge only when the user has an index ─────────
+  // A plain conversational agent does not need the local embedding model. This
+  // keeps first replies reliable when the optional ONNX model is still loading
+  // or the vector index is temporarily unavailable.
+  let retrievedChunks = ''
   try {
-    queryEmbedding = await embedText(messageText)
-  } catch (err) {
-    console.error('[ai-agent] embedding failed:', err)
-    await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)
-    return
-  }
+    const knowledgeCount = await withTimeout(
+      prisma.waKnowledgeChunk.count({ where: { user_id: userId } }),
+      'Knowledge index check',
+    )
 
-  // ── Step 5: Retrieve top-3 relevant chunks ───────────────────────────────
-  const chunks = await retrieveChunks(userId, queryEmbedding, 3, config.confidence_threshold)
-  const retrievedChunks = chunks.map((c) => c.content).join('\n\n---\n\n')
+    if (knowledgeCount === 0) {
+      console.log(`[ai-agent] no indexed knowledge for user ${userId}; skipping embedding`)
+    } else {
+      console.log(`[ai-agent] retrieving from ${knowledgeCount} indexed knowledge chunks`)
+      const queryEmbedding = await withTimeout(
+        embedText(messageText),
+        'Knowledge embedding',
+      )
+      const chunks = await withTimeout(
+        retrieveChunks(userId, queryEmbedding, 3, config.confidence_threshold),
+        'Knowledge retrieval',
+      )
+      retrievedChunks = chunks.map((chunk) => chunk.content).join('\n\n---\n\n')
+    }
+  } catch (err) {
+    console.warn('[ai-agent] knowledge lookup unavailable; continuing without it:', err)
+  }
 
   // ── Step 6–7: Build prompt + call Gemini ────────────────────────────────
   let agentResponse: Awaited<ReturnType<typeof generateResponse>>
   try {
+    console.log(`[ai-agent] requesting Gemini reply for conversation ${conversationId}`)
     agentResponse = await generateResponse({
       agentName: config.agent_name,
       companyName: config.agent_name, // falls back to agent name; editable in system prompt
@@ -167,6 +208,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
       customerMessage: messageText,
       maxTokens: config.max_response_tokens,
     })
+    console.log(`[ai-agent] Gemini reply received for conversation ${conversationId}`)
   } catch (err) {
     console.error('[ai-agent] LLM call failed:', err)
     await sendFallback(userId, conversationId, contactPhone, config.fallback_message, incomingMessageId, channel, socialPageAccessToken, socialRecipientId)

@@ -80,6 +80,8 @@ services:
       NEXT_PUBLIC_WS_URL: "https://${DOMAIN:-crm.kosmicfurniture.com}:3001"
       # Images stored on VPS local volume — no cloud storage needed
       UPLOAD_DIR: "/app/uploads"
+      # Persist the local ONNX embedding model across app rebuilds.
+      TRANSFORMERS_CACHE_DIR: "/app/model-cache"
       # AI / STT / TTS providers
       DEEPGRAM_API_KEY: "${DEEPGRAM_API_KEY}"
       # The separate voice-call agent receives its own environment via env_file.
@@ -108,6 +110,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - modelcache:/app/model-cache
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/api/auth/me" ]
       interval: 30s
@@ -156,3 +159,4 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  modelcache:

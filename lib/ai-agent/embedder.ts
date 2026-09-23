@@ -14,8 +14,9 @@
  *
  * Implementation notes:
  *   - The pipeline is loaded ONCE as a module-level singleton and reused for
- *     every call. First call takes 2–3 s to load the ONNX weights; subsequent
- *     calls are near-instant.
+ *     every call. First call downloads/loads the ONNX weights; subsequent
+ *     calls are near-instant. The Docker deployment persists that cache so a
+ *     normal app rebuild does not require another model download.
  *   - We mean-pool the token embeddings and L2-normalise so cosine similarity
  *     equals dot-product, which is what pgvector's <=> operator measures.
  *   - Input text is truncated to 512 tokens by the tokeniser automatically;
@@ -34,18 +35,36 @@ async function getPipeline(): Promise<FeatureExtractionPipeline> {
   if (_loading) return _loading
 
   _loading = (async () => {
-    const { pipeline } = await import('@xenova/transformers')
+    const { pipeline, env } = await import('@xenova/transformers')
+    // Transformers.js otherwise caches inside node_modules, which is not
+    // writable by the non-root production user and disappears on rebuild.
+    // Docker mounts this directory as a named volume for warm restarts.
+    env.cacheDir = process.env.TRANSFORMERS_CACHE_DIR || '/app/model-cache'
+
     console.log('[embedder] Loading Xenova/multilingual-e5-small (first call — may take a few seconds)…')
     const p = await pipeline('feature-extraction', 'Xenova/multilingual-e5-small', {
       // quantized ONNX is the default; it is ~30 MB and fast enough
       quantized: true,
+      progress_callback: (progress: { status?: string; file?: string }) => {
+        if (progress.status === 'download' && progress.file) {
+          console.log(`[embedder] downloading ${progress.file}`)
+        }
+      },
     }) as FeatureExtractionPipeline
     _pipeline = p
     console.log('[embedder] Xenova/multilingual-e5-small loaded ✓')
     return p
   })()
 
-  return _loading
+  try {
+    return await _loading
+  } catch (error) {
+    // Do not cache a failed initial download forever. The next message can
+    // retry after connectivity is restored, while the caller falls back to
+    // the text model immediately.
+    _loading = null
+    throw error
+  }
 }
 
 // ── Math helpers ─────────────────────────────────────────────────────────────
