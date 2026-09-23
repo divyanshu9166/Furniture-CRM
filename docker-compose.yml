@@ -66,6 +66,9 @@ services:
       SESSION_SECRET: "${SESSION_SECRET}"
       NEXT_PUBLIC_APP_URL: "https://${DOMAIN:-crm.kosmicfurniture.com}"
       CRM_API_SECRET: "${CRM_API_SECRET}"
+      # Meta signs WhatsApp webhook POST bodies with this App Secret.
+      # Required in production to reject forged webhook requests.
+      META_APP_SECRET: "${META_APP_SECRET}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
       GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
       # WhatsApp, Instagram and Facebook chatbots
