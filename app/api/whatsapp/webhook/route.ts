@@ -16,6 +16,7 @@ import {
 } from '@/lib/whatsapp/inquiry-message'
 import {
   getBotState,
+  isAppointmentBookingRequest,
   startAppointmentBot,
   handleAppointmentBotMessage,
 } from '@/lib/whatsapp/appointment-bot'
@@ -629,15 +630,26 @@ async function processMessage(
 
   // ── Send 3-button inquiry welcome to brand-new contacts ─────────────────
   // isFirstInboundMessage is true when the contact has NEVER messaged us.
-  // We reply with the welcome menu — the AI agent is skipped for this message.
+  // A direct appointment request takes priority over the generic welcome menu.
   if (isFirstInboundMessage) {
-    sendInquiryWelcomeMessage({
-      userId,
-      contactPhone: senderPhone,
-      contactName: contactName || senderPhone,
-      conversationId: conversation.id,
-      incomingMessageId: message.id,
-    }).catch((err) => console.error('[webhook] sendInquiryWelcomeMessage failed:', err))
+    if (message.type === 'text' && isAppointmentBookingRequest(inboundText)) {
+      const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
+      if (waConfigRow) {
+        await startAppointmentBot(
+          { conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId },
+          { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) },
+        )
+        console.log(`[webhook] started appointment bot for first message ${message.id}`)
+      }
+    } else {
+      sendInquiryWelcomeMessage({
+        userId,
+        contactPhone: senderPhone,
+        contactName: contactName || senderPhone,
+        conversationId: conversation.id,
+        incomingMessageId: message.id,
+      }).catch((err) => console.error('[webhook] sendInquiryWelcomeMessage failed:', err))
+    }
   }
 
   // Update conversation and capture the result for the publish event
@@ -775,6 +787,21 @@ async function processMessage(
           console.log(`[webhook] msg ${message.id} handled by appointment bot`)
           return
         }
+      }
+    }
+
+    // Text requests such as "appointment" must start the same deterministic
+    // workflow as the Schedule Appointment button. Sending them to an LLM
+    // lets it promise a booking without creating the CRM appointment record.
+    if (isAppointmentBookingRequest(inboundText)) {
+      const waConfigRow = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId } })
+      if (waConfigRow) {
+        await startAppointmentBot(
+          { conversationId: conversation.id, contactId: contactRecord.id, contactPhone: senderPhone, contactName: contactName || senderPhone, userId },
+          { phoneNumberId: waConfigRow.phone_number_id, accessToken: decrypt(waConfigRow.access_token) },
+        )
+        console.log(`[webhook] started appointment bot for text request ${message.id}`)
+        return
       }
     }
 

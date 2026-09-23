@@ -206,6 +206,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
       retrievedChunks,
       conversationHistory,
       customerMessage: messageText,
+      systemPrompt: config.system_prompt,
       maxTokens: config.max_response_tokens,
     })
     console.log(`[ai-agent] Gemini reply received for conversation ${conversationId}`)

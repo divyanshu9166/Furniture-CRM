@@ -72,6 +72,11 @@ interface WaConfig {
   accessToken: string
 }
 
+/** Detect an explicit text request to start the showroom-booking workflow. */
+export function isAppointmentBookingRequest(text: string): boolean {
+  return /\b(appointment|book(?:\s+(?:an?\s+)?)?(?:appointment|visit)|schedule(?:\s+(?:an?\s+)?)?(?:appointment|visit)|showroom\s+visit)\b/i.test(text)
+}
+
 // ── Redis helpers ─────────────────────────────────────────────────────────────
 
 function stateKey(conversationId: string): string {
@@ -215,8 +220,11 @@ function parseTimeToSlot(input: string): string | null {
   )
   if (directMatch) return directMatch
 
-  // Numeric hour extraction: "11", "11am", "11 baje", "2pm"
-  const hourMatch = text.match(/(\d{1,2})\s*(?:am|pm|baje|o'?clock)?/)
+  // Numeric hour extraction: "11", "11am", "11 baje", "2pm".
+  // Prefer an hour explicitly followed by a time marker so a date such as
+  // "25 Sep ko 3 bje" is not incorrectly read as 25 o'clock.
+  const markedMatches = [...text.matchAll(/(\d{1,2})\s*(?:am|pm|baje|bje|o'?clock)\b/g)]
+  const hourMatch = markedMatches.at(-1) ?? text.match(/(\d{1,2})\s*(?:am|pm|baje|bje|o'?clock)?/)
   if (hourMatch) {
     const hour = parseInt(hourMatch[1])
     const isPM = text.includes('pm') || (hour !== 12 && hour < 8)  // 2→2PM, 11→11AM heuristic
@@ -389,7 +397,7 @@ export async function startAppointmentBot(
   }
   await setBotState(state)
 
-  const greeting = `नमस्ते ${ctx.contactName.split(' ')[0]}! 😊\n\nKosmic Furniture showroom visit schedule karne ke liye kaun si *tarikh* aapko suit karegi?\n\nPlease date share karein (e.g. kal, 15 june, 2026-06-15):`
+  const greeting = `Kosmic Furniture showroom visit schedule karne ke liye kaun si *tarikh* aapko suit karegi?\n\nPlease date share karein (e.g. kal, 15 june, 2026-06-15):`
   await sendBotReply(greeting, state, waConfig)
 }
 
@@ -445,6 +453,42 @@ export async function handleAppointmentBotMessage(
 
     const updatedState: BotState = { ...state, step: 'COLLECTING_TIME', date: parsedDate }
     await setBotState(updatedState)
+
+    // Customers often send date and time together, e.g. "25 Sep ko 3 bje".
+    // Preserve that input instead of unnecessarily asking them for the time again.
+    const inlineSlot = parseTimeToSlot(text)
+    if (inlineSlot) {
+      const { available, suggestions } = await isSlotAvailable(parsedDate, inlineSlot)
+      if (!available) {
+        const humanDate = formatDateHuman(parsedDate)
+        if (suggestions.length > 0) {
+          await sendSlotsAsButtons(
+            updatedState,
+            waConfig,
+            suggestions,
+            `*${inlineSlot}* available nahi hai ${humanDate} ko. Inme se koi time choose karein:`,
+          )
+        } else {
+          await setBotState({ ...updatedState, step: 'COLLECTING_DATE' })
+          await sendBotReply(
+            `Maafi, ${humanDate} ko koi slot available nahi hai. Kripya koi aur date share karein:`,
+            updatedState,
+            waConfig,
+          )
+        }
+        return true
+      }
+
+      const confirmingState: BotState = { ...updatedState, step: 'CONFIRMING', time: inlineSlot }
+      await setBotState(confirmingState)
+      const humanDate = formatDateHuman(parsedDate)
+      await sendBotReply(
+        `✅ Slot available hai!\n\n📅 *Date:* ${humanDate}\n⏰ *Time:* ${inlineSlot}\n\nKya aap confirm karna chahenge? (*haan* / *yes* likhein ya *cancel* karein)`,
+        confirmingState,
+        waConfig,
+      )
+      return true
+    }
 
     const humanDate = formatDateHuman(parsedDate)
     await sendSlotsAsButtons(
@@ -559,18 +603,39 @@ export async function handleAppointmentBotMessage(
       })
     }
 
-    // Create the appointment in DB
+    // Meta can retry a webhook delivery. If the same confirmation is processed
+    // twice, keep one appointment rather than creating duplicate showroom slots.
+    // Create the appointment in the same CRM table used by the Appointments
+    // dashboard and the calling agent — WhatsApp is not a separate calendar.
+    const appointmentDate = new Date(`${state.date}T00:00:00.000Z`)
+    let appointmentId: number | undefined
+    let appointmentAlreadyExists = false
     try {
-      await prisma.appointment.create({
-        data: {
+      const existingAppointment = await prisma.appointment.findFirst({
+        where: {
           contactId: crmContact.id,
-          date: new Date(state.date),
+          date: appointmentDate,
           time: state.time,
-          purpose: 'Showroom Visit',
-          notes: `Booked via WhatsApp chatbot by ${state.contactName} (${state.contactPhone})`,
-          status: 'Scheduled',
+          status: { not: 'Cancelled' },
         },
+        select: { id: true },
       })
+      appointmentAlreadyExists = Boolean(existingAppointment)
+      appointmentId = existingAppointment?.id
+
+      if (!appointmentId) {
+        const appointment = await prisma.appointment.create({
+          data: {
+            contactId: crmContact.id,
+            date: appointmentDate,
+            time: state.time,
+            purpose: 'Showroom Visit',
+            notes: `Booked via WhatsApp chatbot by ${state.contactName} (${state.contactPhone})`,
+            status: 'Scheduled',
+          },
+        })
+        appointmentId = appointment.id
+      }
     } catch (err) {
       console.error('[appt-bot] appointment creation failed:', err)
       await clearBotState(ctx.conversationId)
@@ -598,7 +663,7 @@ export async function handleAppointmentBotMessage(
     await sendBotReply(confirmationMsg, state, waConfig)
 
     console.log(
-      `[appt-bot] Appointment booked | contact=${state.contactId} | date=${state.date} | time=${state.time}`,
+      `[appt-bot] appointment ${appointmentAlreadyExists ? 'already existed' : 'booked'} | id=${appointmentId} | contact=${state.contactId} | date=${state.date} | time=${state.time}`,
     )
     return true
   }

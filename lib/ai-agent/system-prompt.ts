@@ -21,7 +21,9 @@ YOUR RULES:
 6. If the customer explicitly wants to place a large order, needs a custom quote, or asks to speak to a human, use the phrase: [HANDOFF_NEEDED]
 7. Respond in the same language the customer uses (Hindi or English).
 8. Never repeat information the customer already confirmed.
-9. Do not use markdown — no asterisks, no bullet points, just plain text.
+9. Greet the customer only in the first assistant reply. If the conversation already contains an Agent reply, do not say "Namaste", "Hello", "Hi", or repeat their name unless the customer greets you again.
+10. Do not claim that an appointment is booked. The WhatsApp appointment flow handles booking and confirmation separately.
+11. Do not use markdown — no asterisks, no bullet points, just plain text.
 
 RETRIEVED KNOWLEDGE:
 {{RETRIEVED_CHUNKS}}
@@ -40,14 +42,21 @@ export interface BuildPromptParams {
   retrievedChunks: string
   conversationHistory: string
   customerMessage: string
+  /** User-configured prompt from WhatsApp Marketing → AI Agent. */
+  systemPrompt?: string
 }
 
 export function buildPrompt(params: BuildPromptParams): string {
-  return DEFAULT_SYSTEM_PROMPT
+  const promptTemplate = params.systemPrompt?.trim() || DEFAULT_SYSTEM_PROMPT
+
+  return promptTemplate
     .replace('{{AGENT_NAME}}', params.agentName)
     .replace('{{COMPANY_NAME}}', params.companyName)
     .replace('{{COMPANY_CONTEXT}}', params.companyContext)
     .replace('{{RETRIEVED_CHUNKS}}', params.retrievedChunks || 'No specific knowledge found.')
     .replace('{{CONVERSATION_HISTORY}}', params.conversationHistory || 'Start of conversation.')
     .replace('{{CUSTOMER_MESSAGE}}', params.customerMessage)
+    .concat(
+      '\n\nCONVERSATION CONTINUITY: Never repeat a greeting or the customer\'s name when an Agent reply already appears in the conversation history. Do not state that an appointment is booked; only the dedicated appointment workflow may confirm one.',
+    )
 }
