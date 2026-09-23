@@ -13,6 +13,7 @@ import {
 } from '@/lib/validations/custom-order'
 import type { CustomOrderStatus, Prisma } from '@prisma/client'
 import { sendEmail } from '@/lib/email'
+import { requireAuth } from '@/lib/auth-helpers'
 
 const statusMap: Record<string, CustomOrderStatus> = {
   'Measurement Scheduled': 'MEASUREMENT_SCHEDULED',
@@ -41,6 +42,15 @@ function compactMeasurements(measurements: MeasurementsInput): Prisma.InputJsonV
   return Object.fromEntries(
     Object.entries(measurements).filter(([, value]) => value !== undefined)
   ) as Prisma.InputJsonValue
+}
+
+async function requireStaffPortalScope(staffId: number) {
+  const session = await requireAuth()
+  if (session.user.role === 'ADMIN' || session.user.role === 'MANAGER') return session
+  if (session.user.staffId !== staffId) throw new Error('Forbidden')
+  const staff = await prisma.staff.findUnique({ where: { id: staffId }, select: { status: true, user: { select: { isActive: true } } } })
+  if (!staff || staff.status !== 'Active' || !staff.user?.isActive) throw new Error('Staff account is inactive')
+  return session
 }
 
 // ─── GET ALL CUSTOM ORDERS ──────────────────────────────
@@ -445,6 +455,7 @@ export async function updateFieldVisit(data: unknown) {
     select: { customOrderId: true, staffId: true, photoUrls: true, photos: true },
   })
   if (!visit) return { success: false, error: 'Visit not found' }
+  try { await requireStaffPortalScope(visit.staffId) } catch { return { success: false, error: 'Forbidden' } }
 
   const updateData: Record<string, unknown> = {}
   if (measurements) updateData.measurements = compactMeasurements(measurements)
@@ -567,6 +578,7 @@ export async function updateReferenceImages(orderId: number, imageUrls: string[]
 // ─── GET STAFF ASSIGNED VISITS ──────────────────────────
 
 export async function getStaffVisits(staffId: number) {
+  try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId },
     include: {
@@ -633,6 +645,10 @@ export async function logSelfVisit(data: {
   photoUrls?: string[]
 }) {
   const { staffId, customer, address, type, notes, measurements, photoUrls } = data
+  try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Number.isInteger(staffId) || staffId <= 0 || !customer.trim() || !address.trim() || !type.trim()) {
+    return { success: false, error: 'Customer, address and visit type are required' }
+  }
 
   const now = new Date()
   const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
@@ -666,6 +682,7 @@ export async function logSelfVisit(data: {
 // ─── GET SELF VISITS ────────────────────────────────────
 
 export async function getSelfVisits(staffId: number) {
+  try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId, customOrderId: null },
     orderBy: { date: 'desc' },
@@ -695,6 +712,10 @@ export async function getSelfVisits(staffId: number) {
 export async function updateSelfVisitPhotos(visitId: number, newUrls: string[]) {
   const visit = await prisma.fieldVisit.findUnique({ where: { id: visitId } })
   if (!visit) return { success: false, error: 'Visit not found' }
+  try { await requireStaffPortalScope(visit.staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Array.isArray(newUrls) || newUrls.length === 0 || newUrls.some(url => typeof url !== 'string' || !url)) {
+    return { success: false, error: 'Invalid photo upload' }
+  }
 
   await prisma.fieldVisit.update({
     where: { id: visitId },

@@ -68,7 +68,8 @@ services:
       CRM_API_SECRET: "${CRM_API_SECRET}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
       GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
-      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash}"
+      # WhatsApp, Instagram and Facebook chatbots
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-3.5-flash-lite}"
       LIVEKIT_URL: "${LIVEKIT_URL}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY}"
       LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET}"
@@ -81,9 +82,7 @@ services:
       UPLOAD_DIR: "/app/uploads"
       # AI / STT / TTS providers
       DEEPGRAM_API_KEY: "${DEEPGRAM_API_KEY}"
-      GROQ_API_KEY: "${GROQ_API_KEY}"
-      GROQ_MODEL: "${GROQ_MODEL:-meta-llama/llama-4-scout-17b-16e-instruct}"
-      LLM_PROVIDER: "${LLM_PROVIDER:-groq}"
+      # The separate voice-call agent receives its own environment via env_file.
       AI_AGENT_NAME: "${AI_AGENT_NAME:-anushka}"
       SARVAM_API_KEY: "${SARVAM_API_KEY}"
       TTS_PROVIDER: "${TTS_PROVIDER:-sarvam}"

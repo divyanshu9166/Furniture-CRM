@@ -12,7 +12,7 @@ import Modal from '@/components/Modal';
 import {
   getEmailCampaigns, createEmailCampaign, updateEmailCampaign, deleteEmailCampaign,
   sendEmailCampaign, duplicateCampaign, getCampaignAnalytics, setEmailAutomationActive,
-  getEmailTemplates, createEmailTemplate, deleteEmailTemplate,
+  getEmailTemplates, createEmailTemplate, updateEmailTemplate, deleteEmailTemplate,
   getAudienceStats, getEmailConfigStatus,
 } from '@/app/actions/email-campaigns';
 import Link from 'next/link';
@@ -132,6 +132,8 @@ export default function EmailMarketingPage() {
   const [showCreateCampaign, setShowCreateCampaign] = useState(false);
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [editingTemplate, setEditingTemplate] = useState(null);
   const [campaignAnalytics, setCampaignAnalytics] = useState(null);
   const [showAnalytics, setShowAnalytics] = useState(false);
 
@@ -202,9 +204,12 @@ export default function EmailMarketingPage() {
         triggerType: isAutomated ? campaignForm.triggerType || undefined : undefined,
         scheduledAt: asDraft || isAutomated || !campaignForm.scheduledAt ? undefined : new Date(campaignForm.scheduledAt).toISOString(),
       };
-      const res = await createEmailCampaign(payload);
+      const res = editingCampaign
+        ? await updateEmailCampaign(editingCampaign.id, payload)
+        : await createEmailCampaign(payload);
       if (res.success) {
         setShowCreateCampaign(false);
+        setEditingCampaign(null);
         setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' });
         await refresh();
       } else alert(res.error);
@@ -215,12 +220,16 @@ export default function EmailMarketingPage() {
     if (!templateForm.name || !templateForm.subject || !templateForm.body) return;
     setSubmitting(true);
     try {
-      const res = await createEmailTemplate({
+      const payload = {
         ...templateForm,
         variables: templateForm.variables ? templateForm.variables.split(',').map(v => v.trim()).filter(Boolean) : [],
-      });
+      };
+      const res = editingTemplate
+        ? await updateEmailTemplate(editingTemplate.id, payload)
+        : await createEmailTemplate(payload);
       if (res.success) {
         setShowCreateTemplate(false);
+        setEditingTemplate(null);
         setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' });
         await refresh();
       } else alert(res.error);
@@ -260,6 +269,18 @@ export default function EmailMarketingPage() {
     await refresh();
   };
 
+  const openTemplateEditor = (template) => {
+    setEditingTemplate(template);
+    setTemplateForm({
+      name: template.name,
+      subject: template.subject,
+      body: template.body,
+      category: template.category,
+      variables: Array.isArray(template.variables) ? template.variables.join(', ') : '',
+    });
+    setShowCreateTemplate(true);
+  };
+
   const handleViewAnalytics = async (campaign) => {
     const res = await getCampaignAnalytics(campaign.id);
     if (res.success) {
@@ -274,6 +295,35 @@ export default function EmailMarketingPage() {
     else alert(res.error || 'Unable to update automation');
   };
 
+  const openCampaignEditor = (campaign) => {
+    const scheduledAt = campaign.scheduledAt
+      ? (() => {
+        const date = new Date(campaign.scheduledAt);
+        const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+        return local.toISOString().slice(0, 16);
+      })()
+      : '';
+    const variantB = campaign.variantB || {};
+    setEditingCampaign(campaign);
+    setCampaignForm({
+      name: campaign.name,
+      subject: campaign.subject,
+      body: campaign.body,
+      templateId: campaign.templateId ? String(campaign.templateId) : '',
+      audience: campaign.audience,
+      scheduledAt,
+      isABTest: campaign.isABTest,
+      variantBSubject: variantB.subject || '',
+      variantBBody: variantB.body || '',
+      abSplitPercent: campaign.abSplitPercent || 50,
+      isAutomated: campaign.isAutomated,
+      triggerType: campaign.triggerType || '',
+      triggerDelay: campaign.triggerDelay ? String(campaign.triggerDelay) : '',
+    });
+    setSelectedCampaign(null);
+    setShowCreateCampaign(true);
+  };
+
   const handleUseTemplate = (template) => {
     setCampaignForm(f => ({
       ...f,
@@ -284,7 +334,11 @@ export default function EmailMarketingPage() {
     setShowCreateCampaign(true);
   };
 
-  const handleLoadDefault = (tpl) => {
+  const handleLoadDefault = (tpl, openModal = false) => {
+    if (openModal) {
+      setEditingTemplate(null);
+      setShowCreateTemplate(true);
+    }
     setTemplateForm({
       name: tpl.name,
       subject: tpl.subject,
@@ -322,7 +376,7 @@ export default function EmailMarketingPage() {
         </div>
         <div className="flex items-center gap-2">
           {tab === 'templates' ? (
-            <button onClick={() => setShowCreateTemplate(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+            <button onClick={() => { setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); setShowCreateTemplate(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
               <Plus className="w-4 h-4" /> New Template
             </button>
           ) : tab === 'campaigns' ? (
@@ -500,7 +554,7 @@ export default function EmailMarketingPage() {
                   <p className="text-xs font-medium text-accent mb-1">{tpl.category}</p>
                   <h4 className="text-sm font-semibold text-foreground mb-2">{tpl.name}</h4>
                   <p className="text-xs text-muted mb-3 line-clamp-2">{tpl.subject}</p>
-                  <button onClick={() => handleLoadDefault(tpl)}
+                  <button onClick={() => handleLoadDefault(tpl, true)}
                     className="text-xs text-accent hover:text-accent-hover font-medium flex items-center gap-1">
                     <Copy className="w-3 h-3" /> Use as Template
                   </button>
@@ -530,6 +584,9 @@ export default function EmailMarketingPage() {
                       <div className="flex gap-1">
                         <button onClick={() => handleUseTemplate(t)} className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-accent transition-colors" title="Use in campaign">
                           <Mail className="w-3.5 h-3.5" />
+                        </button>
+                        <button onClick={() => openTemplateEditor(t)} className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-accent transition-colors" title="Edit">
+                          <PenLine className="w-3.5 h-3.5" />
                         </button>
                         <button onClick={() => handleDeleteTemplate(t.id)} className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-red-500 transition-colors" title="Delete">
                           <Trash2 className="w-3.5 h-3.5" />
@@ -809,6 +866,9 @@ export default function EmailMarketingPage() {
               {/* Actions */}
               <div className="flex items-center justify-between pt-3 border-t border-border">
                 <div className="flex gap-2">
+                  {c.status !== 'SENT' && c.status !== 'SENDING' && <button onClick={() => openCampaignEditor(c)} className="px-3 py-2 text-xs text-accent hover:bg-accent/10 rounded-lg transition-colors flex items-center gap-1">
+                    <PenLine className="w-3.5 h-3.5" /> Edit
+                  </button>}
                   <button onClick={() => handleDeleteCampaign(c.id)} className="px-3 py-2 text-xs text-red-500 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1">
                     <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>
@@ -823,7 +883,7 @@ export default function EmailMarketingPage() {
                       <BarChart3 className="w-3.5 h-3.5" /> View Analytics
                     </button>
                   )}
-                  {!c.isAutomated && (c.status === 'DRAFT' || c.status === 'SCHEDULED') && (
+                  {!c.isAutomated && (c.status === 'DRAFT' || c.status === 'SCHEDULED' || c.status === 'PAUSED') && (
                     <button onClick={() => handleSendCampaign(c.id)} disabled={submitting}
                       className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover text-white rounded-lg font-semibold flex items-center gap-1 disabled:opacity-50">
                       <Send className="w-3.5 h-3.5" /> Send Now
@@ -966,7 +1026,7 @@ export default function EmailMarketingPage() {
       </Modal>
 
       {/* ═══════════════ CREATE CAMPAIGN MODAL ═══════════════ */}
-      <Modal isOpen={showCreateCampaign} onClose={() => { setShowCreateCampaign(false); setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' }); }} title="Create Email Campaign" size="xl">
+      <Modal isOpen={showCreateCampaign} onClose={() => { setShowCreateCampaign(false); setEditingCampaign(null); setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' }); }} title={editingCampaign ? 'Edit Email Campaign' : 'Create Email Campaign'} size="xl">
         <div className="space-y-5">
           {/* Basic Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1120,14 +1180,14 @@ export default function EmailMarketingPage() {
             </button>
             <button onClick={() => handleCreateCampaign(false)} disabled={submitting || !campaignForm.name || !campaignForm.subject || !campaignForm.body}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2">
-              <Send className="w-3.5 h-3.5" /> {campaignForm.isAutomated ? 'Activate Automation' : campaignForm.scheduledAt ? 'Schedule' : 'Create Campaign'}
+              <Send className="w-3.5 h-3.5" /> {editingCampaign ? (campaignForm.isAutomated ? 'Save Automation' : campaignForm.scheduledAt ? 'Save Schedule' : 'Save Changes') : campaignForm.isAutomated ? 'Activate Automation' : campaignForm.scheduledAt ? 'Schedule' : 'Create Campaign'}
             </button>
           </div>
         </div>
       </Modal>
 
       {/* ═══════════════ CREATE TEMPLATE MODAL ═══════════════ */}
-      <Modal isOpen={showCreateTemplate} onClose={() => { setShowCreateTemplate(false); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); }} title="Create Email Template" size="lg">
+      <Modal isOpen={showCreateTemplate} onClose={() => { setShowCreateTemplate(false); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); }} title={editingTemplate ? "Edit Email Template" : "Create Email Template"} size="lg">
         <div className="space-y-4">
           {/* Default template quick-fill */}
           <div>
@@ -1189,11 +1249,11 @@ export default function EmailMarketingPage() {
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button onClick={() => setShowCreateTemplate(false)}
+            <button onClick={() => { setShowCreateTemplate(false); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); }}
               className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button onClick={handleCreateTemplate} disabled={submitting || !templateForm.name || !templateForm.subject || !templateForm.body}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2">
-              <PenLine className="w-3.5 h-3.5" /> Save Template
+              <PenLine className="w-3.5 h-3.5" /> {editingTemplate ? 'Update Template' : 'Save Template'}
             </button>
           </div>
         </div>

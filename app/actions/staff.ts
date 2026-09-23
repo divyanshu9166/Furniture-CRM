@@ -6,6 +6,7 @@ import { createStaffSchema, updateStaffSchema } from '@/lib/validations/staff'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import bcrypt from 'bcryptjs'
 import type { Prisma, UserRole } from '@prisma/client'
+import { z } from 'zod'
 
 // ─── IST helpers ─────────────────────────────────────────────────────────────
 // All attendance dates/times must be in IST (Asia/Kolkata, UTC+5:30)
@@ -39,6 +40,26 @@ const staffPortalInclude: Prisma.StaffInclude = {
   _count: { select: { leads: true, invoices: true, customOrders: true } },
 }
 
+const staffStockUpdateSchema = z.object({
+  staffId: z.number().int().positive(),
+  productId: z.number().int().positive(),
+  action: z.enum(['Received', 'Stock Out', 'Dispatched', 'Low Stock Alert']),
+  quantity: z.number().int().positive().max(1_000_000),
+})
+
+async function requireStaffScope(staffId: number, allowManagement = true) {
+  if (!Number.isInteger(staffId) || staffId <= 0) throw new Error('Invalid staff member')
+  const session = await requireAuth()
+  if (allowManagement && (session.user.role === 'ADMIN' || session.user.role === 'MANAGER')) return session
+  if (session.user.staffId !== staffId) throw new Error('Forbidden')
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    select: { status: true, user: { select: { isActive: true } } },
+  })
+  if (!staff || staff.status !== 'Active' || !staff.user?.isActive) throw new Error('Staff account is inactive')
+  return session
+}
+
 const mapStaffForPortal = (s: any) => ({
   id: s.id,
   name: s.name,
@@ -54,9 +75,9 @@ const mapStaffForPortal = (s: any) => ({
   status: s.status,
   joinDate: s.joinDate ? s.joinDate.toISOString().split('T')[0] : null,
   avatar: s.avatar,
-  stats: s.stats,
-  target: s.target,
-  commission: s.commission,
+  stats: s.stats || { leadsAssigned: 0, conversions: 0, revenue: 0, avgResponseTime: '0 min', todaySales: 0, todayRevenue: 0, rating: 0, conversionRate: 0 },
+  target: s.target || { monthly: 0, achieved: 0 },
+  commission: s.commission || { rate: 0, earned: 0, pending: 0 },
   attendance: s.attendance.map((a: any) => ({
     date: a.date.toISOString().split('T')[0],
     clockIn: a.clockIn,
@@ -96,6 +117,7 @@ const mapStaffForPortal = (s: any) => ({
 })
 
 export async function getStaff() {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: [] } }
   const staff = await prisma.staff.findMany({
     include: staffPortalInclude,
     orderBy: { name: 'asc' },
@@ -121,11 +143,13 @@ export async function getStaffPortalProfile(staffId: number) {
   })
 
   if (!staff) return { success: false, error: 'Staff not found' }
+  if (staff.status !== 'Active' || !staff.user?.isActive) return { success: false, error: 'Staff account is inactive' }
 
   return { success: true, data: mapStaffForPortal(staff) }
 }
 
 export async function getStaffMember(id: number) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const staff = await prisma.staff.findUnique({
     where: { id },
     include: {
@@ -236,7 +260,7 @@ export async function assignStaffLogin(staffId: number, loginUsername: string, l
 }
 
 export async function verifyStaffPortalPassword(staffId: number, password: string) {
-  try { await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
+  try { await requireStaffScope(staffId, false) } catch { return { success: false, error: 'Forbidden' } }
 
   const pass = password.trim()
   if (!pass) return { success: false, error: 'Password is required' }
@@ -313,13 +337,15 @@ export async function updateStaffMember(data: unknown) {
     })
 
     if (existing.user) {
-      const userData: { name: string; email?: string; hashedPassword?: string; role?: UserRole } = {
+      const userData: { name: string; email?: string; hashedPassword?: string; role?: UserRole; isActive?: boolean } = {
         name: parsed.data.name,
         role: accessLevel,
       }
 
       if (loginUsername) userData.email = loginUsername
       if (loginPassword) userData.hashedPassword = await bcrypt.hash(loginPassword, 12)
+      if (parsed.data.status === 'Inactive') userData.isActive = false
+      if (existing.status === 'Inactive' && parsed.data.status === 'Active') userData.isActive = true
 
       await tx.user.update({ where: { id: existing.user.id }, data: userData })
     } else if (loginUsername && loginPassword) {
@@ -350,6 +376,9 @@ export async function updateStaffTarget(staffId: number, data: {
   commissionPending: number
 }) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  if (!Number.isInteger(staffId) || staffId <= 0 || !Object.values(data).every(value => Number.isFinite(value) && value >= 0) || data.commissionRate > 100) {
+    return { success: false, error: 'Invalid target or commission values' }
+  }
 
   const staff = await prisma.staff.findUnique({ where: { id: staffId } })
   if (!staff) return { success: false, error: 'Staff not found' }
@@ -376,6 +405,7 @@ function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 export async function clockIn(staffId: number, gps?: { lat: number; lng: number }) {
+  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   const { today, time } = getISTDate()
 
   // 1. Check if already clocked in
@@ -430,6 +460,7 @@ export async function clockIn(staffId: number, gps?: { lat: number; lng: number 
 }
 
 export async function clockOut(staffId: number, gps?: { lat: number; lng: number }) {
+  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   const { today, time } = getISTDate()
 
   const existing = await prisma.attendance.findUnique({
@@ -487,6 +518,8 @@ export async function clockOut(staffId: number, gps?: { lat: number; lng: number
 }
 
 export async function getMonthAttendance(staffId: number, year: number, month: number) {
+  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return { success: false, error: 'Invalid month', data: [] }
   // month is 1-based (1 = January)
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0, 23, 59, 59) // last day of month
@@ -512,6 +545,8 @@ export async function getMonthAttendance(staffId: number, year: number, month: n
 }
 
 export async function getAttendance(staffId: number, days: number = 30) {
+  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+  if (!Number.isInteger(days) || days < 1 || days > 366) return { success: false, error: 'Invalid date range', data: [] }
   const since = new Date()
   since.setDate(since.getDate() - days)
 
@@ -524,6 +559,7 @@ export async function getAttendance(staffId: number, days: number = 30) {
 }
 
 export async function getDailyAttendanceReport() {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: null } }
   const { today } = getISTDate()
 
   const allStaff = await prisma.staff.findMany({
@@ -562,13 +598,11 @@ export async function getDailyAttendanceReport() {
   return { success: true, data: { report, summary: { total: allStaff.length, present, late, absent } } }
 }
 
-export async function staffStockUpdate(data: {
-  staffId: number
-  productId: number
-  action: string
-  quantity: number
-}) {
-  const { staffId, productId, action, quantity } = data
+export async function staffStockUpdate(data: unknown) {
+  const parsed = staffStockUpdateSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  const { staffId, productId, action, quantity } = parsed.data
+  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
 
   const product = await prisma.product.findUnique({
     where: { id: productId },

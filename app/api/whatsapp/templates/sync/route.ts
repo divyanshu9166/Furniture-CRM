@@ -38,6 +38,7 @@ interface MetaTemplateComponent {
   type: string
   text?: string
   format?: string
+  buttons?: unknown
 }
 
 interface MetaTemplate {
@@ -166,6 +167,7 @@ export async function POST() {
       const body = (t.components ?? []).find((c) => c.type === 'BODY')
       const header = (t.components ?? []).find((c) => c.type === 'HEADER')
       const footer = (t.components ?? []).find((c) => c.type === 'FOOTER')
+      const buttons = (t.components ?? []).find((c) => c.type === 'BUTTONS')
 
       const row = {
         user_id: userId,
@@ -176,6 +178,7 @@ export async function POST() {
         header_content: header?.text ?? null,
         body_text: body?.text ?? '',
         footer_text: footer?.text ?? null,
+        buttons: buttons?.buttons as any ?? null,
         status: normalizeStatus(t.status),
       }
 
@@ -208,13 +211,37 @@ export async function POST() {
       }
     }
 
+    const truncated = pageCount >= PAGE_CAP && nextUrl !== null
+    let markedStale = 0
+    // A local row is not evidence that Meta has approved it. After a complete
+    // sync, downgrade any previously-approved row not returned by Meta so it
+    // can never be selected for an automatic reminder or broadcast by mistake.
+    if (!truncated) {
+      const metaKeys = new Set(metaTemplates.map((template) => `${template.name}\u0000${template.language}`))
+      const localApproved = await prisma.waMessageTemplate.findMany({
+        where: { user_id: userId, status: 'Approved' },
+        select: { id: true, name: true, language: true },
+      })
+      const staleIds = localApproved
+        .filter((template) => !metaKeys.has(`${template.name}\u0000${template.language}`))
+        .map((template) => template.id)
+      if (staleIds.length) {
+        const result = await prisma.waMessageTemplate.updateMany({
+          where: { id: { in: staleIds } },
+          data: { status: 'Draft' },
+        })
+        markedStale = result.count
+      }
+    }
+
     return NextResponse.json({
       success: errors.length === 0,
       total: metaTemplates.length,
       inserted,
       updated,
       errors,
-      truncated: pageCount >= PAGE_CAP && nextUrl !== null,
+      truncated,
+      markedStale,
     })
   } catch (error) {
     console.error('Error syncing WhatsApp templates:', error)

@@ -27,7 +27,7 @@ R2_PUBLIC_URL=https://pub-your-id.r2.dev
 # AI / voice agent
 AI_AGENT_NAME=anushka
 GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-3.1-flash-lite
+GEMINI_MODEL=gemini-3.5-flash-lite
 GEMINI_MAX_OUTPUT_TOKENS=48
 SARVAM_API_KEY=your_sarvam_key
 SARVAM_TTS_MODEL=bulbul:v3

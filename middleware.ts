@@ -21,12 +21,13 @@ const routePermissions: Record<string, string[]> = {
   '/staff-portal': ['STAFF', 'MANAGER'],
   '/settings': ['ADMIN'],
   '/staff': ['ADMIN', 'MANAGER'],
-  '/payroll': ['ADMIN', 'MANAGER'],
+  '/payroll': ['ADMIN'],
   '/billing': ['ADMIN', 'MANAGER'],
   '/drafts': ['ADMIN', 'MANAGER'],
   '/whatsapp-marketing': ['ADMIN', 'MANAGER'],
   '/email-marketing': ['ADMIN', 'MANAGER'],
   '/marketing': ['ADMIN', 'MANAGER'],
+  '/follow-ups': ['ADMIN', 'MANAGER'],
 }
 
 export async function middleware(req: NextRequest) {

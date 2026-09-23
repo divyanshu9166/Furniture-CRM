@@ -10,7 +10,7 @@
  *   4.  Embed customer message with multilingual-e5-small (local ONNX)
  *   5.  pgvector cosine search → top-3 knowledge chunks
  *   6.  Build prompt (system + knowledge + history + message)
- *   7.  Groq Llama → draft reply
+ *   7.  Gemini 3.5 Flash-Lite → draft reply
  *   8.  Confidence/handoff check
  *   9.  Cache reply in Redis (TTL: 2h)
  *  10.  Send reply via WhatsApp Cloud API + save to DB
@@ -155,7 +155,7 @@ export async function processAiAgentJob(payload: AiAgentJobPayload): Promise<voi
   const chunks = await retrieveChunks(userId, queryEmbedding, 3, config.confidence_threshold)
   const retrievedChunks = chunks.map((c) => c.content).join('\n\n---\n\n')
 
-  // ── Step 6–7: Build prompt + call Groq Llama ────────────────────────────
+  // ── Step 6–7: Build prompt + call Gemini ────────────────────────────────
   let agentResponse: Awaited<ReturnType<typeof generateResponse>>
   try {
     agentResponse = await generateResponse({

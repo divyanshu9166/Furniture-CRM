@@ -3,7 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { unstable_noStore } from 'next/cache'
-import { requireRole, requireManufacturingPermission } from '@/lib/auth-helpers'
+import { requireAuth, requireRole, requireManufacturingPermission } from '@/lib/auth-helpers'
 import {
   createWorkCenterSchema,
   createBOMSchema,
@@ -30,6 +30,15 @@ type GodownStockRow = {
   godownId: number
   quantity: number
   godown: { id: number; name: string; isDefault: boolean }
+}
+
+async function requireAssignedStaffScope(staffId: number) {
+  const session = await requireAuth()
+  if (session.user.role === 'ADMIN' || session.user.role === 'MANAGER') return session
+  if (session.user.staffId !== staffId) throw new Error('Forbidden')
+  const staff = await prisma.staff.findUnique({ where: { id: staffId }, select: { status: true, user: { select: { isActive: true } } } })
+  if (!staff || staff.status !== 'Active' || !staff.user?.isActive) throw new Error('Staff account is inactive')
+  return session
 }
 
 function getActualStepMins(step: ProductionStepTiming) {
@@ -1306,6 +1315,7 @@ export async function getManufacturingStats() {
 // ─── Staff Portal: Production Orders ────────────────────
 
 export async function getStaffProductionOrders(staffId: number) {
+  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const orders = await prisma.productionOrder.findMany({
     where: { assignedStaffId: staffId },  // Only fetch orders assigned to THIS staff
     orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
@@ -1350,6 +1360,8 @@ export async function getStaffProductionOrders(staffId: number) {
 }
 
 export async function staffUpdateProductionStep(staffId: number, stepId: number, status: string, notes?: string) {
+  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Number.isInteger(stepId) || stepId <= 0 || !['PENDING', 'IN_PROGRESS', 'DONE'].includes(status)) return { success: false, error: 'Invalid production step update' }
   // Verify the step belongs to an order assigned to this staff
   const step = await prisma.productionStep.findUnique({
     where: { id: stepId },
@@ -1386,6 +1398,8 @@ export async function staffUpdateProductionStep(staffId: number, stepId: number,
 }
 
 export async function staffAddStepNote(staffId: number, stepId: number, notes: string) {
+  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Number.isInteger(stepId) || stepId <= 0 || typeof notes !== 'string' || notes.trim().length === 0 || notes.length > 5000) return { success: false, error: 'Invalid step note' }
   const step = await prisma.productionStep.findUnique({
     where: { id: stepId },
     include: { productionOrder: { select: { assignedStaffId: true } } },
@@ -1402,6 +1416,8 @@ export async function staffAddStepNote(staffId: number, stepId: number, notes: s
 
 
 export async function staffUpdateProductionProgress(staffId: number, orderId: number, actualQty: number, notes?: string) {
+  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isFinite(actualQty) || actualQty < 0) return { success: false, error: 'Invalid quantity' }
   const order = await prisma.productionOrder.findUnique({ where: { id: orderId } })
   if (!order) return { success: false, error: 'Order not found' }
   if (order.assignedStaffId !== staffId) return { success: false, error: 'You are not assigned to this order' }
@@ -1426,6 +1442,8 @@ export async function staffUpdateProductionProgress(staffId: number, orderId: nu
 // assigning the order is the authorization; no separate manager "start" is
 // needed. Only moves PLANNED → IN_PROGRESS so it can't disturb other states.
 export async function staffStartProduction(staffId: number, orderId: number) {
+  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  if (!Number.isInteger(orderId) || orderId <= 0) return { success: false, error: 'Invalid production order' }
   const order = await prisma.productionOrder.findUnique({
     where: { id: orderId },
     select: { assignedStaffId: true, status: true },

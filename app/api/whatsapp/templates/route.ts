@@ -87,9 +87,12 @@ export async function POST(request: Request) {
     const category = CATEGORY_VALUES.has(String(body?.category ?? ''))
         ? String(body?.category)
         : 'Marketing'
-    const status = STATUS_VALUES.has(String(body?.status ?? ''))
+    // Creating a row locally does not submit it to Meta. Only the Meta sync
+    // route can mark a template Approved; this blocks forged local approvals.
+    const requestedStatus = STATUS_VALUES.has(String(body?.status ?? ''))
         ? String(body?.status)
         : 'Draft'
+    const status = requestedStatus === 'Approved' ? 'Draft' : requestedStatus
     const language = String(body?.language ?? '').trim() || 'en_US'
     const headerTypeRaw = String(body?.header_type ?? '').trim()
     const header_type = HEADER_TYPES.has(headerTypeRaw) ? headerTypeRaw : null

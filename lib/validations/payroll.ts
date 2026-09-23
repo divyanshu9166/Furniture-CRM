@@ -1,8 +1,11 @@
 import { z } from 'zod'
 
 export const generatePayrollSchema = z.object({
-  period: z.string().regex(/^\d{4}-\d{2}$/, 'Period must be YYYY-MM format'),
-  workingDays: z.number().min(1).max(31).default(26),
+  period: z.string().regex(/^\d{4}-\d{2}$/, 'Period must be YYYY-MM format').refine((value) => {
+    const month = Number(value.slice(5, 7))
+    return month >= 1 && month <= 12
+  }, 'Period month must be between 01 and 12'),
+  workingDays: z.number().int().min(1).max(31).default(26),
   // Optional per-staff LOP overrides from the Attendance Summary panel
   // Record<staffId (string), lopDays (number)>
   lopOverrides: z.record(z.string(), z.number().min(0).max(31)).optional(),

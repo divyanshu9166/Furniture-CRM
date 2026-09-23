@@ -1,6 +1,7 @@
 'use server'
 
 import { prisma } from '@/lib/db'
+import { requireAuth } from '@/lib/auth-helpers'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
 import { syncProductStockFromGodowns } from './godowns'
@@ -150,11 +151,16 @@ export async function moveCustomOrderToDraft(orderId: number) {
 // ─── MOVE SELF VISIT TO DRAFT ─────────────────────────
 
 export async function moveSelfVisitToDraft(visitId: number) {
+  let session
+  try { session = await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
   const visit = await prisma.fieldVisit.findUnique({
     where: { id: visitId },
     include: { staff: { select: { name: true } } },
   })
   if (!visit) return { success: false, error: 'Visit not found' }
+  if (session.user.role !== 'ADMIN' && session.user.role !== 'MANAGER' && session.user.staffId !== visit.staffId) {
+    return { success: false, error: 'Forbidden' }
+  }
 
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)

@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { testSmtpConnection, sendTestEmail, getSmtpConfig } from '@/lib/email'
 import type { SmtpConfig } from '@/lib/email'
 import { deliverEmailCampaign } from '@/lib/email-campaign-runner'
-import { getPublicAppUrl } from '@/lib/email-tracking'
+import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
 
 // ─── VALIDATION SCHEMAS ─────────────────────────────
 
@@ -132,6 +132,7 @@ export async function getEmailCampaigns() {
       subject: c.subject,
       body: c.body,
       templateName: c.template?.name || null,
+      templateId: c.templateId,
       status: c.status,
       scheduledAt: c.scheduledAt?.toISOString() || null,
       sentAt: c.sentAt?.toISOString() || null,
@@ -207,6 +208,17 @@ export async function updateEmailCampaign(id: number, data: unknown) {
   if (existing.status === 'SENT' || existing.status === 'SENDING') return { success: false, error: 'Sent or in-progress campaigns cannot be edited.' }
   const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
   if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
+  if (parsed.data.templateId) {
+    const templateExists = await prisma.emailTemplate.count({ where: { id: parsed.data.templateId } })
+    if (!templateExists) return { success: false, error: 'Selected template no longer exists.' }
+  }
+  if (parsed.data.isAutomated) {
+    const duplicate = await prisma.emailCampaign.findFirst({
+      where: { id: { not: id }, isAutomated: true, triggerType: parsed.data.triggerType, status: { not: 'PAUSED' } },
+      select: { id: true },
+    })
+    if (duplicate) return { success: false, error: 'An active automation already exists for this trigger.' }
+  }
 
   await prisma.emailCampaign.update({
     where: { id },
@@ -328,7 +340,7 @@ export async function getEmailConfigStatus() {
     smtpHost: config?.smtpHost || null,
     smtpUser: config?.smtpUser || null,
     fromName: config?.smtpFromName || null,
-    trackingConfigured: !!getPublicAppUrl(),
+    trackingConfigured: isEmailTrackingConfigured(),
   }
 }
 

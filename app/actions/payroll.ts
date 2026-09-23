@@ -11,7 +11,7 @@ import { z } from 'zod'
 // (Like Keka / GreytHR's "Attendance Summary" pre-payroll screen)
 
 export async function getAttendanceSummaryForPayroll(period: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const [year, month] = period.split('-').map(Number)
   const monthStart = new Date(year, month - 1, 1)
@@ -161,7 +161,7 @@ function overtimeHoursFromAttendance(entries: { status: string; hours: number | 
 // ─── PRE-PAYROLL READINESS ──────────────────────────
 
 export async function getPayrollReadiness(period?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
 
   const targetPeriod = period || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
   const [year, month] = targetPeriod.split('-').map(Number)
@@ -245,7 +245,7 @@ export async function getPayrollReadiness(period?: string) {
 // ─── STAFF PAYROLL SETTINGS ──────────────────────────
 
 export async function getStaffForPayroll() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const staff = await prisma.staff.findMany({
     where: { status: 'Active' },
@@ -263,7 +263,7 @@ export async function getStaffForPayroll() {
 }
 
 export async function updateStaffPayrollInfo(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = updateStaffPayrollSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -288,7 +288,7 @@ const loanSchema = z.object({
 })
 
 export async function getStaffLoans(staffId?: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const loans = await prisma.staffLoan.findMany({
     where: staffId ? { staffId } : undefined,
@@ -299,7 +299,7 @@ export async function getStaffLoans(staffId?: number) {
 }
 
 export async function createStaffLoan(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = loanSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -524,7 +524,7 @@ export async function generatePayroll(data: unknown) {
 // ─── PAYROLL RUNS ────────────────────────────────────
 
 export async function getPayrollHistory() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const runs = await prisma.payrollRun.findMany({
     orderBy: { period: 'desc' },
@@ -534,7 +534,7 @@ export async function getPayrollHistory() {
 }
 
 export async function getPayrollRun(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
 
   const run = await prisma.payrollRun.findUnique({
     where: { id },
@@ -559,7 +559,7 @@ export async function getPayrollRun(id: number) {
 }
 
 export async function getAllPayslips(period?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied', data: [] } }
+  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const payslips = await prisma.payslip.findMany({
     where: period ? { payrollRun: { period } } : undefined,
@@ -597,19 +597,25 @@ export async function approvePayroll(id: number) {
 
 export async function markPayrollPaid(id: number) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const run = await prisma.payrollRun.findUnique({
-    where: { id },
-    select: {
-      status: true,
-      period: true,
-      payslips: { select: { staffId: true, loanDeduction: true } },
-    },
-  })
-  if (!run) return { success: false, error: 'Payroll run not found' }
-  if (run.status !== 'APPROVED') return { success: false, error: 'Payroll must be APPROVED before marking as paid' }
+  if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'Invalid payroll run' }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.payrollRun.update({ where: { id }, data: { status: 'PAID', paidAt: new Date() } })
+  const paid = await prisma.$transaction(async (tx) => {
+    // Claim the APPROVED run inside the transaction. This prevents two
+    // concurrent requests from applying the same loan installment twice.
+    const claimed = await tx.payrollRun.updateMany({
+      where: { id, status: 'APPROVED' },
+      data: { status: 'PAID', paidAt: new Date() },
+    })
+    if (claimed.count !== 1) return false
+
+    const run = await tx.payrollRun.findUnique({
+      where: { id },
+      select: {
+        period: true,
+        payslips: { select: { id: true, staffId: true, loanDeduction: true } },
+      },
+    })
+    if (!run) throw new Error('Payroll run not found')
 
     // Apply loan deductions only when payroll is actually paid.
     for (const payslip of run.payslips) {
@@ -644,7 +650,11 @@ export async function markPayrollPaid(id: number) {
         pendingDeduction -= applied
       }
     }
+    await tx.payslip.updateMany({ where: { payrollRunId: id }, data: { status: 'Paid' } })
+    return true
   })
+
+  if (!paid) return { success: false, error: 'Payroll must be APPROVED before marking as paid' }
 
   revalidatePath('/payroll')
   return { success: true }

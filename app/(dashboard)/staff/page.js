@@ -49,6 +49,14 @@ const stockActionColors = {
   'Low Stock Alert': 'text-amber-700 bg-amber-500/10',
 };
 
+const getISTDateKey = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+
 export default function StaffPage() {
   const [staff, setStaff] = useState([]);
   const [storeCampaigns, setStoreCampaigns] = useState([]);
@@ -100,6 +108,7 @@ export default function StaffPage() {
   const totalTarget = staff.reduce((sum, s) => sum + s.target.monthly, 0);
   const totalCommissionEarned = staff.reduce((sum, s) => sum + s.commission.earned, 0);
   const presentToday = staff.filter(s => s.attendance[0]?.status === 'Present').length;
+  const todayKey = getISTDateKey();
 
   const tabs = [
     { key: 'overview', label: 'Overview', icon: BarChart3 },
@@ -626,9 +635,9 @@ export default function StaffPage() {
           <div className="glass-card p-5">
             <h3 className="text-base font-semibold text-foreground mb-4">All Staff Activity — Today</h3>
             <div className="space-y-2">
-              {staff.flatMap(s => s.activities.filter(a => a.date === '2026-03-21').map(a => ({ ...a, staffName: s.name, staffAvatar: s.avatar, staffRole: s.role }))).sort((a, b) => {
-                const tA = new Date(`2026-03-21 ${a.time}`);
-                const tB = new Date(`2026-03-21 ${b.time}`);
+              {staff.flatMap(s => s.activities.filter(a => a.date === todayKey).map(a => ({ ...a, staffName: s.name, staffAvatar: s.avatar, staffRole: s.role }))).sort((a, b) => {
+                const tA = new Date(`${todayKey} ${a.time}`);
+                const tB = new Date(`${todayKey} ${b.time}`);
                 return tB - tA;
               }).map((act, i) => {
                 const config = activityIcons[act.type] || activityIcons.walkin;
@@ -655,10 +664,10 @@ export default function StaffPage() {
           {/* Tasks Summary */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Sales Made', count: staff.flatMap(s => s.activities.filter(a => a.date === '2026-03-21' && a.type === 'sale')).length, icon: ShoppingBag, color: 'bg-emerald-500/10 text-emerald-700' },
-              { label: 'Calls Made', count: staff.flatMap(s => s.activities.filter(a => a.date === '2026-03-21' && a.type === 'call')).length, icon: Phone, color: 'bg-blue-500/10 text-blue-700' },
-              { label: 'Walk-ins Handled', count: staff.flatMap(s => s.activities.filter(a => a.date === '2026-03-21' && a.type === 'walkin')).length, icon: Users, color: 'bg-purple-500/10 text-purple-700' },
-              { label: 'Stock Updates', count: staff.flatMap(s => s.activities.filter(a => a.date === '2026-03-21' && a.type === 'stock')).length, icon: Package, color: 'bg-amber-500/10 text-amber-700' },
+              { label: 'Sales Made', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'sale')).length, icon: ShoppingBag, color: 'bg-emerald-500/10 text-emerald-700' },
+              { label: 'Calls Made', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'call')).length, icon: Phone, color: 'bg-blue-500/10 text-blue-700' },
+              { label: 'Walk-ins Handled', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'walkin')).length, icon: Users, color: 'bg-purple-500/10 text-purple-700' },
+              { label: 'Stock Updates', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'stock')).length, icon: Package, color: 'bg-amber-500/10 text-amber-700' },
             ].map((item, i) => {
               const Icon = item.icon;
               return (

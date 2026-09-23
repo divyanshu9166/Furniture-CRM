@@ -8,7 +8,7 @@ import {
 import {
     getFollowUps, createFollowUp, updateFollowUp, updateFollowUpStatus,
     deleteFollowUp, getFollowUpCounts,
-    getReminderConfig, updateReminderConfig, runFollowUpRemindersNow,
+    getReminderConfig, getFollowUpReminderTemplates, updateReminderConfig, runFollowUpRemindersNow,
 } from '@/app/actions/follow-ups';
 import { getStaff } from '@/app/actions/staff';
 import { dueLabel, dueBucket, daysUntil } from '@/lib/follow-ups';
@@ -84,13 +84,62 @@ export default function FollowUpsPage() {
     const [cfgLoaded, setCfgLoaded] = useState(false);
     const [savingCfg, setSavingCfg] = useState(false);
     const [running, setRunning] = useState(false);
+    const [reminderTemplates, setReminderTemplates] = useState([]);
+    const [templatesLoading, setTemplatesLoading] = useState(false);
+    const [templatesReason, setTemplatesReason] = useState('');
+    const [syncingTemplates, setSyncingTemplates] = useState(false);
+
+    const loadReminderTemplates = async () => {
+        setTemplatesLoading(true);
+        try {
+            const res = await getFollowUpReminderTemplates();
+            if (res.success) {
+                setReminderTemplates(res.data || []);
+                setTemplatesReason(res.reason || '');
+            } else {
+                setReminderTemplates([]);
+                setTemplatesReason(res.error || 'Could not load approved Meta templates.');
+            }
+        } catch (err) {
+            setReminderTemplates([]);
+            setTemplatesReason(err?.message || 'Could not load approved Meta templates.');
+        } finally {
+            setTemplatesLoading(false);
+        }
+    };
 
     const openSettings = async () => {
         setShowSettings(true);
-        if (!cfgLoaded) {
-            const res = await getReminderConfig();
-            if (res.success) { setCfg(res.data); setCfgLoaded(true); }
-            else notify(res.error || 'Could not load settings', { variant: 'danger' });
+        const [configResult] = await Promise.all([
+            getReminderConfig(),
+            loadReminderTemplates(),
+        ]);
+        if (configResult.success) {
+            setCfg(configResult.data);
+            setCfgLoaded(true);
+        } else {
+            notify(configResult.error || 'Could not load settings', { variant: 'danger' });
+        }
+    };
+
+    const syncMetaTemplates = async () => {
+        setSyncingTemplates(true);
+        try {
+            const response = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+            const body = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(body.error || 'Meta template sync failed');
+            }
+            await loadReminderTemplates();
+            if (body.success === false) {
+                notify(`Meta sync completed with ${body.errors?.length || 0} template issue(s). Compatible templates are refreshed.`, { variant: 'warning' });
+            } else {
+                notify(`${body.inserted || 0} added, ${body.updated || 0} templates refreshed from Meta`, { variant: 'success' });
+            }
+        } catch (err) {
+            notify(err?.message || 'Could not sync Meta templates', { variant: 'danger' });
+        } finally {
+            setSyncingTemplates(false);
         }
     };
 
@@ -104,15 +153,29 @@ export default function FollowUpsPage() {
 
     const runNow = async () => {
         setRunning(true);
-        const res = await runFollowUpRemindersNow();
-        setRunning(false);
-        if (res.success) {
-            const s = res.data;
-            if (!s.enabled) notify('Reminders are disabled — enable them first', { variant: 'warning' });
-            else notify(`Reminders run: ${s.sent} sent, ${s.skipped} skipped, ${s.failed} failed`, { variant: 'success' });
-            await refresh();
-        } else {
-            notify(res.error || 'Failed to run reminders', { variant: 'danger' });
+        try {
+            // Never run with an unsaved template selection: validate and persist
+            // the visible settings first, then execute the same configuration.
+            const saved = await updateReminderConfig(cfg);
+            if (!saved.success) {
+                notify(saved.error || 'Save reminder settings before running', { variant: 'danger' });
+                return;
+            }
+            setCfg(saved.data);
+            const res = await runFollowUpRemindersNow();
+            if (res.success) {
+                const s = res.data;
+                if (!s.enabled) notify('Reminders are disabled — enable them first', { variant: 'warning' });
+                else if (s.failed > 0) notify(`Reminders run: ${s.sent} sent, ${s.skipped} skipped, ${s.failed} failed`, { variant: 'danger' });
+                else if (s.skipped > 0) notify(`Reminders run: ${s.sent} sent, ${s.skipped} skipped`, { variant: 'warning' });
+                else notify(`Reminders run: ${s.sent} sent`, { variant: 'success' });
+                if (s.reason) notify(s.reason, { variant: 'warning' });
+                await refresh();
+            } else {
+                notify(res.error || 'Failed to run reminders', { variant: 'danger' });
+            }
+        } finally {
+            setRunning(false);
         }
     };
 
@@ -128,22 +191,24 @@ export default function FollowUpsPage() {
 
     useEffect(() => {
         let active = true;
-        setLoading(true);
-        setLoadError(null);
-        // A single failing action must never leave the page stuck on the
-        // loading skeleton — always clear `loading`, and surface a retry.
-        Promise.all([getFollowUps(tab), getFollowUpCounts()])
-            .then(([res, c]) => {
-                if (!active) return;
-                if (res.success) setItems(res.data);
-                else setLoadError(res.error || 'Failed to load follow-ups');
-                if (c.success) setCounts(c.data);
-            })
-            .catch(err => {
-                if (active) setLoadError(err?.message || 'Failed to load follow-ups');
-            })
-            .finally(() => { if (active) setLoading(false); });
-        return () => { active = false; };
+        const timer = setTimeout(() => {
+            setLoading(true);
+            setLoadError(null);
+            // A single failing action must never leave the page stuck on the
+            // loading skeleton — always clear `loading`, and surface a retry.
+            Promise.all([getFollowUps(tab), getFollowUpCounts()])
+                .then(([res, c]) => {
+                    if (!active) return;
+                    if (res.success) setItems(res.data);
+                    else setLoadError(res.error || 'Failed to load follow-ups');
+                    if (c.success) setCounts(c.data);
+                })
+                .catch(err => {
+                    if (active) setLoadError(err?.message || 'Failed to load follow-ups');
+                })
+                .finally(() => { if (active) setLoading(false); });
+        }, 0);
+        return () => { active = false; clearTimeout(timer); };
     }, [tab]);
 
     useEffect(() => {
@@ -537,20 +602,43 @@ export default function FollowUpsPage() {
                     </label>
 
                     <div>
-                        <label className="block text-xs font-medium text-muted mb-1.5">Approved template name</label>
-                        <input value={cfg.templateName} onChange={e => setCfg(c => ({ ...c, templateName: e.target.value }))}
-                            placeholder="e.g. follow_up_reminder" className="w-full" />
-                        <p className="text-[11px] text-muted mt-1">Must be approved in Meta WhatsApp Manager. Body variable <code>{'{{1}}'}</code> is filled with the customer&apos;s name.</p>
+                        <div className="flex items-center justify-between gap-3 mb-1.5">
+                            <label className="block text-xs font-medium text-muted">Approved Meta template</label>
+                            <button type="button" onClick={syncMetaTemplates} disabled={syncingTemplates}
+                                className="text-xs text-accent hover:text-accent-hover font-medium disabled:opacity-50">
+                                {syncingTemplates ? 'Syncing…' : 'Sync from Meta'}
+                            </button>
+                        </div>
+                        <select
+                            value={`${cfg.templateName}::${cfg.language}`}
+                            onChange={e => {
+                                const selected = reminderTemplates.find(t => `${t.name}::${t.language}` === e.target.value);
+                                setCfg(c => ({ ...c, templateName: selected?.name || '', language: selected?.language || 'en_US' }));
+                            }}
+                            disabled={templatesLoading}
+                            className="w-full disabled:opacity-50"
+                        >
+                            <option value="">{templatesLoading ? 'Loading approved templates…' : 'Select an approved Meta template'}</option>
+                            {reminderTemplates.map(template => (
+                                <option key={`${template.name}-${template.language}`} value={`${template.name}::${template.language}`}>
+                                    {template.name} ({template.language})
+                                </option>
+                            ))}
+                        </select>
+                        <p className="text-[11px] text-muted mt-1">
+                            Only synced, approved templates compatible with this reminder are shown. Body variable <code>{'{{1}}'}</code> is filled with the customer&apos;s name.
+                        </p>
+                        {templatesReason && <p className="text-[11px] text-warning mt-1">{templatesReason}</p>}
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-medium text-muted mb-1.5">Template language</label>
-                        <input value={cfg.language} onChange={e => setCfg(c => ({ ...c, language: e.target.value }))}
-                            placeholder="en_US" className="w-full md:max-w-[200px]" />
-                    </div>
+                    {cfg.templateName && (
+                        <p className="text-xs text-muted rounded-lg bg-surface p-2.5">
+                            Selected: <span className="font-mono text-foreground">{cfg.templateName}</span> · {cfg.language}
+                        </p>
+                    )}
 
                     <div className="flex items-center justify-between gap-3 pt-2 border-t border-border flex-wrap">
-                        <button onClick={runNow} disabled={running}
+                        <button onClick={runNow} disabled={running || !cfgLoaded}
                             className="tap-press-sm inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-surface border border-border text-foreground hover:border-accent/30 disabled:opacity-50">
                             {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Run now
                         </button>

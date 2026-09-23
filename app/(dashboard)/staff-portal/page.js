@@ -41,6 +41,14 @@ const stockActionColors = {
   'Low Stock Alert': 'text-amber-700 bg-amber-500/10',
 };
 
+const getISTDateKey = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+};
+
 export default function StaffPortalPage() {
   const router = useRouter();
   const { data: session } = useSession();
@@ -62,6 +70,20 @@ export default function StaffPortalPage() {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [clockInMsg, setClockInMsg] = useState('');
 
+  // Data used by portal effects must be declared before those effects.
+  const [assignedVisits, setAssignedVisits] = useState([]);
+  const [showUpdateVisit, setShowUpdateVisit] = useState(false);
+  const [editingVisit, setEditingVisit] = useState(null);
+  const [visitSaving, setVisitSaving] = useState(false);
+  const [selfVisits, setSelfVisits] = useState([]);
+  const [deletingVisitId, setDeletingVisitId] = useState(null);
+  const [productionOrders, setProductionOrders] = useState([]);
+  const [productionLoading, setProductionLoading] = useState(false);
+  const [stepUpdating, setStepUpdating] = useState(null);
+  const [expandedOrderId, setExpandedOrderId] = useState(null);
+  const [stepNotes, setStepNotes] = useState({});
+  const [savingNoteId, setSavingNoteId] = useState(null);
+
   // Attendance month state
   const [attendanceMonth, setAttendanceMonth] = useState(() => {
     const n = new Date();
@@ -81,7 +103,7 @@ export default function StaffPortalPage() {
   const applyStaffLogin = (found) => {
     setLoggedInStaff(found);
     setLoginError('');
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDateKey();
     const today = found.attendance.find(a => a.date === todayStr);
     if (today?.clockIn) {
       setIsClockedIn(true);
@@ -98,13 +120,15 @@ export default function StaffPortalPage() {
   useEffect(() => {
     if (!session?.user?.staffId || loggedInStaff) return;
     let active = true;
-    setAutoLoginLoading(true);
-    getStaffPortalProfile(Number(session.user.staffId)).then(res => {
-      if (!active) return;
-      if (res.success) applyStaffLogin(res.data);
-      setAutoLoginLoading(false);
-    });
-    return () => { active = false; };
+    const timer = setTimeout(() => {
+      setAutoLoginLoading(true);
+      getStaffPortalProfile(Number(session.user.staffId)).then(res => {
+        if (!active) return;
+        if (res.success) applyStaffLogin(res.data);
+        setAutoLoginLoading(false);
+      });
+    }, 0);
+    return () => { active = false; clearTimeout(timer); };
   }, [session, loggedInStaff]);
 
   // Re-fetch assigned visits when switching to assigned/dashboard tabs so manager updates are visible
@@ -120,11 +144,14 @@ export default function StaffPortalPage() {
   // Fetch month attendance when tab = 'attendance' or month changes
   useEffect(() => {
     if (!loggedInStaff || tab !== 'attendance') return;
-    setAttendanceLoading(true);
-    getMonthAttendance(loggedInStaff.id, attendanceMonth.year, attendanceMonth.month).then(res => {
-      if (res.success) setMonthAttendance(res.data);
-      setAttendanceLoading(false);
-    });
+    const timer = setTimeout(() => {
+      setAttendanceLoading(true);
+      getMonthAttendance(loggedInStaff.id, attendanceMonth.year, attendanceMonth.month).then(res => {
+        if (res.success) setMonthAttendance(res.data);
+        setAttendanceLoading(false);
+      });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [tab, loggedInStaff, attendanceMonth]);
 
   // Re-fetch self visits from DB when switching to self tab
@@ -140,11 +167,14 @@ export default function StaffPortalPage() {
   // Fetch production orders when switching to production tab
   useEffect(() => {
     if (!loggedInStaff || tab !== 'production') return;
-    setProductionLoading(true);
-    getStaffProductionOrders(loggedInStaff.id).then(res => {
-      if (res.success) setProductionOrders(res.data);
-      setProductionLoading(false);
-    });
+    const timer = setTimeout(() => {
+      setProductionLoading(true);
+      getStaffProductionOrders(loggedInStaff.id).then(res => {
+        if (res.success) setProductionOrders(res.data);
+        setProductionLoading(false);
+      });
+    }, 0);
+    return () => clearTimeout(timer);
   }, [tab, loggedInStaff]);
 
   // Modals
@@ -176,24 +206,6 @@ export default function StaffPortalPage() {
 
   // Photo upload for existing visits
   const [uploadingVisitId, setUploadingVisitId] = useState(null);
-
-  // Assigned visits from custom orders
-  const [assignedVisits, setAssignedVisits] = useState([]);
-  const [showUpdateVisit, setShowUpdateVisit] = useState(false);
-  const [editingVisit, setEditingVisit] = useState(null);
-  const [visitSaving, setVisitSaving] = useState(false);
-
-  // Self visits from DB
-  const [selfVisits, setSelfVisits] = useState([]);
-  const [deletingVisitId, setDeletingVisitId] = useState(null);
-
-  // Production orders
-  const [productionOrders, setProductionOrders] = useState([]);
-  const [productionLoading, setProductionLoading] = useState(false);
-  const [stepUpdating, setStepUpdating] = useState(null);
-  const [expandedOrderId, setExpandedOrderId] = useState(null); // for materials panel
-  const [stepNotes, setStepNotes] = useState({}); // { [stepId]: string } draft notes per step
-  const [savingNoteId, setSavingNoteId] = useState(null);
 
   const handleLogin = async (e) => {
     e.preventDefault();
