@@ -1,7 +1,3 @@
-import { Inter } from 'next/font/google';
-
-const inter = Inter({ subsets: ['latin'], weight: ['300', '400', '500', '600', '700'] });
-
 export const metadata = {
   title: 'Welcome — Register Your Visit',
   description: 'Register your visit at our showroom. Our team will assist you shortly.',
@@ -16,7 +12,7 @@ export const viewport = {
 
 export default function WalkinFormLayout({ children }) {
   return (
-    <div className={inter.className}>
+    <div className="font-sans">
       {children}
     </div>
   );
