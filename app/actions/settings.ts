@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireRole } from '@/lib/auth-helpers'
-import { prepareSmtpConfig, senderAliasesSchema, senderEmailSchema } from '@/lib/email-senders'
+import { formatSmtpError, prepareSmtpConfig, senderAliasesSchema, senderEmailSchema } from '@/lib/email-senders'
 
 const updateSettingsSchema = z.object({
   storeName: z.string().min(1).optional(),
@@ -154,7 +154,7 @@ export async function updateStoreSettings(data: unknown) {
       if (inUse) return { success: false, error: 'An active campaign uses a sender you are removing. Pause or edit that campaign before changing its sender settings.' }
       Object.assign(parsed.data, config)
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Invalid SMTP settings.' }
+      return { success: false, error: formatSmtpError(error) }
     }
   }
 

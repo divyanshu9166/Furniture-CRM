@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import SenderSettings from '@/components/email/SenderSettings';
+import { changeSmtpPort, changeSmtpEncryption, smtpTransportProblem } from '@/lib/email-senders';
 import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText, ShieldCheck, Factory } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings, getManufacturingPermissions, updateManufacturingPermissions } from '@/app/actions/settings';
@@ -194,6 +195,13 @@ export default function SettingsPage() {
   const [smtpTestEmail, setSmtpTestEmail] = useState('');
   const [smtpSaving, setSmtpSaving] = useState(false);
   const [showSmtpPass, setShowSmtpPass] = useState(false);
+  const smtpTransportError = smtpTransportProblem(smtpForm.smtpPort, smtpForm.smtpSecure);
+  function changeSmtpForm(update) {
+    setSmtpForm(update);
+    // A previous test result describes the old settings, not this edited draft.
+    setSmtpTestResult(null);
+    setSmtpSendResult(null);
+  }
 
   const mapTeamMember = (s) => ({
     id: s.id,
@@ -1454,7 +1462,7 @@ export default function SettingsPage() {
                         { name: 'Titan', host: 'smtp.titan.email', port: 465, secure: true },
                       ].map(preset => (
                         <button key={preset.name} type="button"
-                          onClick={() => setSmtpForm(f => ({ ...f, smtpHost: preset.host, smtpPort: preset.port, smtpSecure: preset.secure }))}
+                          onClick={() => changeSmtpForm(f => ({ ...f, smtpHost: preset.host, smtpPort: preset.port, smtpSecure: preset.secure }))}
                           className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${smtpForm.smtpHost === preset.host ? 'bg-accent text-white' : 'bg-surface-hover text-muted hover:text-foreground'}`}>
                           {preset.name}
                         </button>
@@ -1466,19 +1474,19 @@ export default function SettingsPage() {
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">SMTP Host *</label>
                       <input type="text" placeholder="smtp.gmail.com" value={smtpForm.smtpHost}
-                        onChange={e => setSmtpForm(f => ({ ...f, smtpHost: e.target.value }))}
+                        onChange={e => changeSmtpForm(f => ({ ...f, smtpHost: e.target.value }))}
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted mb-1.5">SMTP Port</label>
-                      <input type="number" value={smtpForm.smtpPort}
-                        onChange={e => setSmtpForm(f => ({ ...f, smtpPort: parseInt(e.target.value) || 587 }))}
+                      <label htmlFor="smtp-port" className="block text-xs font-medium text-muted mb-1.5">SMTP Port</label>
+                      <input id="smtp-port" type="number" min="1" max="65535" step="1" value={smtpForm.smtpPort} aria-invalid={!!smtpTransportError} aria-describedby="smtp-transport-help"
+                        onChange={e => { const value = e.target.value; changeSmtpForm(f => changeSmtpPort(f, value)); }}
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">SMTP Login / Main Mailbox *</label>
                       <input type="email" placeholder="your-business@gmail.com" value={smtpForm.smtpUser}
-                        onChange={e => { const value = e.target.value; setSmtpForm(f => ({ ...f, smtpUser: value,
+                        onChange={e => { const value = e.target.value; changeSmtpForm(f => ({ ...f, smtpUser: value,
                           smtpFromEmail: !f.smtpFromEmail || f.smtpFromEmail.trim().toLowerCase() === f.smtpUser.trim().toLowerCase() ? value : f.smtpFromEmail,
                         })); }}
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
@@ -1487,7 +1495,7 @@ export default function SettingsPage() {
                       <label className="block text-xs font-medium text-muted mb-1.5">SMTP / App Password *</label>
                       <div className="relative">
                         <input type={showSmtpPass ? 'text' : 'password'} autoComplete="new-password" placeholder={smtpHasPassword && !smtpForm.smtpPass ? 'Saved password — leave blank to keep' : 'Mailbox or app-specific password'} value={smtpForm.smtpPass}
-                          onChange={e => setSmtpForm(f => ({ ...f, smtpPass: e.target.value }))}
+                          onChange={e => changeSmtpForm(f => ({ ...f, smtpPass: e.target.value }))}
                           className="w-full px-4 py-2.5 pr-10 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                         <button type="button" onClick={() => setShowSmtpPass(!showSmtpPass)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground">
@@ -1498,20 +1506,23 @@ export default function SettingsPage() {
                     <div>
                       <label className="block text-xs font-medium text-muted mb-1.5">Display Name (From)</label>
                       <input type="text" placeholder="Your Furniture Store" value={smtpForm.smtpFromName}
-                        onChange={e => setSmtpForm(f => ({ ...f, smtpFromName: e.target.value }))}
+                        onChange={e => changeSmtpForm(f => ({ ...f, smtpFromName: e.target.value }))}
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                     </div>
                     <div className="flex items-center gap-3 pt-6">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={smtpForm.smtpSecure}
-                          onChange={e => setSmtpForm(f => ({ ...f, smtpSecure: e.target.checked }))}
+                          onChange={e => { const checked = e.target.checked; changeSmtpForm(f => changeSmtpEncryption(f, checked)); }}
                           className="w-4 h-4 rounded border-border accent-accent" />
                         <span className="text-sm text-foreground">Use SSL (port 465)</span>
                       </label>
                     </div>
                   </div>
 
-                  <SenderSettings config={smtpForm} onChange={setSmtpForm} testFrom={smtpTestFrom} onTestFromChange={setSmtpTestFrom} disabled={smtpSaving || smtpSending || smtpTesting} />
+                  <p id="smtp-transport-help" role={smtpTransportError ? 'alert' : undefined} className={`text-xs ${smtpTransportError ? 'text-danger' : 'text-muted'}`}>
+                    {smtpTransportError || 'Port 465 uses SSL/TLS; port 587 uses STARTTLS (also encrypted). Changing either option keeps standard ports paired automatically. For a custom port, follow your email provider’s settings.'}
+                  </p>
+                  <SenderSettings config={smtpForm} onChange={changeSmtpForm} testFrom={smtpTestFrom} onTestFromChange={value => { setSmtpTestFrom(value); setSmtpSendResult(null); }} disabled={smtpSaving || smtpSending || smtpTesting} />
                   </fieldset>
 
                   {/* Gmail Setup Info */}
@@ -1532,7 +1543,7 @@ export default function SettingsPage() {
                         catch { setSmtpTestResult({ success: false, error: 'Unable to test SMTP. Please retry.' }); }
                         finally { setSmtpTesting(false); }
                       }}
-                      disabled={smtpTesting || smtpSaving || smtpSending || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
+                      disabled={smtpTesting || smtpSaving || smtpSending || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword || !!smtpTransportError}
                       className="px-4 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50 flex items-center gap-2">
                       {smtpTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                       Test Connection
@@ -1541,7 +1552,7 @@ export default function SettingsPage() {
                     {/* Send Test Email */}
                     <div className="ui-actions flex items-center gap-2 flex-1 min-w-0">
                       <input type="email" placeholder="Send test to..." value={smtpTestEmail}
-                        onChange={e => setSmtpTestEmail(e.target.value)}
+                        onChange={e => { setSmtpTestEmail(e.target.value); setSmtpSendResult(null); }}
                         className="flex-1 min-w-[200px] px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                       <button
                         onClick={async () => {
@@ -1555,7 +1566,7 @@ export default function SettingsPage() {
                           } catch { setSmtpSendResult({ success: false, error: 'Unable to send the test email. Please retry.' }); }
                           finally { setSmtpSending(false); }
                         }}
-                        disabled={smtpSending || smtpSaving || smtpTesting || !smtpTestEmail || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
+                        disabled={smtpSending || smtpSaving || smtpTesting || !smtpTestEmail || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword || !!smtpTransportError}
                         className="px-4 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
                         {smtpSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         Send Test
@@ -1578,7 +1589,7 @@ export default function SettingsPage() {
                         } catch { alert('Unable to save SMTP settings. Please retry.'); }
                         finally { setSmtpSaving(false); }
                       }}
-                      disabled={smtpSaving || smtpSending || smtpTesting || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
+                      disabled={smtpSaving || smtpSending || smtpTesting || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword || !!smtpTransportError}
                       className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
                       {smtpSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                       Save Settings

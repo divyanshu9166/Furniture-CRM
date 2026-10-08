@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { testSmtpConnection, sendTestEmail, getSmtpConfig } from '@/lib/email'
 import { deliverEmailCampaign } from '@/lib/email-campaign-runner'
 import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
-import { getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema } from '@/lib/email-senders'
+import { formatSmtpError, getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema } from '@/lib/email-senders'
 import { recordEmailEvent as recordEvent } from '@/lib/email-events'
 import type { Prisma } from '@prisma/client'
 import { assertEmailContentReady } from '@/lib/email-content'
@@ -342,7 +342,7 @@ export async function testSmtp(config: Record<string, unknown>) {
   try {
     const saved = await prisma.storeSettings.findUnique({ where: { id: 1 } })
     return await testSmtpConnection(prepareSmtpConfig(config, saved ? { ...saved } : null))
-  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Invalid SMTP settings.' } }
+  } catch (error) { return { success: false, error: formatSmtpError(error) } }
 }
 
 export async function sendSmtpTestEmail(config: Record<string, unknown>, toEmail: string, fromEmail?: string) {
@@ -353,7 +353,7 @@ export async function sendSmtpTestEmail(config: Record<string, unknown>, toEmail
     const sender = resolveSender(parsed, fromEmail)
     const result = await sendTestEmail(parsed, senderEmailSchema.parse(toEmail), sender.email)
     return { ...result, fromEmail: sender.email }
-  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to send the test email.' } }
+  } catch (error) { return { success: false, error: formatSmtpError(error, 'Unable to send the test email.') } }
 }
 
 export async function getEmailConfigStatus() {

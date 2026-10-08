@@ -96,6 +96,18 @@ test('STARTTLS is mandatory on actual port-587 transport, not plaintext downgrad
   assert.equal(transports[0].secure, false)
 })
 
+test('invalid SSL/587 pairing returns readable errors before any actual SMTP operation', async () => {
+  const { email, messages, transports } = mailHarness()
+  const invalid = { ...config, smtpPort: 587, smtpSecure: true }
+  for (const result of [await email.testSmtpConnection(invalid), await email.sendTestEmail(invalid, 'qa@example.com')]) {
+    assert.equal(result.success, false)
+    assert.match(result.error, /Port 587 uses STARTTLS/)
+    assert.doesNotMatch(result.error, /"code"|"path"/)
+  }
+  assert.equal(messages.length, 0)
+  assert.equal(transports.length, 0)
+})
+
 function campaignHarness(overrides: Record<string, unknown> = {}, aliases = config.smtpAliases) {
   const campaign: any = { id: 1, totalRecipients: 0, status: 'DRAFT', isAutomated: false, fromEmail: 'sales@example.com', fromName: 'Pinned Sales', audience: 'all', subject: 'Subject A', body: 'Body A', isABTest: true, abSplitPercent: 50, variantB: { subject: 'Subject B', body: 'Body B' }, ...overrides }
   const deliveries: any[] = []
@@ -250,6 +262,34 @@ function campaignActionsHarness() {
   })
   return { actions, writes, tests, original, prisma, setRole: (value: string) => { role = value } }
 }
+
+test('SMTP settings reject mismatched encryption without writing or modifying existing data', async () => {
+  const { settings, saved, writes } = settingsHarness()
+  const original = JSON.stringify(saved)
+  const rejected = await settings.updateStoreSettings({ smtpPort: 587, smtpSecure: true, smtpPass: '' })
+  assert.equal(rejected.success, false)
+  assert.match(rejected.error, /Port 587 uses STARTTLS/)
+  assert.doesNotMatch(rejected.error, /"code"|"path"/)
+  assert.equal(writes(), 0)
+  assert.equal(JSON.stringify(saved), original)
+  const accepted = await settings.updateStoreSettings({ smtpPort: 587, smtpSecure: false, smtpPass: '' })
+  assert.equal(accepted.success, true)
+  assert.equal(saved.smtpPass, config.smtpPass)
+  assert.deepEqual(saved.smtpAliases, config.smtpAliases)
+  assert.equal(saved.smtpFromEmail, config.smtpFromEmail)
+})
+
+test('SMTP server actions return readable pairing errors before connection or test-email attempts', async () => {
+  const { actions, tests, setRole } = campaignActionsHarness()
+  setRole('ADMIN')
+  const invalid = { ...config, smtpPort: 587, smtpSecure: true, smtpPass: '' }
+  for (const result of [await actions.testSmtp(invalid), await actions.sendSmtpTestEmail(invalid, 'qa@example.com')]) {
+    assert.equal(result.success, false)
+    assert.match(result.error, /Port 587 uses STARTTLS/)
+    assert.doesNotMatch(result.error, /"code"|"path"/)
+  }
+  assert.equal(tests.length, 0)
+})
 
 test('actual campaign create/edit/copy persist selected identity and reject unlisted senders', async () => {
   const { actions, writes } = campaignActionsHarness()

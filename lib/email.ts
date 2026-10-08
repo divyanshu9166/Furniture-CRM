@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer'
 import { prisma } from '@/lib/db'
 import { addTrackingToEmail } from '@/lib/email-tracking'
-import { senderHeaders, smtpConfigSchema } from '@/lib/email-senders'
+import { formatSmtpError, senderHeaders, smtpConfigSchema } from '@/lib/email-senders'
 
 export interface SmtpConfig {
   smtpHost: string
@@ -77,7 +77,7 @@ export async function sendEmail(options: {
 
     return { success: true, messageId: result.messageId }
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to send email' }
+    return { success: false, error: formatSmtpError(err, 'Failed to send email') }
   }
 }
 
@@ -97,7 +97,7 @@ export async function sendBulkEmails(emails: {
     config = smtpConfigSchema.parse(loaded)
     headers = senderHeaders(config, sender.fromEmail, sender.fromName)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid SMTP sender settings.'
+    const message = formatSmtpError(error, 'Invalid SMTP sender settings.')
     return { sent: 0, failed: emails.length, errors: [message], results: emails.map(email => ({ recipientId: email.recipientId, success: false, error: message })) }
   }
 
@@ -155,7 +155,7 @@ export async function testSmtpConnection(config: SmtpConfig): Promise<{ success:
     await transporter.verify()
     return { success: true }
   } catch (err: any) {
-    return { success: false, error: err.message || 'Connection failed' }
+    return { success: false, error: formatSmtpError(err, 'Connection failed') }
   }
 }
 
@@ -183,7 +183,7 @@ export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: 
     })
     return { success: true }
   } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to send test email' }
+    return { success: false, error: formatSmtpError(err, 'Failed to send test email') }
   }
 }
 

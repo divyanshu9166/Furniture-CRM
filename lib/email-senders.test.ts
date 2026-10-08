@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import nodemailer from 'nodemailer'
-import { getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema, senderHeaders, smtpConfigSchema } from './email-senders'
+import { changeSmtpEncryption, changeSmtpPort, formatSmtpError, getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema, senderHeaders, smtpConfigSchema, smtpTransportProblem } from './email-senders'
 
 const config = {
   smtpHost: 'smtp.hostinger.com', smtpPort: 465, smtpSecure: true,
@@ -78,6 +78,53 @@ test('rejects incorrect encryption/port pairings and fractional ports', () => {
   assert.equal(smtpConfigSchema.safeParse({ ...config, smtpPort: 587 }).success, false)
   assert.equal(smtpConfigSchema.safeParse({ ...config, smtpPort: 587, smtpSecure: false }).success, true)
   assert.equal(smtpConfigSchema.safeParse({ ...config, smtpPort: 465.5 }).success, false)
+})
+
+test('editing a standard port synchronizes encryption without changing secrets or aliases', () => {
+  const starttls = changeSmtpPort(config, '587')
+  assert.equal(starttls.smtpSecure, false)
+  assert.equal(starttls.smtpPort, 587)
+  assert.equal(starttls.smtpPass, config.smtpPass)
+  assert.equal(starttls.smtpUser, config.smtpUser)
+  assert.equal(starttls.smtpAliases, config.smtpAliases)
+  assert.equal(starttls.smtpFromEmail, config.smtpFromEmail)
+  assert.equal(config.smtpPort, 465)
+  assert.equal(changeSmtpPort(starttls, '465').smtpSecure, true)
+})
+
+test('SSL toggle pairs standard ports while leaving custom provider ports unchanged', () => {
+  assert.equal(changeSmtpEncryption({ ...config, smtpPort: 587, smtpSecure: false }, true).smtpPort, 465)
+  assert.equal(changeSmtpEncryption(config, false).smtpPort, 587)
+  assert.equal(changeSmtpEncryption({ ...config, smtpPort: 2525 }, false).smtpPort, 2525)
+  assert.equal(changeSmtpPort(config, '2525').smtpSecure, true)
+  assert.equal(smtpTransportProblem(2525, false), null)
+})
+
+test('empty/fractional/out-of-range ports remain invalid rather than silently using 587', () => {
+  assert.equal(changeSmtpPort(config, '').smtpPort, '')
+  for (const port of ['', 0, -1, 465.5, 65536, Number.NaN, null]) {
+    assert.throws(() => prepareSmtpConfig({ ...config, smtpPort: port }, config))
+  }
+  assert.ok(smtpTransportProblem('', false))
+  assert.ok(smtpTransportProblem(465.5, true))
+  const { smtpPort: ignored, ...legacy } = config
+  void ignored
+  assert.equal(prepareSmtpConfig({ ...legacy, smtpSecure: false }, null).smtpPort, 587)
+})
+
+test('SMTP validation reports plain actionable messages, not serialized Zod issues', () => {
+  const invalid = smtpConfigSchema.safeParse({ ...config, smtpPort: 587 })
+  assert.equal(invalid.success, false)
+  if (invalid.success) return
+  const message = formatSmtpError(invalid.error)
+  assert.match(message, /Port 587 uses STARTTLS/)
+  assert.doesNotMatch(message, /"code"|"path"|\[\s*\{/)
+  assert.deepEqual(invalid.error.issues[0].path, ['smtpSecure'])
+  const nested = smtpConfigSchema.safeParse({ ...config, smtpAliases: [{ email: config.smtpUser, name: '' }] })
+  assert.equal(nested.success, false)
+  if (!nested.success) assert.match(formatSmtpError(nested.error), /Duplicate sender/)
+  assert.equal(formatSmtpError(new Error('Authentication failed')), 'Authentication failed')
+  assert.equal(formatSmtpError(null, 'Try again'), 'Try again')
 })
 
 test('rejects excessive alias counts, blank addresses and oversized names', () => {

@@ -80,3 +80,16 @@ Do not use database reset, `db push --force-reset`, reseeding or `docker compose
 To reproduce the safe component preview, run `node scripts/email-sender-preview.mjs`, open `http://127.0.0.1:4318`, and stop the helper when finished. It binds localhost only, uses sample addresses and never calls SMTP or the database.
 
 See [the email/mobile follow-up audit](email-marketing-mobile-audit.md) for scheduling, history-preservation, tracking, unsubscribe, personalization and mobile fixes, plus the remaining production-verification limits.
+
+## SMTP port/encryption fix (2026-10-08)
+
+The reported error was caused by port **587** with **Use SSL** checked. Use **587 + unchecked** for STARTTLS, or **465 + checked** for implicit SSL/TLS. STARTTLS remains mandatory in the transport; unchecking this option does not allow plaintext delivery.
+
+- Editing either setting now keeps standard ports/encryption paired automatically. Custom ports remain unchanged when toggling SSL.
+- Blank, fractional and out-of-range ports are rejected rather than silently changed to 587. Existing mismatched saved configurations show an actionable inline error; no automatic database rewrite occurs.
+- Invalid configuration blocks save/test buttons. Server validation remains enforced independently; Zod issues are returned as plain messages rather than JSON arrays.
+- Editing the SMTP draft clears stale connection/test-email results. Saved credentials, sender aliases and selected default are preserved by port/encryption changes.
+- **49 email tests passed**, focused ESLint and production build passed. Server-action tests verify invalid pairing cannot write settings or attempt SMTP. The seven unrelated repository-wide type-check errors described above remain.
+- Actual form JSX and sender component were checked in a sample-only browser preview, including standard/custom/blank ports and mobile layout. No live SMTP connection, email send, production settings change, migration or deployment was performed.
+
+Safe preview: `node scripts/smtp-settings-preview.mjs`, then open `http://127.0.0.1:4321`. It starts with the reported mismatch using sample addresses, binds localhost only and never calls SMTP or the database. Stop it after testing.
