@@ -10,10 +10,29 @@ import {
   updateVisitSchema,
   updateMeasurementsSchema,
   type UpdateMeasurementsInput,
+  photoUrlsSchema,
 } from '@/lib/validations/custom-order'
-import type { CustomOrderStatus, Prisma } from '@prisma/client'
+import type { CustomOrderStatus } from '@prisma/client'
 import { sendEmail } from '@/lib/email'
-import { requireAuth } from '@/lib/auth-helpers'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
+
+import { inventoryError, inventoryTransaction } from '@/lib/inventory/stock'
+import { activeStaff, assertId, nextDocumentId } from '@/lib/commerce/documents'
+import { changeVisit, createCustom, lockedCustomOrder, measureCustom, scheduleCustomVisit, transitionCustom } from '@/lib/commerce/custom-orders'
+import { z } from 'zod'
+import { normalizePhoneForMetaIndia } from '@/lib/whatsapp/phone-utils'
+import { indiaDay } from '@/lib/commerce/rules'
+
+function escapeHtml(value: string) { return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;') }
+
+async function orderEditor() {
+  const session = await requireAuth()
+  if (!['ADMIN', 'MANAGER'].includes(session.user.role)) {
+    if (!session.user.staffId) throw new Error('Access denied')
+    await requireStaffPortalScope(session.user.staffId)
+  }
+  return { actor: session.user.name, staffId: ['ADMIN', 'MANAGER'].includes(session.user.role) ? undefined : session.user.staffId! }
+}
 
 const statusMap: Record<string, CustomOrderStatus> = {
   'Measurement Scheduled': 'MEASUREMENT_SCHEDULED',
@@ -29,20 +48,7 @@ const statusDisplay: Record<CustomOrderStatus, string> = {
   DELIVERED: 'Delivered',
 }
 
-const statusOrder: CustomOrderStatus[] = [
-  'MEASUREMENT_SCHEDULED',
-  'IN_PRODUCTION',
-  'QUALITY_CHECK',
-  'DELIVERED',
-]
-
 type MeasurementsInput = UpdateMeasurementsInput['measurements']
-
-function compactMeasurements(measurements: MeasurementsInput): Prisma.InputJsonValue {
-  return Object.fromEntries(
-    Object.entries(measurements).filter(([, value]) => value !== undefined)
-  ) as Prisma.InputJsonValue
-}
 
 async function requireStaffPortalScope(staffId: number) {
   const session = await requireAuth()
@@ -56,7 +62,12 @@ async function requireStaffPortalScope(staffId: number) {
 // ─── GET ALL CUSTOM ORDERS ──────────────────────────────
 
 export async function getCustomOrders() {
+  try {
+  const session = await requireAuth()
+  const manager = ['ADMIN', 'MANAGER'].includes(session.user.role)
+  if (!manager && !session.user.staffId) return { success: false, error: 'Access denied', data: [] }
   const orders = await prisma.customOrder.findMany({
+    where: manager ? {} : { assignedStaffId: session.user.staffId },
     include: {
       contact: true,
       assignedStaff: true,
@@ -90,7 +101,7 @@ export async function getCustomOrders() {
       statusKey: o.status,
       assignedStaff: o.assignedStaff?.name || null,
       assignedStaffId: o.assignedStaffId,
-      date: o.date.toISOString().split('T')[0],
+      date: indiaDay(o.date),
       estimatedDelivery: o.estimatedDelivery?.toISOString().split('T')[0] || null,
       measurements: o.measurements,
       photos: o.photos,
@@ -109,7 +120,7 @@ export async function getCustomOrders() {
       productionNotes: o.productionNotes,
       timeline: o.timeline.map(t => ({
         id: t.id,
-        date: t.date.toISOString().split('T')[0],
+        date: indiaDay(t.date),
         event: t.event,
         notes: t.notes,
         status: t.status,
@@ -121,7 +132,7 @@ export async function getCustomOrders() {
         staffName: fv.staff.name,
         staffRole: fv.staff.role,
         staffId: fv.staff.id,
-        date: fv.date.toISOString().split('T')[0],
+        date: indiaDay(fv.date),
         time: fv.time,
         scheduledDate: fv.scheduledDate?.toISOString().split('T')[0] || null,
         scheduledTime: fv.scheduledTime,
@@ -149,435 +160,161 @@ export async function getCustomOrders() {
       })),
     })),
   }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 
 // ─── CREATE CUSTOM ORDER ────────────────────────────────
 
 export async function createCustomOrder(data: unknown) {
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = createCustomOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const {
-    customer, phone, address, type, assignedStaffId,
-    estimatedDelivery, measurements, referenceProductId, referenceImages,
-    materials, color, quotedPrice, advancePaid, productionNotes,
-    scheduleVisit, visitDate, visitTime, visitStaffId,
-  } = parsed.data
-
-  // Find or create contact
-  let contact = await prisma.contact.findFirst({ where: { phone } })
-  if (!contact) {
-    contact = await prisma.contact.create({ data: { name: customer, phone, address } })
-  }
-
-  // Generate display ID using MAX + 1
-  const lastOrder = await prisma.customOrder.findFirst({
-    orderBy: { id: 'desc' },
-    select: { displayId: true },
-  })
-  let nextNum = 1
-  if (lastOrder?.displayId) {
-    const match = lastOrder.displayId.match(/CUS-(\d+)/)
-    if (match) nextNum = parseInt(match[1]) + 1
-  }
-  const displayId = `CUS-${String(nextNum).padStart(4, '0')}`
-
-  const now = new Date()
-
-  const order = await prisma.customOrder.create({
-    data: {
-      displayId,
-      contactId: contact.id,
-      phone,
-      address,
-      type,
-      assignedStaffId,
-      date: now,
-      estimatedDelivery: estimatedDelivery ? new Date(estimatedDelivery) : null,
-      measurements: measurements || undefined,
-      referenceProductId,
-      referenceImages: referenceImages || [],
-      materials,
-      color,
-      quotedPrice,
-      advancePaid,
-      productionNotes,
-      timeline: {
-        create: {
-          date: now,
-          event: 'Order Created',
-          status: 'done',
-          updatedBy: 'Manager',
-        },
-      },
-    },
-  })
-
-  // Schedule visit if requested
-  if (scheduleVisit && visitDate && visitTime) {
-    const visitStaff = visitStaffId || assignedStaffId
-    if (visitStaff) {
-      const visitDisplayId = `FV-${String(order.id).padStart(3, '0')}-1`
-      await prisma.fieldVisit.create({
-        data: {
-          displayId: visitDisplayId,
-          staffId: visitStaff,
-          customOrderId: order.id,
-          customer,
-          address,
-          date: now,
-          time: visitTime,
-          scheduledDate: new Date(visitDate),
-          scheduledTime: visitTime,
-          status: 'Scheduled',
-          type: 'Measurement',
-          notes: `Custom order ${displayId} - ${type}`,
-        },
-      })
-
-      // Add timeline entry for visit scheduling
-      await prisma.customOrderTimeline.create({
-        data: {
-          customOrderId: order.id,
-          date: now,
-          event: 'Visit Scheduled',
-          notes: `Scheduled for ${visitDate} at ${visitTime}`,
-          status: 'pending',
-          updatedBy: 'Manager',
-        },
-      })
-    }
-  }
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  const order = await inventoryTransaction(prisma, tx => createCustom(tx, parsed.data, session.user.name))
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true, data: order }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── UPDATE STATUS (Manager) ────────────────────────────
 
 export async function updateCustomOrderStatus(id: number, status: string) {
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
   const dbStatus = statusMap[status]
   if (!dbStatus) return { success: false, error: 'Invalid status' }
-
-  const order = await prisma.customOrder.findUnique({ where: { id } })
-  if (!order) return { success: false, error: 'Order not found' }
-
-  const now = new Date()
-
-  await prisma.$transaction([
-    prisma.customOrder.update({
-      where: { id },
-      data: { status: dbStatus },
-    }),
-    prisma.customOrderTimeline.create({
-      data: {
-        customOrderId: id,
-        date: now,
-        event: `Status updated to ${status}`,
-        status: 'done',
-        updatedBy: 'Manager',
-      },
-    }),
-  ])
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  await inventoryTransaction(prisma, tx => transitionCustom(tx, id, dbStatus, session.user.name))
+  for (const path of ['/custom-orders', '/staff-portal', '/manufacturing']) revalidatePath(path)
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── ASSIGN STAFF ───────────────────────────────────────
 
 export async function assignStaff(orderId: number, staffId: number) {
-  const staff = await prisma.staff.findUnique({ where: { id: staffId }, select: { name: true } })
-  if (!staff) return { success: false, error: 'Staff not found' }
-
-  const now = new Date()
-
-  await prisma.$transaction([
-    prisma.customOrder.update({
-      where: { id: orderId },
-      data: { assignedStaffId: staffId },
-    }),
-    prisma.customOrderTimeline.create({
-      data: {
-        customOrderId: orderId,
-        date: now,
-        event: `Assigned to ${staff.name}`,
-        status: 'done',
-        updatedBy: 'Manager',
-      },
-    }),
-  ])
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
+  assertId(staffId)
+  await inventoryTransaction(prisma, async tx => {
+    await lockedCustomOrder(tx, orderId)
+    await activeStaff(tx, staffId)
+    const staff = await tx.staff.findUniqueOrThrow({ where: { id: staffId } })
+    await tx.customOrder.update({ where: { id: orderId }, data: { assignedStaffId: staffId } })
+    await tx.customOrderTimeline.create({ data: { customOrderId: orderId, date: new Date(), event: `Assigned to ${staff.name}`, status: 'done', updatedBy: session.user.name } })
+  })
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── SCHEDULE VISIT (Manager) ───────────────────────────
 
 export async function scheduleVisit(data: unknown) {
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = scheduleVisitSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const { customOrderId, staffId, date, time, notes } = parsed.data
-
-  const order = await prisma.customOrder.findUnique({
-    where: { id: customOrderId },
-    select: { displayId: true, phone: true, address: true, type: true, contact: { select: { name: true } } },
-  })
-  if (!order) return { success: false, error: 'Order not found' }
-
-  // Count existing visits for this order to generate display ID
-  const visitCount = await prisma.fieldVisit.count({ where: { customOrderId } })
-  const visitDisplayId = `FV-${String(customOrderId).padStart(3, '0')}-${visitCount + 1}`
-
-  const now = new Date()
-
-  const visit = await prisma.fieldVisit.create({
-    data: {
-      displayId: visitDisplayId,
-      staffId,
-      customOrderId,
-      customer: order.contact.name,
-      address: order.address,
-      date: now,
-      time,
-      scheduledDate: new Date(date),
-      scheduledTime: time,
-      status: 'Scheduled',
-      type: 'Measurement',
-      notes: notes || `Custom order ${order.displayId} - ${order.type}`,
-    },
-  })
-
-  // Also assign the staff to the custom order
-  const staff = await prisma.staff.findUnique({ where: { id: staffId }, select: { name: true } })
-  await prisma.customOrder.update({
-    where: { id: customOrderId },
-    data: { assignedStaffId: staffId },
-  })
-
-  // Add timeline entry
-  await prisma.customOrderTimeline.create({
-    data: {
-      customOrderId,
-      date: now,
-      event: `Visit scheduled for ${staff?.name || 'staff'} & assigned to order`,
-      notes: `${date} at ${time}`,
-      status: 'pending',
-      updatedBy: 'Manager',
-    },
-  })
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  const visit = await inventoryTransaction(prisma, tx => scheduleCustomVisit(tx, parsed.data, session.user.name))
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true, data: visit }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── UPDATE MEASUREMENTS (Manager or Staff) ─────────────
 
 export async function updateMeasurements(data: unknown) {
+  try {
+  const editor = await orderEditor()
   const parsed = updateMeasurementsSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const { customOrderId, measurements } = parsed.data
-
-  await prisma.customOrder.update({
-    where: { id: customOrderId },
-    data: { measurements: compactMeasurements(measurements) },
-  })
-
-  await prisma.customOrderTimeline.create({
-    data: {
-      customOrderId,
-      date: new Date(),
-      event: 'Measurements updated',
-      status: 'done',
-      updatedBy: 'Manager',
-    },
-  })
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  await inventoryTransaction(prisma, tx => measureCustom(tx, parsed.data, [], editor.actor, editor.staffId))
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── UPDATE MEASUREMENTS WITH PHOTOS ────────────────────
 
-export async function updateMeasurementsWithPhotos(
-  customOrderId: number,
-  measurements: MeasurementsInput,
-  photoUrls: string[]
-) {
-  const order = await prisma.customOrder.findUnique(
-    { where: { id: customOrderId }, select: { photos: true } }
-  )
-  if (!order) return { success: false, error: 'Order not found' }
-
-  const updatedPhotos = [...(order.photos || []), ...photoUrls]
-
-  await prisma.customOrder.update({
-    where: { id: customOrderId },
-    data: {
-      measurements: compactMeasurements(measurements),
-      photos: updatedPhotos,
-    },
-  })
-
-  await prisma.customOrderTimeline.create({
-    data: {
-      customOrderId,
-      date: new Date(),
-      event: 'Measurements updated with photos',
-      status: 'done',
-      updatedBy: 'Manager',
-    },
-  })
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+export async function updateMeasurementsWithPhotos(customOrderId: number, measurements: MeasurementsInput, photoUrls: string[]) {
+  try {
+  const editor = await orderEditor()
+  const parsed = updateMeasurementsSchema.safeParse({ customOrderId, measurements })
+  const photos = photoUrlsSchema.safeParse(photoUrls)
+  if (!parsed.success || !photos.success) return { success: false, error: 'Invalid measurements or image URLs' }
+  await inventoryTransaction(prisma, tx => measureCustom(tx, parsed.data, photos.data, editor.actor, editor.staffId))
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── UPDATE VISIT (Staff) ───────────────────────────────
 
 export async function updateFieldVisit(data: unknown) {
+  try {
+  const editor = await orderEditor()
   const parsed = updateVisitSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const { visitId, measurements, staffNotes, status, photoUrls } = parsed.data
-
-  const visit = await prisma.fieldVisit.findUnique({
-    where: { id: visitId },
-    select: { customOrderId: true, staffId: true, photoUrls: true, photos: true },
-  })
-  if (!visit) return { success: false, error: 'Visit not found' }
-  try { await requireStaffPortalScope(visit.staffId) } catch { return { success: false, error: 'Forbidden' } }
-
-  const updateData: Record<string, unknown> = {}
-  if (measurements) updateData.measurements = compactMeasurements(measurements)
-  if (staffNotes !== undefined) updateData.staffNotes = staffNotes
-  if (status) {
-    updateData.status = status
-    if (status === 'Completed') updateData.completedAt = new Date()
+  const visit = await inventoryTransaction(prisma, tx => changeVisit(tx, parsed.data, editor.actor, editor.staffId))
+  if (visit.status === 'Completed' && visit.customOrderId) {
+    await notifyManagers({
+      type: 'field_visit', title: `Visit completed by ${editor.actor}`, subtitle: visit.customer,
+      href: '/custom-orders', metadata: { visitId: visit.id, customOrderId: visit.customOrderId, staffId: visit.staffId },
+      emailSubject: `Field visit completed — ${visit.customer}`,
+      emailHtml: `<p>${escapeHtml(editor.actor)} completed the field visit for ${escapeHtml(visit.customer)}.</p><p>${escapeHtml(visit.staffNotes || '')}</p>`,
+      whatsappText: `Field visit completed by ${editor.actor} for ${visit.customer}. Review measurements in Custom Orders.`,
+    }).catch(() => console.warn('[field-visit] Notification failed', { visitId: visit.id }))
   }
-  if (photoUrls) {
-    updateData.photoUrls = [...(visit.photoUrls || []), ...photoUrls]
-    updateData.photos = (visit.photos || 0) + photoUrls.length
-  }
-
-  await prisma.fieldVisit.update({
-    where: { id: visitId },
-    data: updateData,
-  })
-
-  // If visit completed and linked to custom order, update order measurements
-  if (status === 'Completed' && visit.customOrderId) {
-    const staff = await prisma.staff.findUnique({ where: { id: visit.staffId }, select: { name: true } })
-
-    // Update custom order measurements if provided
-    if (measurements) {
-      await prisma.customOrder.update({
-        where: { id: visit.customOrderId },
-        data: { measurements: compactMeasurements(measurements) },
-      })
-    }
-
-    // Add timeline entry
-    await prisma.customOrderTimeline.create({
-      data: {
-        customOrderId: visit.customOrderId,
-        date: new Date(),
-        event: `Visit completed by ${staff?.name || 'staff'}`,
-        notes: staffNotes || (measurements ? 'Measurements recorded' : undefined),
-        status: 'done',
-        updatedBy: staff?.name || 'Staff',
-      },
-    })
-
-    // Notify managers about field visit completion
-    const order = await prisma.customOrder.findUnique({
-      where: { id: visit.customOrderId },
-      select: { displayId: true, type: true, contactId: true, contact: { select: { name: true } } },
-    })
-    const customerName = order?.contact?.name || 'Customer'
-    const staffName = staff?.name || 'Staff'
-    const orderId = order?.displayId || `#${visit.customOrderId}`
-    const hasMeasurements = measurements ? 'Yes' : 'No'
-
-    notifyManagers({
-      type: 'field_visit',
-      title: `Visit Completed: ${customerName}`,
-      subtitle: `${staffName} completed visit for ${orderId}${measurements ? ' — measurements recorded' : ''}`,
-      href: '/custom-orders',
-      metadata: { visitId, customOrderId: visit.customOrderId, staffId: visit.staffId },
-      emailSubject: `✅ Field Visit Completed — ${customerName} (${orderId})`,
-      emailHtml: `
-        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-          <h2 style="color:#8B4513;border-bottom:2px solid #D4A574;padding-bottom:10px;">✅ Field Visit Completed</h2>
-          <table style="width:100%;border-collapse:collapse;margin-top:16px;">
-            <tr><td style="padding:8px 12px;font-weight:600;color:#555;width:160px;">Customer</td><td style="padding:8px 12px;">${customerName}</td></tr>
-            <tr style="background:#F9F6F3;"><td style="padding:8px 12px;font-weight:600;color:#555;">Order</td><td style="padding:8px 12px;">${orderId}${order?.type ? ` — ${order.type}` : ''}</td></tr>
-            <tr><td style="padding:8px 12px;font-weight:600;color:#555;">Completed By</td><td style="padding:8px 12px;">${staffName}</td></tr>
-            <tr style="background:#F9F6F3;"><td style="padding:8px 12px;font-weight:600;color:#555;">Measurements Captured</td><td style="padding:8px 12px;">${hasMeasurements}</td></tr>
-            ${staffNotes ? `<tr><td style="padding:8px 12px;font-weight:600;color:#555;">Staff Notes</td><td style="padding:8px 12px;">${staffNotes}</td></tr>` : ''}
-          </table>
-          <p style="margin-top:20px;font-size:13px;color:#888;">Log in to review the visit details and update the order status.</p>
-        </div>
-      `,
-      whatsappText: `✅ *Field Visit Completed*\n\nCustomer: ${customerName}\nOrder: ${orderId}\nCompleted by: ${staffName}\nMeasurements: ${hasMeasurements}${staffNotes ? `\nNotes: ${staffNotes}` : ''}\n\nLog in to review and update order status.`,
-    }).catch(err => console.error('[field-visit] Notification failed:', err))
-  }
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── ADD TIMELINE ENTRY ─────────────────────────────────
 
 export async function addTimelineEntry(data: unknown) {
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = addTimelineEntrySchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const entry = await prisma.customOrderTimeline.create({
-    data: {
-      customOrderId: parsed.data.customOrderId,
-      date: new Date(parsed.data.date),
-      event: parsed.data.event,
-      notes: parsed.data.notes,
-      status: parsed.data.status,
-      updatedBy: parsed.data.updatedBy,
-    },
+  const entry = await inventoryTransaction(prisma, async tx => {
+    await lockedCustomOrder(tx, parsed.data.customOrderId)
+    return tx.customOrderTimeline.create({ data: { ...parsed.data, date: new Date(parsed.data.date), updatedBy: session.user.name } })
   })
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true, data: entry }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── UPDATE REFERENCE IMAGES ────────────────────────────
 
 export async function updateReferenceImages(orderId: number, imageUrls: string[]) {
-  const order = await prisma.customOrder.findUnique({ where: { id: orderId }, select: { referenceImages: true } })
-  if (!order) return { success: false, error: 'Order not found' }
-
-  await prisma.customOrder.update({
-    where: { id: orderId },
-    data: { referenceImages: [...order.referenceImages, ...imageUrls] },
+  try {
+  const editor = await orderEditor()
+  const parsed = photoUrlsSchema.safeParse(imageUrls)
+  if (!parsed.success) return { success: false, error: 'Invalid image URLs' }
+  await inventoryTransaction(prisma, async tx => {
+    const order = await lockedCustomOrder(tx, orderId, editor.staffId)
+    await tx.customOrder.update({ where: { id: orderId }, data: { referenceImages: [...new Set([...order.referenceImages, ...parsed.data])] } })
   })
-
-  revalidatePath('/custom-orders')
-  revalidatePath('/staff-portal')
+  revalidatePath('/custom-orders'); revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
+
 
 // ─── GET STAFF ASSIGNED VISITS ──────────────────────────
 
 export async function getStaffVisits(staffId: number) {
+  try {
   try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId },
@@ -631,6 +368,7 @@ export async function getStaffVisits(staffId: number) {
       }
     }),
   }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 // ─── LOG SELF VISIT ─────────────────────────────────────
@@ -644,6 +382,7 @@ export async function logSelfVisit(data: {
   measurements?: Record<string, string>
   photoUrls?: string[]
 }) {
+  try {
   const { staffId, customer, address, type, notes, measurements, photoUrls } = data
   try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   if (!Number.isInteger(staffId) || staffId <= 0 || !customer.trim() || !address.trim() || !type.trim()) {
@@ -654,10 +393,12 @@ export async function logSelfVisit(data: {
   const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
 
   // Generate displayId
-  const count = await prisma.fieldVisit.count({ where: { staffId, customOrderId: null } })
-  const displayId = `SV-${staffId}-${count + 1}`
-
-  const visit = await prisma.fieldVisit.create({
+  const validPhotos = photoUrlsSchema.safeParse(photoUrls || [])
+  if (!validPhotos.success) return { success: false, error: 'Invalid image URLs' }
+  const visit = await inventoryTransaction(prisma, async tx => {
+  await activeStaff(tx, staffId)
+  const displayId = await nextDocumentId(tx, 'fieldVisit', `SV-${staffId}-`, 1)
+  return tx.fieldVisit.create({
     data: {
       displayId,
       staffId,
@@ -666,6 +407,7 @@ export async function logSelfVisit(data: {
       date: now,
       time,
       status: 'Completed',
+      completedAt: now,
       type,
       notes: notes || null,
       measurements: measurements || undefined,
@@ -674,14 +416,17 @@ export async function logSelfVisit(data: {
     },
   })
 
+  })
   revalidatePath('/staff-portal')
   revalidatePath('/staff')
   return { success: true, data: { id: visit.id, displayId: visit.displayId } }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 // ─── GET SELF VISITS ────────────────────────────────────
 
 export async function getSelfVisits(staffId: number) {
+  try {
   try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId, customOrderId: null },
@@ -705,11 +450,13 @@ export async function getSelfVisits(staffId: number) {
       photoUrls: v.photoUrls,
     })),
   }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 // ─── UPDATE SELF VISIT PHOTOS ───────────────────────────
 
 export async function updateSelfVisitPhotos(visitId: number, newUrls: string[]) {
+  try {
   const visit = await prisma.fieldVisit.findUnique({ where: { id: visitId } })
   if (!visit) return { success: false, error: 'Visit not found' }
   try { await requireStaffPortalScope(visit.staffId) } catch { return { success: false, error: 'Forbidden' } }
@@ -717,16 +464,18 @@ export async function updateSelfVisitPhotos(visitId: number, newUrls: string[]) 
     return { success: false, error: 'Invalid photo upload' }
   }
 
-  await prisma.fieldVisit.update({
-    where: { id: visitId },
-    data: {
-      photoUrls: [...visit.photoUrls, ...newUrls],
-      photos: visit.photos + newUrls.length,
-    },
+  const parsed = photoUrlsSchema.safeParse(newUrls)
+  if (!parsed.success || visit.customOrderId) return { success: false, error: 'Use the assigned visit update for custom-order visits' }
+  await inventoryTransaction(prisma, async tx => {
+    await tx.$queryRaw`SELECT id FROM "FieldVisit" WHERE id = ${visitId} FOR UPDATE`
+    const current = await tx.fieldVisit.findUniqueOrThrow({ where: { id: visitId } })
+    const photos = [...new Set([...current.photoUrls, ...parsed.data])]
+    await tx.fieldVisit.update({ where: { id: visitId }, data: { photoUrls: photos, photos: photos.length } })
   })
 
   revalidatePath('/staff-portal')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 // ─── SEND PROGRESS NOTIFICATION ────────────────────────────────────
@@ -736,7 +485,11 @@ export async function sendProgressNotification(data: {
   message: string
   channels: ('whatsapp' | 'email')[]
 }) {
-  const { orderId, message, channels } = data
+  try {
+  await requireRole('ADMIN', 'MANAGER')
+  const parsed = z.object({ orderId: z.number().int().positive(), message: z.string().trim().min(1).max(2000), channels: z.array(z.enum(['whatsapp', 'email'])).min(1).max(2) }).safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  const { orderId, message, channels } = parsed.data
 
   const order = await prisma.customOrder.findUnique({
     where: { id: orderId },
@@ -763,8 +516,7 @@ export async function sendProgressNotification(data: {
       if (!config?.enabled || !cfg?.phoneNumberId || !token) {
         errors.push('WhatsApp not configured or disabled. Go to Settings → Channels → WhatsApp and enable it with your Phone Number ID and API Token.')
       } else {
-        const phone = order.phone.replace(/\D/g, '')
-        const waPhone = phone.startsWith('91') ? phone : `91${phone}`
+        const waPhone = normalizePhoneForMetaIndia(order.phone)
 
         // Use approved template if configured, otherwise fall back to text
         // (text only works within 24hr customer service window)
@@ -819,6 +571,7 @@ export async function sendProgressNotification(data: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15000),
           }
         )
         const json = await res.json()
@@ -845,13 +598,13 @@ export async function sendProgressNotification(data: {
       const html = `
         <div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;background:#fff;">
           <div style="border-bottom:3px solid #7c3aed;padding-bottom:16px;margin-bottom:24px;">
-            <h2 style="margin:0;color:#1a1a1a;font-size:20px;">${storeName}</h2>
+            <h2 style="margin:0;color:#1a1a1a;font-size:20px;">${escapeHtml(storeName)}</h2>
             <p style="margin:4px 0 0;color:#888;font-size:13px;">Custom Order Update</p>
           </div>
           <div style="background:#f5f3ff;border:1px solid #ede9fe;border-radius:10px;padding:16px 20px;margin-bottom:24px;">
             <p style="margin:0;font-size:13px;color:#5b21b6;font-weight:600;">Order ${order.displayId} — ${statusLabel}</p>
           </div>
-          <p style="color:#374151;font-size:15px;line-height:1.6;white-space:pre-line;">${message}</p>
+          <p style="color:#374151;font-size:15px;line-height:1.6;white-space:pre-line;">${escapeHtml(message)}</p>
           <div style="margin-top:32px;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;text-align:center;">
             <p style="margin:0;">This message was sent regarding your custom order from ${storeName}.</p>
           </div>
@@ -890,18 +643,21 @@ export async function sendProgressNotification(data: {
     return { success: false, error: errors.join('; ') }
   }
   return { success: true, results, errors: errors.length > 0 ? errors : undefined }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }
 
 // ─── GET CUSTOM ORDER STATS ─────────────────────────────
 
 export async function getCustomOrderStats() {
+  try {
+  await requireRole('ADMIN', 'MANAGER')
   const orders = await prisma.customOrder.findMany({
     select: { status: true, quotedPrice: true, advancePaid: true },
   })
 
   const active = orders.filter(o => o.status !== 'DELIVERED').length
   const totalValue = orders.reduce((s, o) => s + (o.quotedPrice || 0), 0)
-  const pendingPayment = orders.reduce((s, o) => s + ((o.quotedPrice || 0) - o.advancePaid), 0)
+  const pendingPayment = orders.reduce((s, o) => s + Math.max(0, (o.quotedPrice || 0) - o.advancePaid), 0)
   const measurementsPending = orders.filter(o => o.status === 'MEASUREMENT_SCHEDULED').length
   const inProduction = orders.filter(o => o.status === 'IN_PRODUCTION').length
   const delivered = orders.filter(o => o.status === 'DELIVERED').length
@@ -910,4 +666,5 @@ export async function getCustomOrderStats() {
     success: true,
     data: { active, totalValue, pendingPayment, measurementsPending, inProduction, delivered },
   }
+  } catch (error) { return { success: false, error: inventoryError(error), data: undefined } }
 }

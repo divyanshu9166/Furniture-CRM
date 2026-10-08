@@ -96,15 +96,15 @@ export function WhatsAppMarketingClient() {
     // When inbox is active we switch to a full-height flex-column layout so
     // the thread + composer can fill the remaining viewport without overflow.
     <div className={isInbox
-      ? '-m-3.5 sm:-m-6 flex flex-col h-[calc(100dvh-56px)] md:h-[calc(100dvh-64px)]'
+      ? 'ui-inbox-shell -m-3.5 md:-m-6 flex flex-col h-[calc(100dvh-56px)] md:h-[calc(100dvh-64px)]'
       : 'wa-light space-y-6'
     }>
       {/* ── Page header + tab bar ─────────────────────────────────────── */}
       <div className={isInbox
-        ? 'shrink-0 border-b border-border bg-background px-3.5 sm:px-6 pt-4 sm:pt-5 pb-0'
+        ? 'shrink-0 border-b border-border bg-background px-3.5 md:px-6 pt-4 md:pt-5 pb-0'
         : ''
       }>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+        <div className="ui-page-header flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
             <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
               <Megaphone className="w-6 h-6 text-accent" />
@@ -117,7 +117,7 @@ export function WhatsAppMarketingClient() {
           <ConnectionBadge config={waConfig} loading={configLoading} />
         </div>
 
-        <div className="flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto hide-scrollbar mb-0">
+        <div className="ui-tabs flex gap-1 p-1 bg-surface rounded-xl border border-border overflow-x-auto hide-scrollbar mb-0">
           {TABS.map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;

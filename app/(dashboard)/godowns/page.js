@@ -6,18 +6,39 @@ import {
   MapPin, Phone, Mail, CheckCircle, Trash2, Edit2, Star, 
   FileText, ArrowDown, ArrowUp, RefreshCw, BarChart3
 } from 'lucide-react'
-import {
-  getBranches, createBranch, updateBranch, deleteBranch,
-  getGodowns, createGodown, updateGodown, deleteGodown, setDefaultGodown,
-  getGodownStock, getTransfers, createTransfer, completeTransfer,
-  getGodownStockSummary, getStockLedger, assignStockToGodown, migrateExistingStockToGodowns
-} from '@/app/actions/godowns'
-import { getProducts } from '@/app/actions/products'
+import {getBranches as getBranchesAction, createBranch as createBranchAction, updateBranch as updateBranchAction, deleteBranch as deleteBranchAction, getGodowns as getGodownsAction, createGodown as createGodownAction, updateGodown as updateGodownAction, deleteGodown as deleteGodownAction, setDefaultGodown as setDefaultGodownAction, getGodownStock as getGodownStockAction, getTransfers as getTransfersAction, createTransfer as createTransferAction, completeTransfer as completeTransferAction, getGodownStockSummary as getGodownStockSummaryAction, getStockLedger as getStockLedgerAction, assignStockToGodown as assignStockToGodownAction, migrateExistingStockToGodowns as migrateExistingStockToGodownsAction} from '@/app/actions/godowns'
+import {getProducts as getProductsAction} from '@/app/actions/products'
 import Modal from '@/components/Modal'
+
+import { safeAction } from '@/lib/safe-action';
+const getBranches = safeAction(getBranchesAction);
+const createBranch = safeAction(createBranchAction);
+const updateBranch = safeAction(updateBranchAction);
+const deleteBranch = safeAction(deleteBranchAction);
+const getGodowns = safeAction(getGodownsAction);
+const createGodown = safeAction(createGodownAction);
+const updateGodown = safeAction(updateGodownAction);
+const deleteGodown = safeAction(deleteGodownAction);
+const setDefaultGodown = safeAction(setDefaultGodownAction);
+const getGodownStock = safeAction(getGodownStockAction);
+const getTransfers = safeAction(getTransfersAction);
+const createTransfer = safeAction(createTransferAction);
+const completeTransfer = safeAction(completeTransferAction);
+const getGodownStockSummary = safeAction(getGodownStockSummaryAction);
+const getStockLedger = safeAction(getStockLedgerAction);
+const assignStockToGodown = safeAction(assignStockToGodownAction);
+const migrateExistingStockToGodowns = safeAction(migrateExistingStockToGodownsAction);
+const getProducts = safeAction(getProductsAction);
 
 export default function GodownsPage() {
   const [tab, setTab] = useState('branches')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [editingBranchId, setEditingBranchId] = useState(null)
+  const [editingGodownId, setEditingGodownId] = useState(null)
+  const [ledgerCursor, setLedgerCursor] = useState(null)
+  const [ledgerLoading, setLedgerLoading] = useState(false)
+  const [ledgerError, setLedgerError] = useState('')
   const [branches, setBranches] = useState([])
   const [godowns, setGodowns] = useState([])
   const [stocks, setStocks] = useState([])
@@ -42,8 +63,11 @@ export default function GodownsPage() {
 
   const loadData = () => {
     setLoading(true)
+    setLoadError('')
     Promise.all([getBranches(), getGodowns(), getGodownStock(), getTransfers(), getProducts(), getGodownStockSummary()])
       .then(([brRes, gdRes, stRes, trRes, prRes, smRes]) => {
+        const failed = [brRes, gdRes, stRes, trRes, prRes, smRes].find(res => !res.success)
+        if (failed) setLoadError(failed.error || 'Could not load warehouse data')
         if (brRes.success) setBranches(brRes.data)
         if (gdRes.success) setGodowns(gdRes.data)
         if (stRes.success) setStocks(stRes.data)
@@ -60,11 +84,21 @@ export default function GodownsPage() {
     loadData()
   }, [])
 
+  const loadLedger = async (append = false) => {
+    if (ledgerLoading) return
+    setLedgerLoading(true); setLedgerError('')
+    const res = await getStockLedger({ limit: 200, ...(append && ledgerCursor ? { cursor: ledgerCursor } : {}) })
+    if (res.success) {
+      setLedgerEntries(previous => append ? [...previous, ...res.data.filter(row => !previous.some(old => old.id === row.id))] : res.data)
+      setLedgerCursor(res.nextCursor)
+    } else setLedgerError(res.error || 'Could not load ledger')
+    setLedgerLoading(false)
+  }
   useEffect(() => {
-    if (tab === 'ledger' && ledgerEntries.length === 0) {
-      getStockLedger({ limit: 200 }).then(res => { if (res.success) setLedgerEntries(res.data) })
-    }
-  }, [tab, ledgerEntries.length])
+    if (tab !== 'ledger') return
+    const timer = setTimeout(() => { loadLedger() }, 0)
+    return () => clearTimeout(timer)
+  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredStocks = useMemo(() => stocks.filter(s =>
     (!selectedGodown || s.godownId === Number(selectedGodown)) &&
@@ -73,9 +107,10 @@ export default function GodownsPage() {
 
   const handleCreateBranch = async () => {
     setSubmitting(true)
-    const res = await createBranch(branchForm)
+    const res = editingBranchId ? await updateBranch(editingBranchId, branchForm) : await createBranch(branchForm)
     if (res.success) {
       setShowBranchModal(false)
+      setEditingBranchId(null)
       setBranchForm({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false })
       loadData()
     } else alert(res.error)
@@ -89,9 +124,10 @@ export default function GodownsPage() {
       branchId: godownForm.branchId ? Number(godownForm.branchId) : undefined,
       capacity: godownForm.capacity ? Number(godownForm.capacity) : undefined,
     }
-    const res = await createGodown(data)
+    const res = editingGodownId ? await updateGodown(editingGodownId, data) : await createGodown(data)
     if (res.success) {
       setShowGodownModal(false)
+      setEditingGodownId(null)
       setGodownForm({ name: '', address: '', branchId: '', type: 'Warehouse', capacity: '', isDefault: false })
       loadData()
     } else alert(res.error)
@@ -156,6 +192,7 @@ export default function GodownsPage() {
   const INP = 'w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50'
   const SEL = INP
 
+  if (loadError && !loading) return <div role="alert" className="glass-card p-6 text-center"><p>{loadError}</p><button onClick={loadData} className="mt-3 px-4 py-2 bg-accent text-white rounded-lg">Retry</button></div>
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
 
   const totalStockItems = godownSummary.reduce((s, g) => s + (g.totalItems || 0), 0)
@@ -163,14 +200,14 @@ export default function GodownsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Multi-Branch & Godown</h1>
           <p className="text-muted text-sm mt-1">{branches.length} branches · {godowns.length} godowns · ₹{(totalStockValue / 100000).toFixed(1)}L inventory value</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {tab === 'branches' && <button onClick={() => setShowBranchModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Branch</button>}
-          {tab === 'godowns' && <button onClick={() => setShowGodownModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Godown</button>}
+        <div className="ui-actions flex gap-2 flex-wrap">
+          {tab === 'branches' && <button onClick={() => { setEditingBranchId(null); setBranchForm({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false }); setShowBranchModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Branch</button>}
+          {tab === 'godowns' && <button onClick={() => { setEditingGodownId(null); setGodownForm({ name: '', address: '', branchId: '', type: 'Warehouse', capacity: '', isDefault: false }); setShowGodownModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Godown</button>}
           {tab === 'stock' && <button onClick={() => setShowAssignModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Assign Stock</button>}
           {tab === 'transfers' && <button onClick={() => setShowTransferModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New Transfer</button>}
           <button onClick={handleMigrate} disabled={migrating} className="px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-foreground hover:bg-surface-hover flex items-center gap-1.5 disabled:opacity-50" title="Sync existing product stock to default godown">
@@ -180,7 +217,7 @@ export default function GodownsPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'Branches', value: branches.length, icon: Building2, color: 'text-blue-400' },
           { label: 'Godowns', value: godowns.length, icon: Warehouse, color: 'text-emerald-400' },
@@ -201,7 +238,7 @@ export default function GodownsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 overflow-x-auto hide-scrollbar">
+      <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 overflow-x-auto hide-scrollbar">
         {tabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setSearch('') }}
             className={`flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-md text-xs sm:text-sm font-medium transition-all flex-shrink-0 ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -212,7 +249,7 @@ export default function GodownsPage() {
 
       {/* ═══════ BRANCHES ═══════ */}
       {tab === 'branches' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {branches.map(b => (
             <div key={b.id} className={`glass-card p-5 ${b.isHeadOffice ? 'border-l-4 border-l-accent' : ''}`}>
               <div className="flex items-start justify-between mb-3">
@@ -222,8 +259,9 @@ export default function GodownsPage() {
                   </h3>
                   {b.managerName && <p className="text-xs text-muted mt-0.5">Manager: {b.managerName}</p>}
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="ui-actions flex items-center gap-1">
                   <span className="text-xs text-muted bg-surface-hover px-2 py-1 rounded-full">{b._count?.godowns || 0} godowns</span>
+                  <button title="Edit branch" onClick={() => { setEditingBranchId(b.id); setBranchForm({ name: b.name, address: b.address || '', phone: b.phone || '', email: b.email || '', managerName: b.managerName || '', isHeadOffice: b.isHeadOffice }); setShowBranchModal(true) }} className="p-1 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>
                   <button onClick={async () => { if (confirm('Delete this branch?')) { const r = await deleteBranch(b.id); if (r.success) loadData(); else alert(r.error) }}}
                     className="p-1 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
                 </div>
@@ -253,7 +291,7 @@ export default function GodownsPage() {
 
       {/* ═══════ GODOWNS ═══════ */}
       {tab === 'godowns' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {godownSummary.map(g => {
             const typeColors = { Warehouse: 'bg-blue-500/10 text-blue-400', Showroom: 'bg-purple-500/10 text-purple-400', Factory: 'bg-orange-500/10 text-orange-400' }
             return (
@@ -264,13 +302,14 @@ export default function GodownsPage() {
                     {g.isDefault && <span className="text-[9px] bg-accent/20 text-accent px-2 py-0.5 rounded-full font-semibold">⭐ DEFAULT</span>}
                     <span className={`text-[9px] px-2 py-0.5 rounded-full font-medium ${typeColors[g.type] || typeColors.Warehouse}`}>{g.type}</span>
                   </div>
-                  <div className="flex gap-0.5">
+                  <div className="ui-actions flex gap-0.5">
                     {!g.isDefault && (
-                      <button onClick={async () => { const r = await setDefaultGodown(g.id); if (r.success) loadData() }}
+                      <button onClick={async () => { const r = await setDefaultGodown(g.id); if (r.success) loadData(); else alert(r.error) }}
                         className="p-1.5 text-muted hover:text-accent rounded" title="Set as default">
                         <Star className="w-3.5 h-3.5" />
                       </button>
                     )}
+                    <button title="Edit godown" onClick={() => { setEditingGodownId(g.id); setGodownForm({ name: g.name, address: g.address || '', branchId: g.branchId ? String(g.branchId) : '', type: g.type, capacity: g.capacity ?? '', isDefault: g.isDefault }); setShowGodownModal(true) }} className="p-1.5 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>
                     <button onClick={async () => { if (confirm('Delete this godown?')) { const r = await deleteGodown(g.id); if (r.success) loadData(); else alert(r.error) }}}
                       className="p-1.5 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
                   </div>
@@ -318,7 +357,7 @@ export default function GodownsPage() {
       {/* ═══════ STOCK VIEW ═══════ */}
       {tab === 'stock' && (
         <div>
-          <div className="flex items-center gap-3 mb-4 flex-wrap">
+          <div className="ui-filters flex items-center gap-3 mb-4 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search products..." className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50" />
@@ -329,7 +368,7 @@ export default function GodownsPage() {
             </select>
           </div>
           <div className="glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border">
                   {['Product', 'SKU', 'Category', 'Godown', 'Type', 'Quantity', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
@@ -359,7 +398,7 @@ export default function GodownsPage() {
       {/* ═══════ TRANSFERS ═══════ */}
       {tab === 'transfers' && (
         <div className="glass-card overflow-hidden">
-          <div className="overflow-x-auto">
+          <div className="ui-table-scroll overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border">
                 {['Transfer #', 'From', 'To', 'Items', 'Date', 'Requested By', 'Status', 'Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
@@ -401,7 +440,7 @@ export default function GodownsPage() {
         <div className="space-y-4">
           <p className="text-xs text-muted">Complete audit trail of all stock movements across godowns. Every add, transfer, sale, and adjustment is recorded.</p>
           <div className="glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border">
                   {['Date', 'Product', 'Godown', 'Type', 'Qty', 'Balance', 'Reference', 'Notes', 'By'].map(h => <th key={h} className="px-3 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
@@ -445,6 +484,11 @@ export default function GodownsPage() {
                 </tbody>
               </table>
             </div>
+            {ledgerError && <p role="alert" className="text-red-500 p-3">{ledgerError}</p>}
+            <div className="flex gap-3 p-3">
+              <button disabled={ledgerLoading} onClick={() => loadLedger()} className="px-3 py-2 border border-border rounded-lg">Refresh ledger</button>
+              {ledgerCursor && <button disabled={ledgerLoading} onClick={() => loadLedger(true)} className="px-3 py-2 bg-accent text-white rounded-lg">{ledgerLoading ? 'Loading...' : 'Load older entries'}</button>}
+            </div>
             {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No ledger entries yet. Stock movements will appear here.</div>}
           </div>
         </div>
@@ -453,7 +497,7 @@ export default function GodownsPage() {
       {/* ═══════ MODALS ═══════ */}
 
       {/* Create Branch Modal */}
-      <Modal isOpen={showBranchModal} onClose={() => setShowBranchModal(false)} title="Add Branch">
+      <Modal isOpen={showBranchModal} onClose={() => { if (!submitting) setShowBranchModal(false) }} title={editingBranchId ? "Edit Branch" : "Add Branch"}>
         <div className="space-y-4">
           {[
             { key: 'name', label: 'Branch Name *', type: 'text' },
@@ -472,19 +516,19 @@ export default function GodownsPage() {
             Head Office
           </label>
           <button onClick={handleCreateBranch} disabled={submitting || !branchForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
-            {submitting ? 'Creating...' : 'Create Branch'}
+            {submitting ? 'Saving...' : editingBranchId ? 'Save Branch' : 'Create Branch'}
           </button>
         </div>
       </Modal>
 
       {/* Create Godown Modal */}
-      <Modal isOpen={showGodownModal} onClose={() => setShowGodownModal(false)} title="Add Godown">
+      <Modal isOpen={showGodownModal} onClose={() => { if (!submitting) setShowGodownModal(false) }} title={editingGodownId ? "Edit Godown" : "Add Godown"}>
         <div className="space-y-4">
           <div>
             <label className="text-sm text-muted mb-1 block">Godown Name *</label>
             <input value={godownForm.name} onChange={e => setGodownForm(p => ({ ...p, name: e.target.value }))} className={INP} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">Type</label>
               <select value={godownForm.type} onChange={e => setGodownForm(p => ({ ...p, type: e.target.value }))} className={SEL}>
@@ -514,7 +558,7 @@ export default function GodownsPage() {
             Set as Default Godown (primary stock location)
           </label>
           <button onClick={handleCreateGodown} disabled={submitting || !godownForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
-            {submitting ? 'Creating...' : 'Create Godown'}
+            {submitting ? 'Saving...' : editingGodownId ? 'Save Godown' : 'Create Godown'}
           </button>
         </div>
       </Modal>
@@ -553,7 +597,7 @@ export default function GodownsPage() {
       {/* Create Transfer Modal */}
       <Modal isOpen={showTransferModal} onClose={() => setShowTransferModal(false)} title="New Inter-Godown Transfer" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">From Godown *</label>
               <select value={transferForm.fromGodownId} onChange={e => setTransferForm(p => ({ ...p, fromGodownId: e.target.value }))} className={SEL}>
@@ -579,7 +623,7 @@ export default function GodownsPage() {
               <button onClick={() => setTransferForm(f => ({ ...f, items: [...f.items, { productId: '', name: '', sku: '', quantity: 1 }] }))} className="text-xs text-accent hover:underline">+ Add Item</button>
             </div>
             {transferForm.items.map((item, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 mb-2">
+              <div key={i} className="ui-form-grid grid grid-cols-12 gap-2 mb-2">
                 <select value={item.productId} onChange={e => { const v = [...transferForm.items]; v[i].productId = e.target.value; setTransferForm(f => ({ ...f, items: v })) }} className="col-span-8 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
                   <option value="">Select Product</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}

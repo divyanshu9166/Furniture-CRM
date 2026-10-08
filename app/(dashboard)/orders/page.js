@@ -354,12 +354,12 @@ function OrdersPageInner() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Orders</h1>
           <p className="text-xs md:text-sm text-muted mt-1">{orders.length} orders · ₹{(totalRevenue/1000).toFixed(0)}K collected</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           <button onClick={() => { resetOfflineOrderForm(); setShowCreateModal(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
             <Plus className="w-4 h-4" /> New Offline Order
           </button>
@@ -371,7 +371,7 @@ function OrdersPageInner() {
       {tab === 'orders' && (
         <>
           {/* Stats */}
-          <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
+          <div className="ui-stat-strip flex gap-3 overflow-x-auto hide-scrollbar pb-1">
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
               <div className="p-2.5 rounded-xl bg-accent-light"><Package className="w-5 h-5 text-accent" /></div>
               <div><p className="text-xs text-muted">Total Orders</p><p className="text-lg font-bold text-foreground">{orders.length}</p></div>
@@ -392,7 +392,7 @@ function OrdersPageInner() {
 
           {/* Filters */}
           <div className="glass-card p-4 space-y-3">
-            <div className="flex gap-3">
+            <div className="ui-filters flex gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                 <input type="search" autoComplete="off" placeholder="Search orders by customer, product, or ID..." value={search} onChange={e => setSearch(e.target.value)}
@@ -449,7 +449,7 @@ function OrdersPageInner() {
                     <span className="font-mono text-[10px] text-muted">{order.id}</span>
                     {getSourceBadge(order.source)}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ui-actions flex items-center gap-2">
                     <span className="text-sm font-bold text-foreground">₹{order.amount.toLocaleString()}</span>
                     <button onClick={() => openSlipModal(order)} title="Print Packaging Slip"
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
@@ -467,7 +467,7 @@ function OrdersPageInner() {
 
           {/* ── Desktop Table View ── */}
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
             <table className="crm-table">
               <thead>
                 <tr>
@@ -496,7 +496,7 @@ function OrdersPageInner() {
                     <td><span className={`badge ${paymentColors[order.payment]}`}>{order.payment}</span></td>
                     <td className="text-muted">{order.date}</td>
                     <td>
-                      <div className="flex items-center gap-2">
+                      <div className="ui-actions flex items-center gap-2">
                         <button onClick={() => openSlipModal(order)} title="Print Packaging Slip"
                           className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-surface border border-border text-muted hover:text-accent hover:border-accent/40 transition-all">
                           <Printer className="w-3.5 h-3.5" /> Slip
@@ -523,7 +523,7 @@ function OrdersPageInner() {
       {tab === 'channels' && (
         <div className="space-y-6">
           {/* Channel overview stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {orderSources.filter(s => s !== 'All').map(source => (
               <div key={source} className="glass-card p-4 cursor-pointer hover:border-accent/30 transition-all" onClick={() => { setTab('orders'); setSourceFilter(source); }}>
                 <div className="flex items-center justify-between mb-3">
@@ -600,7 +600,7 @@ function OrdersPageInner() {
                   </div>
 
                   {/* Actions */}
-                  <div className="flex gap-2">
+                  <div className="ui-actions flex gap-2">
                     <button
                       onClick={() => handleSync(channel.id)}
                       disabled={!channel.connected || syncing[channel.id]}
@@ -782,7 +782,7 @@ function OrdersPageInner() {
           )}
 
           {/* Qty + Amount */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Quantity</label>
               <input type="number" name="quantity" min="1" max={selectedProduct?.stock || 999} value={orderQty}
@@ -813,7 +813,7 @@ function OrdersPageInner() {
             <textarea name="notes" rows={2} placeholder="Any special instructions..." className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm resize-none focus:outline-none focus:border-accent/50" />
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => { setShowCreateModal(false); resetOfflineOrderForm(); }}
               className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
               Cancel
@@ -831,7 +831,7 @@ function OrdersPageInner() {
         {orderToDraft && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Move <strong className="text-foreground">{orderToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={cancelMoveOrderToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveOrderToDraft} disabled={deletingOrder} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingOrder ? 'Moving...' : 'Move to Draft'}</button>
             </div>
@@ -849,7 +849,7 @@ function OrdersPageInner() {
                 <Package className="w-5 h-5 text-accent" />
                 <h2 className="text-base font-semibold text-foreground">Packaging Slip — {slipOrder.id}</h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <button onClick={() => { setTempTemplate({ ...slipTemplate }); setEditingTemplate(true); }}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground bg-surface border border-border rounded-lg transition-colors">
                   <Settings2 className="w-3.5 h-3.5" /> Edit Template
@@ -914,7 +914,7 @@ function OrdersPageInner() {
                     </label>
                   ))}
                 </div>
-                <div className="flex gap-3 pt-2">
+                <div className="ui-actions flex gap-3 pt-2">
                   <button onClick={saveTemplate}
                     className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-medium transition-colors">
                     <Check className="w-4 h-4" /> Save Template

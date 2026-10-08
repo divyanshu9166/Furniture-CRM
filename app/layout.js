@@ -1,4 +1,5 @@
 import './globals.css';
+import './mobile.css';
 import AuthProvider from '@/components/AuthProvider';
 import AlertToastProvider from '@/components/AlertToastProvider';
 import { ThemeProvider, themeInitScript } from '@/components/ThemeProvider';

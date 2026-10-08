@@ -574,7 +574,7 @@ export function SocialInbox({ platform }: { platform?: Platform }) {
   return (
     // Mobile: subtract the fixed bottom nav (~60px + 16px pad + safe-area) so the
     // composer stays reachable above it. Desktop (md+) keeps the original height.
-    <div className="-m-3.5 sm:-m-6 flex flex-col h-[calc(100dvh-3.5rem-76px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden">
+    <div className="ui-inbox-shell -m-3.5 md:-m-6 flex flex-col h-[calc(100dvh-3.5rem-76px-env(safe-area-inset-bottom))] md:h-[calc(100dvh-3.5rem)] min-h-0 overflow-hidden">
 
       {/* ── Mobile segmented channel control ─────────────────────────────── */}
       {!platform && (

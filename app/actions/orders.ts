@@ -4,7 +4,9 @@ import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createOrderSchema, updateOrderStatusSchema } from '@/lib/validations/order'
 import type { OrderSource, OrderStatus, PaymentStatus } from '@prisma/client'
-import { adjustGodownStock, getOrCreateDefaultGodown } from './godowns'
+import { requireAuth } from '@/lib/auth-helpers'
+import { defaultGodown, inventoryError, inventoryTransaction, moveStock } from '@/lib/inventory/stock'
+import { isManualCategory } from '@/lib/inventory/category'
 
 export async function getOrders(source?: string) {
   const where = source && source !== 'All'
@@ -45,6 +47,7 @@ export async function getOrder(id: number) {
 }
 
 export async function createOrder(data: unknown) {
+  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = createOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -75,8 +78,9 @@ export async function createOrder(data: unknown) {
   const displayId = `${prefix}-${String(nextNum).padStart(4, '0')}`
 
   // Check stock availability
-  const product = await prisma.product.findUnique({ where: { id: productId } })
+  const product = await prisma.product.findUnique({ where: { id: productId }, include: { category: true } })
   if (!product) return { success: false, error: 'Product not found' }
+  if (isManualCategory(product.category.name)) return { success: false, error: 'Raw materials and consumables are not for sale' }
 
   if (shouldDeductStock) {
     const godownCount = await prisma.godown.count()
@@ -89,8 +93,8 @@ export async function createOrder(data: unknown) {
       } else if (godownId) {
         targetGodownId = godownId
       } else {
-        const defaultGodown = await getOrCreateDefaultGodown()
-        targetGodownId = defaultGodown.id
+        const location = await prisma.godown.findFirst({ orderBy: [{ isDefault: 'desc' }, { id: 'asc' }] })
+        targetGodownId = location?.id
       }
 
       const selectedGodown = await prisma.godown.findUnique({
@@ -99,22 +103,16 @@ export async function createOrder(data: unknown) {
       })
       if (!selectedGodown) return { success: false, error: 'Selected showroom/godown not found' }
 
-      const godownStock = await prisma.godownStock.findUnique({
-        where: { productId_godownId: { productId, godownId: selectedGodown.id } },
-        select: { quantity: true },
-      })
-      const available = godownStock?.quantity || 0
-      if (available < quantity) {
-        return { success: false, error: `Only ${available} units available in ${selectedGodown.name}` }
-      }
-
       targetGodownId = selectedGodown.id
     } else if (product.stock < quantity) {
       return { success: false, error: `Only ${product.stock} units in stock` }
     }
   }
 
-  const order = await prisma.order.create({
+  try {
+  const order = await inventoryTransaction(prisma, async tx => {
+  const effectiveGodownId = shouldDeductStock ? targetGodownId ?? (await defaultGodown(tx)).id : targetGodownId
+  const created = await tx.order.create({
     data: {
       displayId,
       contactId: contact.id,
@@ -126,37 +124,32 @@ export async function createOrder(data: unknown) {
       status: 'CONFIRMED',
       date: new Date(),
       notes,
-      godownId: targetGodownId,
+      godownId: effectiveGodownId,
     },
   })
 
   if (shouldDeductStock) {
-    if (usingGodownStock && targetGodownId) {
-      await adjustGodownStock(productId, targetGodownId, -quantity, 'OUT', {
+    if (effectiveGodownId) {
+      await moveStock(tx, productId, effectiveGodownId, -quantity, 'OUT', {
         referenceType: 'Order',
-        referenceId: order.id,
+        referenceId: created.id,
         notes: `${orderSource} order ${displayId}`,
         createdBy: 'Orders',
       })
-      await prisma.product.update({
+      await tx.product.update({
         where: { id: productId },
         data: { sold: { increment: quantity } },
       })
-    } else {
-      await prisma.product.update({
-        where: { id: productId },
-        data: {
-          stock: { decrement: quantity },
-          sold: { increment: quantity },
-        },
-      })
     }
   }
+  return created
+  })
 
   revalidatePath('/orders')
   revalidatePath('/inventory')
-  if (usingGodownStock) revalidatePath('/godowns')
+  revalidatePath('/godowns')
   return { success: true, data: order }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateOrderStatus(data: unknown) {

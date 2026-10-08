@@ -119,7 +119,7 @@ export function SystemPromptEditor({ value, onChange, onSave, saving, savedAt }:
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="ui-actions flex items-center gap-3 flex-wrap">
         <button
           onClick={onSave}
           disabled={saving}

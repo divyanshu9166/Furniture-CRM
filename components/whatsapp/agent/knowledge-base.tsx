@@ -46,7 +46,7 @@ function DocRow({
 
   return (
     <div className={`border rounded-xl overflow-hidden transition-all ${doc.status === 'error' ? 'border-red-200' : 'border-border'}`}>
-      <div className="flex items-center gap-3 px-4 py-3">
+      <div className="ui-actions flex items-center gap-3 px-4 py-3">
         <button onClick={() => setOpen(o => !o)} className="text-muted shrink-0">
           {open ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         </button>
@@ -232,7 +232,7 @@ export function KnowledgeBase() {
             Upload your company info, FAQs, and product catalogue. The AI answers only from this content.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           <button
             onClick={fetchDocs}
             className="p-1.5 rounded-lg border border-border text-muted hover:text-foreground hover:bg-surface-hover transition-colors"

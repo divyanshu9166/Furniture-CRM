@@ -323,7 +323,7 @@ export function PipelinesTab() {
           </DropdownMenu>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           <Button
             variant="outline"
             onClick={() => setNewPipelineOpen(true)}

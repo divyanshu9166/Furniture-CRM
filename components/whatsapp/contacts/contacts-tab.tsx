@@ -207,14 +207,14 @@ export function ContactsTab() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="ui-page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Contacts</h1>
           <p className="text-sm text-muted mt-1">
             Manage your contact list. {totalCount > 0 && `${totalCount} total contacts.`}
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="ui-actions grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
           <Button
             variant="outline"
             onClick={handleSyncFromCrm}
@@ -527,7 +527,7 @@ export function ContactsTab() {
             Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, totalCount)} of{' '}
             {totalCount}
           </p>
-          <div className="flex items-center gap-1">
+          <div className="ui-actions flex items-center gap-1">
             <Button
               variant="outline"
               size="icon-sm"

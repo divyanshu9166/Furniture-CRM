@@ -2,34 +2,20 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
-import { requireRole } from '@/lib/auth-helpers'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import { createBranchSchema, createGodownSchema, createTransferSchema } from '@/lib/validations/godown'
+import { completeStockTransfer, defaultGodown, inventoryError, inventoryTransaction, lockProducts, moveStock, prepareStock } from '@/lib/inventory/stock'
+import { assertId } from '@/lib/commerce/documents'
+import { z } from 'zod'
+import { isManualCategory } from '@/lib/inventory/category'
 
 // ─── CORE SYNC ENGINE ────────────────────────────────────
-// All stock changes MUST go through adjustGodownStock → syncProductStockFromGodowns
+// All physical stock changes use lib/inventory/stock within the document transaction.
 // This ensures Product.stock always equals SUM(GodownStock.quantity)
 
 /**
- * Recalculates Product.stock as SUM(GodownStock.quantity) for a given product.
- * Called after every godown stock change to keep the single source of truth.
- */
-export async function syncProductStockFromGodowns(productId: number, tx?: any) {
-  const db = tx || prisma
-  const result = await db.godownStock.aggregate({
-    where: { productId },
-    _sum: { quantity: true },
-  })
-  const totalStock = result._sum.quantity || 0
-  await db.product.update({
-    where: { id: productId },
-    data: { stock: totalStock },
-  })
-  return totalStock
-}
-
-/**
  * Adjusts godown stock, creates a StockLedger entry, and syncs Product.stock.
- * This is the ONLY function that should modify godown stock quantities.
+ * Server action wrapper for the shared transactional engine.
  */
 export async function adjustGodownStock(
   productId: number,
@@ -43,86 +29,35 @@ export async function adjustGodownStock(
     createdBy?: string
   }
 ) {
-  return await prisma.$transaction(async (tx) => {
-    // Upsert the godown stock
-    const existing = await tx.godownStock.findUnique({
-      where: { productId_godownId: { productId, godownId } },
-    })
-
-    const currentQty = existing?.quantity || 0
-    const newQty = Math.max(0, currentQty + quantity) // never go below 0
-
-    await tx.godownStock.upsert({
-      where: { productId_godownId: { productId, godownId } },
-      create: { productId, godownId, quantity: newQty },
-      update: { quantity: newQty },
-    })
-
-    // Create ledger entry
-    await tx.stockLedger.create({
-      data: {
-        productId,
-        godownId,
-        entryType,
-        quantity,
-        balanceAfter: newQty,
-        referenceType: options?.referenceType,
-        referenceId: options?.referenceId,
-        notes: options?.notes,
-        createdBy: options?.createdBy,
-      },
-    })
-
-    // Sync product total stock
-    const totalStock = await syncProductStockFromGodowns(productId, tx)
-
-    // ─── Update lastRestocked whenever stock is added ─────────────────
-    const isStockIn = quantity > 0 && (
-      entryType === 'IN' ||
-      entryType === 'ADJUSTMENT' ||
-      entryType === 'TRANSFER_IN'
-    )
-    if (isStockIn) {
-      await tx.product.update({
-        where: { id: productId },
-        data: { lastRestocked: new Date() },
-      })
-    }
-
-    return { godownBalance: newQty, totalStock }
-  })
+  try {
+  const session = await requireRole('ADMIN', 'MANAGER')
+  assertId(productId); assertId(godownId)
+  if (!['IN', 'OUT', 'ADJUSTMENT'].includes(entryType) || !Number.isFinite(quantity) || quantity === 0) throw new Error('Invalid manual stock adjustment')
+  if ((entryType === 'IN' && quantity < 0) || (entryType === 'OUT' && quantity > 0)) throw new Error('Adjustment direction does not match quantity')
+  if (typeof options?.notes !== 'string' || !options.notes.trim()) throw new Error('An adjustment reason is required')
+  const data = await inventoryTransaction(prisma, tx => moveStock(tx, productId, godownId, quantity, entryType, { referenceType: 'Manual', notes: options.notes, createdBy: session.user.name }))
+  revalidatePath('/godowns'); revalidatePath('/inventory')
+  return { success: true, data }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 /**
  * Gets the default godown, creating one if none exists.
  */
 export async function getOrCreateDefaultGodown() {
-  let defaultGodown = await prisma.godown.findFirst({ where: { isDefault: true } })
-  if (!defaultGodown) {
-    // Try to find any godown and mark it as default
-    defaultGodown = await prisma.godown.findFirst({ orderBy: { id: 'asc' } })
-    if (defaultGodown) {
-      defaultGodown = await prisma.godown.update({
-        where: { id: defaultGodown.id },
-        data: { isDefault: true },
-      })
-    } else {
-      // Create a default godown
-      defaultGodown = await prisma.godown.create({
-        data: {
-          name: 'Main Showroom',
-          type: 'Showroom',
-          isDefault: true,
-        },
-      })
-    }
-  }
-  return defaultGodown
+  try {
+  await requireRole('ADMIN', 'MANAGER')
+  return inventoryTransaction(prisma, defaultGodown)
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── STOCK LEDGER ────────────────────────────────────────
 
-export async function getStockLedger(filters?: { productId?: number; godownId?: number; limit?: number }) {
+export async function getStockLedger(filters?: { productId?: number; godownId?: number; limit?: number; cursor?: number }) {
+  await requireAuth()
+  const parsed = z.object({ productId: z.number().int().positive().optional(), godownId: z.number().int().positive().optional(), cursor: z.number().int().positive().optional(), limit: z.number().int().positive().max(1000).optional() }).safeParse(filters || {})
+  if (!parsed.success) return { success: false, error: 'Invalid ledger filters', data: [], nextCursor: null }
+  const limit = Math.min(1000, Math.max(1, Math.floor(filters?.limit || 100)))
   const entries = await prisma.stockLedger.findMany({
     where: {
       ...(filters?.productId ? { productId: filters.productId } : {}),
@@ -131,21 +66,25 @@ export async function getStockLedger(filters?: { productId?: number; godownId?: 
     include: {
       product: { select: { name: true, sku: true } },
       godown: { select: { name: true } },
+      batchMovements: { include: { batch: { select: { batchNumber: true } } }, orderBy: { id: 'asc' } },
     },
-    orderBy: { createdAt: 'desc' },
-    take: filters?.limit || 100,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    ...(filters?.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
   })
-  return { success: true, data: entries }
+  const data = entries.slice(0, limit)
+  return { success: true, data, nextCursor: entries.length > limit ? data.at(-1)?.id ?? null : null }
 }
 
 // ─── GODOWN STOCK SUMMARY ────────────────────────────────
 
 export async function getGodownStockSummary() {
+  await requireAuth()
   const godowns = await prisma.godown.findMany({
     include: {
       branch: { select: { name: true } },
       stocks: {
-        include: { product: { select: { name: true, sku: true, price: true, costPrice: true } } },
+        include: { product: { select: { name: true, sku: true, price: true, costPrice: true, category: { select: { name: true } } } } },
       },
       _count: { select: { stocks: true, ledgerEntries: true } },
     },
@@ -156,7 +95,7 @@ export async function getGodownStockSummary() {
     success: true,
     data: godowns.map(g => {
       const totalItems = g.stocks.reduce((s, st) => s + st.quantity, 0)
-      const totalValue = g.stocks.reduce((s, st) => s + (st.quantity * (st.product?.price || 0)), 0)
+      const totalValue = g.stocks.reduce((s, st) => s + st.quantity * (isManualCategory(st.product.category.name) ? st.product.costPrice : st.product.price), 0)
       const totalCostValue = g.stocks.reduce((s, st) => s + (st.quantity * (st.product?.costPrice || 0)), 0)
       return {
         ...g,
@@ -172,6 +111,7 @@ export async function getGodownStockSummary() {
 // ─── BRANCHES ────────────────────────────────────────
 
 export async function getBranches() {
+  await requireAuth()
   const branches = await prisma.branch.findMany({
     orderBy: { name: 'asc' },
     include: {
@@ -183,37 +123,54 @@ export async function getBranches() {
 }
 
 export async function createBranch(data: unknown) {
+  try {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = createBranchSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const branch = await prisma.branch.create({ data: parsed.data })
+  const branch = await inventoryTransaction(prisma, async tx => {
+    if (parsed.data.isHeadOffice) await tx.branch.updateMany({ data: { isHeadOffice: false } })
+    return tx.branch.create({ data: parsed.data })
+  })
   revalidatePath('/godowns')
   return { success: true, data: branch }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateBranch(id: number, data: unknown) {
+  try {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = createBranchSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const branch = await prisma.branch.update({ where: { id }, data: parsed.data })
+  assertId(id)
+  const branch = await inventoryTransaction(prisma, async tx => {
+    if (parsed.data.isHeadOffice) await tx.branch.updateMany({ data: { isHeadOffice: false } })
+    return tx.branch.update({ where: { id }, data: parsed.data })
+  })
   revalidatePath('/godowns')
   return { success: true, data: branch }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function deleteBranch(id: number) {
+  try {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const godownCount = await prisma.godown.count({ where: { branchId: id } })
-  if (godownCount > 0) return { success: false, error: 'Cannot delete branch with godowns. Remove godowns first.' }
-  await prisma.branch.delete({ where: { id } })
+  assertId(id)
+  await inventoryTransaction(prisma, async tx => {
+    await tx.$queryRaw`SELECT id FROM "Branch" WHERE id = ${id} FOR UPDATE`
+    if (await tx.godown.count({ where: { branchId: id } })) throw new Error('Cannot delete branch with godowns. Remove godowns first.')
+    await tx.branch.delete({ where: { id } })
+  })
   revalidatePath('/godowns')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── GODOWNS ─────────────────────────────────────────
 
 export async function getGodowns() {
+  await requireAuth()
   const godowns = await prisma.godown.findMany({
     orderBy: { name: 'asc' },
     include: {
@@ -229,21 +186,16 @@ export async function createGodown(data: unknown) {
   const parsed = createGodownSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  // If this is the first godown, make it default
-  const existingCount = await prisma.godown.count()
-  const isDefault = parsed.data.isDefault || existingCount === 0
-
-  // If marking as default, unset others
-  if (isDefault) {
-    await prisma.godown.updateMany({ data: { isDefault: false } })
-  }
-
-  const godown = await prisma.godown.create({
-    data: { ...parsed.data, isDefault },
+  try {
+  const godown = await inventoryTransaction(prisma, async tx => {
+    const isDefault = parsed.data.isDefault || await tx.godown.count() === 0
+    if (isDefault) await tx.godown.updateMany({ data: { isDefault: false } })
+    return tx.godown.create({ data: { ...parsed.data, isDefault } })
   })
   revalidatePath('/godowns')
   revalidatePath('/inventory')
   return { success: true, data: godown }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateGodown(id: number, data: unknown) {
@@ -251,39 +203,58 @@ export async function updateGodown(id: number, data: unknown) {
   const parsed = createGodownSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  if (parsed.data.isDefault) {
-    await prisma.godown.updateMany({ data: { isDefault: false } })
-  }
-
-  const godown = await prisma.godown.update({ where: { id }, data: parsed.data })
+  try {
+  const godown = await inventoryTransaction(prisma, async tx => {
+    const existing = await tx.godown.findUnique({ where: { id } })
+    if (!existing) throw new Error('Location not found')
+    if (existing.isDefault && !parsed.data.isDefault) throw new Error('Select another default location before unsetting this default')
+    if (parsed.data.isDefault) await tx.godown.updateMany({ data: { isDefault: false } })
+    return tx.godown.update({ where: { id }, data: parsed.data })
+  })
   revalidatePath('/godowns')
+  revalidatePath('/inventory')
   return { success: true, data: godown }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function deleteGodown(id: number) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const stockCount = await prisma.godownStock.count({ where: { godownId: id } })
-  if (stockCount > 0) return { success: false, error: 'Cannot delete godown with stock. Transfer stock first.' }
-  await prisma.godown.delete({ where: { id } })
+  try {
+  await inventoryTransaction(prisma, async tx => {
+    const location = await tx.godown.findUnique({ where: { id }, include: { _count: { select: { stocks: true, ledgerEntries: true, transfersFrom: true, transfersTo: true, orders: true } } } })
+    if (!location) throw new Error('Location not found')
+    if (Object.values(location._count).some(count => count > 0)) throw new Error('Cannot delete a location with stock, ledger, transfer or order history')
+    if (location.isDefault && await tx.godown.count() > 1) throw new Error('Select another default location before deleting this one')
+    await tx.godown.delete({ where: { id } })
+  })
   revalidatePath('/godowns')
+  revalidatePath('/inventory')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function setDefaultGodown(id: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  await prisma.godown.updateMany({ data: { isDefault: false } })
-  await prisma.godown.update({ where: { id }, data: { isDefault: true } })
+  try {
+  await inventoryTransaction(prisma, async tx => {
+    if (!await tx.godown.findUnique({ where: { id } })) throw new Error('Location not found')
+    await tx.godown.updateMany({ data: { isDefault: false } })
+    await tx.godown.update({ where: { id }, data: { isDefault: true } })
+  })
   revalidatePath('/godowns')
+  revalidatePath('/inventory')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── GODOWN STOCK ─────────────────────────────────────
 
 export async function getGodownStock(godownId?: number) {
+  await requireAuth()
   const stocks = await prisma.godownStock.findMany({
     where: godownId ? { godownId } : undefined,
     include: {
-      product: { select: { name: true, sku: true, price: true, costPrice: true, category: { select: { name: true } } } },
+      product: { select: { name: true, sku: true, price: true, costPrice: true, unitOfMeasure: true, category: { select: { name: true } } } },
       godown: { select: { name: true, type: true } },
     },
     orderBy: { product: { name: 'asc' } },
@@ -293,21 +264,8 @@ export async function getGodownStock(godownId?: number) {
 
 export async function updateGodownStock(productId: number, godownId: number, quantity: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-
-  const existing = await prisma.godownStock.findUnique({
-    where: { productId_godownId: { productId, godownId } },
-  })
-  const currentQty = existing?.quantity || 0
-  const diff = quantity - currentQty
-
-  const result = await adjustGodownStock(productId, godownId, diff, 'ADJUSTMENT', {
-    notes: `Stock set to ${quantity} (was ${currentQty})`,
-    createdBy: 'Admin',
-  })
-
-  revalidatePath('/godowns')
-  revalidatePath('/inventory')
-  return { success: true, data: result }
+  const { updateStock } = await import('./products')
+  return updateStock({ id: productId, godownId, stock: quantity, mode: 'SET' })
 }
 
 /**
@@ -315,22 +273,14 @@ export async function updateGodownStock(productId: number, godownId: number, qua
  */
 export async function assignStockToGodown(productId: number, godownId: number, quantity: number, notes?: string) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  if (quantity <= 0) return { success: false, error: 'Quantity must be positive' }
-
-  const result = await adjustGodownStock(productId, godownId, quantity, 'IN', {
-    referenceType: 'Manual',
-    notes: notes || 'Stock assigned to godown',
-    createdBy: 'Admin',
-  })
-
-  revalidatePath('/godowns')
-  revalidatePath('/inventory')
-  return { success: true, data: result }
+  const { updateStock } = await import('./products')
+  return updateStock({ id: productId, godownId, stock: quantity, mode: 'ADD', notes: notes || 'Stock assigned to godown' })
 }
 
 // ─── INTER-GODOWN TRANSFERS ──────────────────────────
 
 export async function getTransfers() {
+  await requireAuth()
   const transfers = await prisma.godownTransfer.findMany({
     orderBy: { date: 'desc' },
     include: {
@@ -347,23 +297,27 @@ export async function createTransfer(data: unknown) {
   const parsed = createTransferSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { fromGodownId, toGodownId, notes, requestedBy, items } = parsed.data
+  const { fromGodownId, toGodownId, notes, items } = parsed.data
+  const requestedBy = (await requireRole('ADMIN', 'MANAGER')).user.name
   if (fromGodownId === toGodownId) return { success: false, error: 'Source and destination godown cannot be the same' }
 
-  // Validate source stock
+  try {
+  const transfer = await inventoryTransaction(prisma, async tx => {
+  await lockProducts(tx, items.map(item => item.productId))
+  if (await tx.godown.count({ where: { id: { in: [fromGodownId, toGodownId] } } }) !== 2) throw new Error('Source or destination location not found')
+  // Validate source stock inside the same transaction as the request.
   for (const item of items) {
-    const sourceStock = await prisma.godownStock.findUnique({
+    await prepareStock(tx, item.productId)
+    const sourceStock = await tx.godownStock.findUnique({
       where: { productId_godownId: { productId: item.productId, godownId: fromGodownId } },
     })
     if (!sourceStock || sourceStock.quantity < item.quantity) {
-      return { success: false, error: `Insufficient stock for ${item.name} in source godown (available: ${sourceStock?.quantity || 0}, requested: ${item.quantity})` }
+      throw new Error(`Insufficient stock for ${item.name} in source godown (available: ${sourceStock?.quantity || 0}, requested: ${item.quantity})`)
     }
   }
 
-  const count = await prisma.godownTransfer.count()
-  const displayId = `TRF-${String(count + 1).padStart(4, '0')}`
-
-  const transfer = await prisma.godownTransfer.create({
+  const displayId = `TRF-${crypto.randomUUID()}`
+  return tx.godownTransfer.create({
     data: {
       displayId,
       fromGodownId,
@@ -380,46 +334,23 @@ export async function createTransfer(data: unknown) {
       },
     },
   })
+  })
   revalidatePath('/godowns')
   return { success: true, data: transfer }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
-export async function completeTransfer(id: number, approvedBy?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+export async function completeTransfer(id: number, _approvedBy?: string) {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Access denied' } }
 
-  const transfer = await prisma.godownTransfer.findUnique({
-    where: { id },
-    include: { items: true },
-  })
-  if (!transfer) return { success: false, error: 'Transfer not found' }
-  if (transfer.status === 'Completed') return { success: false, error: 'Already completed' }
-
-  // Use the sync engine for each item
-  for (const item of transfer.items) {
-    // Deduct from source godown
-    await adjustGodownStock(item.productId, transfer.fromGodownId, -item.quantity, 'TRANSFER_OUT', {
-      referenceType: 'Transfer',
-      referenceId: transfer.id,
-      notes: `Transfer ${transfer.displayId}`,
-      createdBy: approvedBy || 'Admin',
-    })
-    // Add to destination godown
-    await adjustGodownStock(item.productId, transfer.toGodownId, item.quantity, 'TRANSFER_IN', {
-      referenceType: 'Transfer',
-      referenceId: transfer.id,
-      notes: `Transfer ${transfer.displayId}`,
-      createdBy: approvedBy || 'Admin',
-    })
-  }
-
-  await prisma.godownTransfer.update({
-    where: { id },
-    data: { status: 'Completed', approvedBy },
-  })
+  try {
+  await inventoryTransaction(prisma, tx => completeStockTransfer(tx, id, actor))
 
   revalidatePath('/godowns')
   revalidatePath('/inventory')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── MIGRATION HELPER ────────────────────────────────
@@ -431,30 +362,30 @@ export async function completeTransfer(id: number, approvedBy?: string) {
 export async function migrateExistingStockToGodowns() {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
 
-  const defaultGodown = await getOrCreateDefaultGodown()
-
-  const products = await prisma.product.findMany({
+  try {
+  const result = await inventoryTransaction(prisma, async tx => {
+  const location = await defaultGodown(tx)
+  const products = await tx.product.findMany({
     where: { stock: { gt: 0 } },
     select: { id: true, stock: true, name: true },
   })
 
   let migrated = 0
   for (const product of products) {
-    const existingGodownStock = await prisma.godownStock.findFirst({
+    const existingGodownStock = await tx.godownStock.findFirst({
       where: { productId: product.id },
     })
 
     if (!existingGodownStock) {
-      await adjustGodownStock(product.id, defaultGodown.id, product.stock, 'IN', {
-        referenceType: 'Manual',
-        notes: 'Migration: existing stock allocated to default godown',
-        createdBy: 'System',
-      })
+      await prepareStock(tx, product.id)
       migrated++
     }
   }
+  return { migrated, defaultGodownId: location.id, defaultGodownName: location.name }
+  })
 
   revalidatePath('/godowns')
   revalidatePath('/inventory')
-  return { success: true, migrated, defaultGodownId: defaultGodown.id, defaultGodownName: defaultGodown.name }
+  return { success: true, ...result }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }

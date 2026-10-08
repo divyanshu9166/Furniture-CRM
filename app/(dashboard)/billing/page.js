@@ -18,16 +18,12 @@ import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import { useSession } from '@/components/AuthProvider';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
-import {
-  getInvoices, getInvoice, createInvoice, updateInvoice, recordPayment,
-  cancelInvoice, createCreditNote, finalizeHeldInvoice,
-  searchContacts, getInvoiceStats, getCustomerProfile,
-} from '@/app/actions/invoices';
-import { getHsnCodes } from '@/app/actions/gst';
-import { moveInvoiceToDraft } from '@/app/actions/drafts';
-import { getProducts } from '@/app/actions/products';
-import { getStaff } from '@/app/actions/staff';
-import { getStoreSettings } from '@/app/actions/settings';
+import {getInvoices as getInvoicesAction, getInvoice as getInvoiceAction, createInvoice as createInvoiceAction, updateInvoice as updateInvoiceAction, recordPayment as recordPaymentAction, cancelInvoice as cancelInvoiceAction, createCreditNote as createCreditNoteAction, finalizeHeldInvoice as finalizeHeldInvoiceAction, searchContacts as searchContactsAction, getInvoiceStats as getInvoiceStatsAction, getCustomerProfile as getCustomerProfileAction} from '@/app/actions/invoices';
+import {getHsnCodes as getHsnCodesAction} from '@/app/actions/gst';
+import {moveInvoiceToDraft as moveInvoiceToDraftAction} from '@/app/actions/drafts';
+import {getProducts as getProductsAction} from '@/app/actions/products';
+import {getStaff as getStaffAction} from '@/app/actions/staff';
+import {getStoreSettings as getStoreSettingsAction} from '@/app/actions/settings';
 
 // ─── CONSTANTS ─────────────────────────────────────────
 
@@ -177,6 +173,25 @@ const buildInvoiceFooterHtml = (store) => {
 
 // ─── MAIN COMPONENT ───────────────────────────────────
 
+import { calculateBill } from '@/lib/commerce/rules';
+import { safeAction } from '@/lib/safe-action';
+const getInvoices = safeAction(getInvoicesAction);
+const getInvoice = safeAction(getInvoiceAction);
+const createInvoice = safeAction(createInvoiceAction);
+const updateInvoice = safeAction(updateInvoiceAction);
+const recordPayment = safeAction(recordPaymentAction);
+const cancelInvoice = safeAction(cancelInvoiceAction);
+const createCreditNote = safeAction(createCreditNoteAction);
+const finalizeHeldInvoice = safeAction(finalizeHeldInvoiceAction);
+const searchContacts = safeAction(searchContactsAction);
+const getInvoiceStats = safeAction(getInvoiceStatsAction);
+const getCustomerProfile = safeAction(getCustomerProfileAction);
+const getHsnCodes = safeAction(getHsnCodesAction);
+const moveInvoiceToDraft = safeAction(moveInvoiceToDraftAction);
+const getProducts = safeAction(getProductsAction);
+const getStaff = safeAction(getStaffAction);
+const getStoreSettings = safeAction(getStoreSettingsAction);
+
 export default function BillingPage() {
   // Data state
   const [invoices, setInvoices] = useState([]);
@@ -184,6 +199,7 @@ export default function BillingPage() {
   const [staffList, setStaffList] = useState([]);
   const [storeSettings, setStoreSettings] = useState(null);
   const [stats, setStats] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [hsnCodes, setHsnCodes] = useState([]);
 
@@ -240,6 +256,8 @@ export default function BillingPage() {
     const [invRes, prodRes, staffRes, settingsRes, statsRes, hsnRes] = await Promise.all([
       getInvoices(), getProducts(), getStaff(), getStoreSettings(), getInvoiceStats(), getHsnCodes(),
     ]);
+    const failed = [invRes, prodRes, staffRes, settingsRes, statsRes, hsnRes].find(res => !res.success);
+    setLoadError(failed?.error || '');
     if (invRes.success) {
       setInvoices(invRes.data);
       setHeldBills(invRes.data.filter(i => i.isHeld));
@@ -252,7 +270,7 @@ export default function BillingPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { const timer = setTimeout(() => { loadData(); }, 0); return () => clearTimeout(timer); }, [loadData]);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -334,41 +352,18 @@ export default function BillingPage() {
     return result;
   }, [search, statusFilter, invoiceStatusFilter, dateRange, sortBy, invoices]);
 
-  // POS calculations
-  const posSubtotal = posItems.reduce((s, item) => s + item.price * item.qty, 0);
-  const posDiscountAmount = posDiscountType === 'percent' ? Math.round(posSubtotal * posDiscount / 100) : Math.min(posDiscount, posSubtotal);
-  let remainingPosDiscount = posDiscountAmount;
-  const posDiscountSplits = posItems.map((item, index) => {
-    if (posDiscountAmount <= 0 || posSubtotal <= 0) return 0;
-    if (index === posItems.length - 1) return remainingPosDiscount;
-    const share = Math.round((item.price * item.qty / posSubtotal) * posDiscountAmount);
-    remainingPosDiscount -= share;
-    return share;
-  });
-
-  const posTaxSummary = posItems.reduce((acc, item, index) => {
-    const lineTotal = item.price * item.qty;
-    const discountShare = posDiscountSplits[index] || 0;
-    const taxableAmount = Math.max(0, lineTotal - discountShare);
-    const rate = Number.isFinite(item.gstRate) ? item.gstRate : gstRate;
-    const itemGst = Math.round(taxableAmount * rate / 100);
-    const igst = posSupplyType === 'INTERSTATE' ? itemGst : 0;
-    const cgst = posSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2);
-    const sgst = posSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst;
-
-    acc.taxable += taxableAmount;
-    acc.totalGst += itemGst;
-    acc.igst += igst;
-    acc.cgst += cgst;
-    acc.sgst += sgst;
-    return acc;
-  }, { taxable: 0, totalGst: 0, igst: 0, cgst: 0, sgst: 0 });
-
-  const posTotalGst = posTaxSummary.totalGst;
-  const posIgst = posTaxSummary.igst;
-  const posCgst = posTaxSummary.cgst;
-  const posSgst = posTaxSummary.sgst;
-  const posTotal = posTaxSummary.taxable + posTotalGst + (posTransportCost || 0);
+  // UI and server use identical line-discount/tax rounding.
+  const posCalculation = useMemo(() => {
+    try { return { ...calculateBill(posItems.map(item => ({ ...item, quantity: item.qty })), posDiscount, posDiscountType, gstRate, posSupplyType === 'INTERSTATE', posTransportCost || 0), error: '' }; }
+    catch (error) { return { subtotal: 0, discount: 0, gst: 0, cgst: 0, sgst: 0, igst: 0, total: 0, error: error.message }; }
+  }, [posItems, posDiscount, posDiscountType, gstRate, posSupplyType, posTransportCost]);
+  const posSubtotal = posCalculation.subtotal;
+  const posDiscountAmount = posCalculation.discount;
+  const posTotalGst = posCalculation.gst;
+  const posIgst = posCalculation.igst;
+  const posCgst = posCalculation.cgst;
+  const posSgst = posCalculation.sgst;
+  const posTotal = posCalculation.total;
   const posTotalPayments = posPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const posAdvancePaid = Math.min(posTotalPayments, posTotal);
   const posBalanceDue = Math.max(0, posTotal - posTotalPayments);
@@ -439,8 +434,11 @@ export default function BillingPage() {
     } : i));
   };
 
+  const paymentAutoFillRef = useRef(true);
   const clearPOS = () => {
     setPosItems([]);
+    setEditingInvoiceId(null);
+    paymentAutoFillRef.current = true;
     setPosCustomer({ name: '', phone: '', address: '', gstNumber: '' });
     setCustomerProfile(null);
     setPosDiscount(0);
@@ -469,7 +467,6 @@ export default function BillingPage() {
   };
 
   // Auto-fill first payment amount when total changes (only if user hasn't manually edited)
-  const paymentAutoFillRef = useRef(true);
   useEffect(() => {
     if (posPayments.length === 1 && posTotal > 0 && paymentAutoFillRef.current) {
       setPosPayments([{ ...posPayments[0], amount: posTotal }]);
@@ -480,26 +477,22 @@ export default function BillingPage() {
 
   const handleGenerateInvoice = async (isHeld = false) => {
     if (posItems.length === 0 || !posCustomer.name || !posCustomer.phone) return;
+    if (posCalculation.error) { notify(posCalculation.error, { variant: 'danger' }); return; }
+    if (!isHeld && !editingInvoiceId && posPayments.filter(p => p.method !== 'Cash').reduce((sum, p) => sum + Number(p.amount || 0), 0) > posTotal) { notify('Non-cash payments cannot exceed the invoice total', { variant: 'danger' }); return; }
     const isEditing = !!editingInvoiceId;
-    if (!isHeld && !isEditing && posTotalPayments === 0) return;
     setSubmitting(true);
     try {
       const placeOfSupplyValue = posPlaceOfSupply === 'OTHER'
         ? posPlaceOfSupplyCustom.trim()
         : posPlaceOfSupply;
       const paymentsData = isHeld
-        ? [{ amount: 0, method: 'Cash' }]
+        ? []
         : posPayments.filter(p => p.amount > 0).map(p => ({
           amount: Number(p.amount),
           method: p.method,
           reference: p.reference || undefined,
         }));
 
-      if (!isHeld && !isEditing && paymentsData.length === 0) {
-        alert('Please enter at least one payment amount');
-        setSubmitting(false);
-        return;
-      }
 
       const payload = {
         customer: posCustomer.name,
@@ -527,7 +520,7 @@ export default function BillingPage() {
       };
 
       const res = isEditing
-        ? await updateInvoice(editingInvoiceId, { ...payload, payments: paymentsData.length ? paymentsData : undefined })
+        ? await updateInvoice(editingInvoiceId, payload)
         : await createInvoice({ ...payload, payments: paymentsData });
       if (res.success) {
         clearPOS();
@@ -574,7 +567,7 @@ export default function BillingPage() {
         gstNumber: contact.gstNumber || inv.gstNumber || '',
       });
       setPosItems(invoice.items.map(item => {
-        const stock = Math.max(item.product?.stock ?? 0, item.quantity);
+        const stock = (item.product?.stock ?? 0) + (invoice.heldAt ? 0 : item.quantity);
         return {
           id: item.productId,
           name: item.name,
@@ -588,7 +581,9 @@ export default function BillingPage() {
         };
       }));
       setPosDiscount(invoice.discount || 0);
-      setPosDiscountType(invoice.discountType === 'percent' ? 'percent' : 'flat');
+      // Stored discount is a rupee amount even when originally entered as %.
+      // Restore that amount as flat to preserve the exact historical total.
+      setPosDiscountType('flat');
       setPosTransportCost(invoice.transportCost || 0);
       paymentAutoFillRef.current = false;
       setPosPayments([{ amount: invoice.amountPaid || 0, method: invoice.paymentMethod || 'Cash', reference: '' }]);
@@ -1106,6 +1101,7 @@ export default function BillingPage() {
 
   // ─── LOADING STATE ─────────────────────────────────────
 
+  if (loadError && !loading) return <div role="alert" className="glass-card p-6 text-center"><p>{loadError}</p><button onClick={loadData} className="mt-3 px-4 py-2 bg-accent text-white rounded-lg">Retry</button></div>;
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -1121,14 +1117,14 @@ export default function BillingPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Billing & POS</h1>
           <p className="text-sm text-muted mt-1">
             {stats ? `${stats.todayCount} invoices today · ${formatCurrency(stats.todayRevenue)} collected` : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           {heldBills.length > 0 && (
             <span className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/10 text-amber-700 rounded-xl text-xs font-medium border border-amber-500/20">
               <PauseCircle className="w-3.5 h-3.5" /> {heldBills.length} held
@@ -1164,7 +1160,7 @@ export default function BillingPage() {
       {tab === 'invoices' && (
         <>
           {/* Stats Row */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: 'Total Billed', value: formatCurrency(stats?.totalBilled || 0), icon: Receipt, color: 'accent', sub: `${invoices.filter(i => i.invoiceStatus === 'ACTIVE').length} invoices` },
               { label: 'Collected', value: formatCurrency(stats?.totalCollected || 0), icon: CheckCircle2, color: 'success', sub: stats?.monthGrowth > 0 ? `+${stats.monthGrowth}% vs last month` : stats?.monthGrowth < 0 ? `${stats.monthGrowth}% vs last month` : 'This month' },
@@ -1182,11 +1178,12 @@ export default function BillingPage() {
             ))}
           </div>
 
+          {stats?.refundDue > 0 && <p role="status" className="p-3 rounded-xl bg-warning-light text-warning text-sm">Credit notes leave {formatFullCurrency(stats.refundDue)} of excess collections to reconcile. A credit note does not automatically refund money or return physical stock.</p>}
           {/* Filters Bar */}
           <div className="glass-card p-4">
             <div className="flex flex-col gap-3">
               {/* Row 1: Search + Payment Status (Mobile Only) */}
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="ui-filters flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                   <input type="search" autoComplete="off" placeholder="Search by customer, phone, invoice ID, or salesperson..." value={search} onChange={e => setSearch(e.target.value)}
@@ -1209,7 +1206,7 @@ export default function BillingPage() {
                   {['All', 'ACTIVE', 'CANCELLED', 'REFUNDED'].map(s => (
                     <button key={s} onClick={() => setInvoiceStatusFilter(s)}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex-shrink-0 ${invoiceStatusFilter === s ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover border border-transparent hover:border-border'}`}>
-                      {s === 'ACTIVE' ? 'Active' : s === 'CANCELLED' ? 'Cancelled' : s === 'REFUNDED' ? 'Refunded' : s}
+                      {s === 'ACTIVE' ? 'Active' : s === 'CANCELLED' ? 'Cancelled' : s === 'REFUNDED' ? 'Fully credited' : s}
                     </button>
                   ))}
                 </div>
@@ -1257,7 +1254,7 @@ export default function BillingPage() {
 
           {/* Invoice Table */}
           <div className="glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table">
                 <thead>
                   <tr>
@@ -1306,7 +1303,7 @@ export default function BillingPage() {
                         </td>
                         <td className="text-muted whitespace-nowrap">{inv.date}</td>
                         <td>
-                          <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <div className="ui-actions flex items-center gap-1" onClick={e => e.stopPropagation()}>
                             <button onClick={() => handleShareInvoiceWhatsApp(inv)}
                               className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors" title="Share on WhatsApp">
                               <MessageSquare className="w-4 h-4" />
@@ -1366,7 +1363,7 @@ export default function BillingPage() {
               <p className="text-xs text-muted mt-1">Bills you park from the POS will appear here</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {heldBills.map(inv => (
                 <div key={inv.dbId} className="glass-card p-5">
                   <div className="flex items-center justify-between mb-3">
@@ -1384,7 +1381,7 @@ export default function BillingPage() {
                     <span className="text-sm text-muted">Total</span>
                     <span className="text-lg font-bold text-accent">{formatFullCurrency(inv.total)}</span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="ui-actions flex gap-2">
                     <button onClick={() => handleFinalizeHeld(inv)} disabled={submitting}
                       className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-accent text-white rounded-xl text-xs font-medium hover:bg-accent-hover transition-colors disabled:opacity-50">
                       <PlayCircle className="w-3.5 h-3.5" /> Finalize
@@ -1532,7 +1529,7 @@ export default function BillingPage() {
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  <div className="grid grid-cols-12 gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-muted font-semibold border-b border-border">
+                  <div className="ui-pos-heading grid grid-cols-12 gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-muted font-semibold border-b border-border">
                     <div className="col-span-5">Product / HSN</div>
                     <div className="col-span-2 text-center">Rate</div>
                     <div className="col-span-2 text-center">Qty</div>
@@ -1542,7 +1539,7 @@ export default function BillingPage() {
                   {posItems.map(item => {
                     const hsnMatch = hsnCodes.find(h => h.code === item.hsnCode);
                     return (
-                      <div key={item.id} className="grid grid-cols-12 gap-3 items-center bg-surface rounded-xl p-3">
+                      <div key={item.id} className="ui-pos-item grid grid-cols-12 gap-3 items-center bg-surface rounded-xl p-3">
                         <div className="col-span-5 min-w-0">
                           <p className="text-sm font-medium text-foreground truncate">{item.name}</p>
                           <p className="text-[10px] text-muted font-mono mt-0.5">{item.sku} · {item.category}</p>
@@ -1570,12 +1567,12 @@ export default function BillingPage() {
                             )}
                           </div>
                         </div>
-                        <div className="col-span-2">
+                        <div className="col-span-2" data-label="Rate">
                           <input type="number" value={item.price} min="0"
                             onChange={e => updateItemPrice(item.id, parseInt(e.target.value) || 0)}
                             className="w-full text-center text-sm font-medium bg-transparent border border-border rounded-lg py-1.5 focus:border-accent/50 outline-none" />
                         </div>
-                        <div className="col-span-2 flex items-center justify-center gap-1">
+                        <div className="col-span-2 flex items-center justify-center gap-1" data-label="Quantity">
                           <button onClick={() => updateQty(item.id, item.qty - 1)} className="w-7 h-7 rounded-lg bg-surface-hover border border-border flex items-center justify-center text-muted hover:text-foreground transition-colors">
                             <Minus className="w-3 h-3" />
                           </button>
@@ -1586,7 +1583,7 @@ export default function BillingPage() {
                             <Plus className="w-3 h-3" />
                           </button>
                         </div>
-                        <div className="col-span-2 text-right">
+                        <div className="col-span-2 text-right" data-label="Amount">
                           <p className="text-sm font-semibold text-foreground">{formatFullCurrency(item.price * item.qty)}</p>
                         </div>
                         <div className="col-span-1 flex justify-end">
@@ -1736,7 +1733,7 @@ export default function BillingPage() {
               <h3 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
                 <Tag className="w-4 h-4 text-accent" /> Discount
               </h3>
-              <div className="flex gap-2 mb-3">
+              <div className="ui-actions flex gap-2 mb-3">
                 <button onClick={() => setPosDiscountType('flat')} className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-all border ${posDiscountType === 'flat' ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-muted hover:text-foreground'}`}>
                   <IndianRupee className="w-3 h-3 inline -mt-0.5 mr-0.5" /> Flat
                 </button>
@@ -1771,7 +1768,8 @@ export default function BillingPage() {
             </div>
 
             {/* Split Payments */}
-            <div className="glass-card p-5">
+            <fieldset disabled={!!editingInvoiceId} className="glass-card p-5">
+              {editingInvoiceId && <p className="text-xs text-muted mb-3">Existing payments are preserved. Use Record Payment in invoice details to collect more.</p>}
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <Wallet className="w-4 h-4 text-accent" /> Payment
@@ -1792,7 +1790,7 @@ export default function BillingPage() {
                         </button>
                       </div>
                     )}
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="ui-choice-grid grid grid-cols-3 gap-2">
                       {paymentMethods.map(method => {
                         const Icon = paymentMethodIcons[method] || CreditCard;
                         return (
@@ -1803,7 +1801,7 @@ export default function BillingPage() {
                         );
                       })}
                     </div>
-                    <div className="flex gap-2.5">
+                    <div className="ui-filters flex gap-2.5">
                       <div className="relative flex-1">
                         <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
                         <input type="number" placeholder="Amount" min="0"
@@ -1818,7 +1816,7 @@ export default function BillingPage() {
                     </div>
                     {/* Quick amount buttons for first payment */}
                     {idx === 0 && posTotal > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="ui-actions flex flex-wrap gap-1.5">
                         <button onClick={() => { paymentAutoFillRef.current = false; updatePaymentSplit(0, 'amount', posTotal); }}
                           className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-accent/10 text-accent hover:bg-accent/20 transition-colors">
                           Full ({formatCurrency(posTotal)})
@@ -1860,7 +1858,7 @@ export default function BillingPage() {
                   )}
                 </div>
               )}
-            </div>
+            </fieldset>
 
             {/* Due Date & Notes combined */}
             <div className="glass-card p-5 space-y-4">
@@ -1959,7 +1957,7 @@ export default function BillingPage() {
               ) : (
                 <>
                   <button
-                    disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting || posTotalPayments === 0}
+                    disabled={posItems.length === 0 || !posCustomer.name || !posCustomer.phone || submitting || !!posCalculation.error}
                     onClick={() => handleGenerateInvoice(false)}
                     className="w-full py-3.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                   >
@@ -2153,7 +2151,7 @@ export default function BillingPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
+            <div className="ui-actions flex flex-wrap gap-2">
               <button onClick={() => handleShareInvoiceWhatsApp(selectedInvoice)}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
                 <MessageSquare className="w-4 h-4" /> WhatsApp
@@ -2224,7 +2222,7 @@ export default function BillingPage() {
             </div>
             <div>
               <label className="text-xs font-medium text-muted mb-1.5 block">Payment Method</label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="ui-choice-grid grid grid-cols-3 gap-1.5">
                 {paymentMethods.map(method => {
                   const Icon = paymentMethodIcons[method] || CreditCard;
                   return (
@@ -2268,7 +2266,7 @@ export default function BillingPage() {
               <label className="text-xs font-medium text-muted mb-1.5 block">Credit Amount *</label>
               <div className="relative">
                 <IndianRupee className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
-                <input type="number" min="1" max={selectedInvoice.total} value={creditNoteData.amount}
+                <input type="number" min="1" max={Math.max(0, selectedInvoice.total - (selectedInvoice.creditNotes || []).reduce((sum, note) => sum + note.amount, 0))} value={creditNoteData.amount}
                   onChange={e => setCreditNoteData({ ...creditNoteData, amount: e.target.value })}
                   className="w-full pl-9 pr-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
               </div>
@@ -2295,7 +2293,7 @@ export default function BillingPage() {
               <p className="text-sm text-red-700 font-medium">Are you sure you want to cancel invoice {selectedInvoice.id}?</p>
               <p className="text-xs text-red-600/70 mt-1">This will mark the invoice as cancelled. This action cannot be undone.</p>
             </div>
-            <div className="flex gap-2">
+            <div className="ui-actions flex gap-2">
               <button onClick={() => setShowCancelConfirm(false)}
                 className="flex-1 py-2.5 bg-surface border border-border text-foreground rounded-xl text-sm font-medium hover:bg-surface-hover transition-colors">
                 Keep Invoice
@@ -2314,7 +2312,7 @@ export default function BillingPage() {
         {invoiceToDraft && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Move invoice <strong className="text-foreground">{invoiceToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={() => setInvoiceToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveInvoiceToDraft} disabled={movingInvoiceToDraft} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{movingInvoiceToDraft ? 'Moving...' : 'Move to Draft'}</button>
             </div>

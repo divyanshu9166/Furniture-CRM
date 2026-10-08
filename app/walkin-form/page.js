@@ -3,11 +3,14 @@
 
 import { useState, useEffect } from 'react';
 
-const REQUIREMENT_OPTIONS = [
-  'Sofa / Sofa Set', 'Bed & Mattress', 'Dining Table', 'Wardrobe',
-  'Office Furniture', 'TV Unit', 'Bookshelf / Storage', 'Kids Furniture',
-  'Modular Kitchen', 'Dressing Table', 'Center Table', 'Home Decor', 'Other',
-];
+async function fetchFormInfo() {
+  const response = await fetch('/api/walkin', { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok || !Array.isArray(data.requirements) || !data.requirements.length) {
+    throw new Error(data.error || 'Could not load requirements. Please try again.');
+  }
+  return data;
+}
 
 const BUDGET_RANGES = [
   'Under ₹10,000', '₹10,000 – ₹25,000', '₹25,000 – ₹50,000',
@@ -21,19 +24,43 @@ export default function WalkinFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [requirements, setRequirements] = useState([]);
+  const [loadingOptions, setLoadingOptions] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  const reloadOptions = async () => {
+    setLoadingOptions(true);
+    setLoadError('');
+    try {
+      const data = await fetchFormInfo();
+      setStoreName(data.storeName || 'Furniture Store');
+      setLogo(data.logo);
+      setRequirements(data.requirements);
+      setForm(current => ({ ...current, requirement: data.requirements.includes(current.requirement) ? current.requirement : '' }));
+    } catch (err) {
+      setLoadError(err.message || 'Could not load requirements. Please try again.');
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
 
   useEffect(() => {
-    fetch('/api/walkin')
-      .then(r => r.json())
+    let active = true;
+    fetchFormInfo()
       .then(data => {
+        if (!active) return;
         setStoreName(data.storeName || 'Furniture Store');
         setLogo(data.logo);
+        setRequirements(data.requirements);
       })
-      .catch(() => {});
+      .catch(err => { if (active) setLoadError(err.message || 'Could not load requirements. Please try again.'); })
+      .finally(() => { if (active) setLoadingOptions(false); });
+    return () => { active = false; };
   }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting || loadingOptions || loadError) return;
     setError('');
 
     if (!form.name.trim()) { setError('Please enter your name'); return; }
@@ -57,6 +84,7 @@ export default function WalkinFormPage() {
         setSubmitted(true);
       } else {
         setError(data.error || 'Something went wrong');
+        if (data.requirementsChanged) await reloadOptions();
       }
     } catch {
       setError('Network error. Please try again.');
@@ -138,12 +166,15 @@ export default function WalkinFormPage() {
           <div style={S.field}>
             <label style={S.label}>What are you looking for? <span style={{ color: '#ef4444' }}>*</span></label>
             <select
+              disabled={loadingOptions || !!loadError}
               value={form.requirement} onChange={e => setForm(f => ({ ...f, requirement: e.target.value }))}
               style={{ ...S.input, appearance: 'none', backgroundImage: 'url("data:image/svg+xml,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 fill=%27none%27 viewBox=%270 0 20 20%27%3e%3cpath stroke=%27%236b7280%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27 stroke-width=%271.5%27 d=%27M6 8l4 4 4-4%27/%3e%3c/svg%3e")', backgroundPosition: 'right 12px center', backgroundRepeat: 'no-repeat', backgroundSize: '20px', paddingRight: 40 }}
             >
               <option value="">Select your requirement</option>
-              {REQUIREMENT_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+              {requirements.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
+            {loadingOptions && <p role="status" style={{ fontSize: 13, color: '#6b7280' }}>Loading requirements...</p>}
+            {loadError && <div role="alert" style={S.errorBox}>{loadError}<button type="button" onClick={reloadOptions} style={{ border: 0, background: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>Retry</button></div>}
           </div>
 
           {/* Budget */}
@@ -167,7 +198,7 @@ export default function WalkinFormPage() {
           )}
 
           {/* Submit */}
-          <button type="submit" disabled={submitting} style={{ ...S.submitBtn, opacity: submitting ? 0.65 : 1 }}>
+          <button type="submit" disabled={submitting || loadingOptions || !!loadError} style={{ ...S.submitBtn, opacity: submitting || loadingOptions || loadError ? 0.65 : 1 }}>
             {submitting ? 'Registering...' : 'Register My Visit'}
           </button>
 

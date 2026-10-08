@@ -144,7 +144,7 @@ export default function TopBar() {
         <button
           type="button"
           onClick={() => setSidebarOpen(true)}
-          className="md:hidden p-2 -ml-1 rounded-xl hover:bg-surface-hover transition-colors flex-shrink-0"
+          className="md:hidden touch-target p-2 -ml-1 rounded-xl hover:bg-surface-hover transition-colors flex-shrink-0"
           aria-label="Open sidebar menu"
         >
           <Menu className="w-5 h-5 text-foreground" />
@@ -176,7 +176,7 @@ export default function TopBar() {
         <div className="relative" ref={notificationsRef}>
           <button
             onClick={handleBellClick}
-            className="relative p-2 rounded-lg hover:bg-surface-hover transition-colors"
+            className="max-md:min-h-11 max-md:min-w-11 relative p-2 rounded-lg hover:bg-surface-hover transition-colors"
             aria-label="Open notifications"
           >
             <Bell className="w-[18px] h-[18px] text-muted" />
@@ -188,7 +188,7 @@ export default function TopBar() {
           </button>
 
           {showNotifications && (
-            <div className="absolute right-0 top-full mt-1.5 w-[360px] max-w-[calc(100vw-24px)] bg-surface rounded-2xl border border-border shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
+            <div className="ui-topbar-popover absolute right-0 top-full mt-1.5 w-[360px] max-w-[calc(100vw-24px)] bg-surface rounded-2xl border border-border shadow-xl z-50 overflow-hidden animate-[fade-in_0.15s_ease-out]">
               <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Notifications</p>
@@ -271,7 +271,7 @@ export default function TopBar() {
 
           {/* Dropdown menu */}
           {showUserMenu && (
-            <div className="absolute right-0 top-full mt-1.5 w-56 bg-surface rounded-xl border border-border shadow-lg py-1.5 z-50 animate-[fade-in_0.15s_ease-out]">
+            <div className="ui-topbar-user-menu absolute right-0 top-full mt-1.5 w-56 bg-surface rounded-xl border border-border shadow-lg py-1.5 z-50 animate-[fade-in_0.15s_ease-out]">
               {/* User info */}
               <div className="px-4 py-3 border-b border-border">
                 <p className="text-sm font-semibold text-foreground">{userName}</p>

@@ -1,11 +1,12 @@
+import { isSessionWindowOpen } from '@/lib/whatsapp/session-window'
 import { prisma } from '@/lib/db'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { sendTextMessage } from '@/lib/social/messenger-api'
 
 // ------------------------------------------------------------
 // Sends a follow-up reminder to a Facebook / Instagram contact via the
-// chatbot (Messenger Platform), using the HUMAN_AGENT tag so it can go out
-// after the standard 24h window. Persists the message + updates the
+// chatbot (Messenger Platform), only inside the standard 24h window.
+// Automated reminders must not use the human-agent exception. Updates the
 // conversation so it shows in the social inbox. Never throws.
 // ------------------------------------------------------------
 
@@ -32,13 +33,21 @@ export async function notifyContactBySocial(args: {
 
         if (!cfg) return { sent: false, skipped: true, reason: `${args.platform} not configured` }
 
+        const existingConversation = await prisma.socialConversation.findFirst({
+            where: { user_id: args.userId, contact_id: args.socialContactId, platform: args.platform },
+            select: { id: true },
+        })
+        const lastInbound = existingConversation ? await prisma.socialMessage.findFirst({
+            where: { conversation_id: existingConversation.id, sender_type: 'customer' },
+            orderBy: { created_at: 'desc' }, select: { created_at: true },
+        }) : null
+        if (!isSessionWindowOpen(lastInbound?.created_at ?? null)) return { sent: false, skipped: true, reason: 'Outside 24h window; automated social follow-up needs a new customer reply' }
         const token = decrypt(cfg.page_access_token)
 
         const res = await sendTextMessage({
             recipientId: args.platformId,
             pageAccessToken: token,
             text: args.text,
-            tag: 'HUMAN_AGENT',
         })
 
         // Mirror the message into the social inbox.

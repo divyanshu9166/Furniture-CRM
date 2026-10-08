@@ -391,14 +391,14 @@ export default function ExpensesPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Daily Expense Calculator</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
             Today: {formatCurrency(todayTotal)} · This period: {formatCurrency(totalInRange)} · {filtered.length} entries
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           <button onClick={handleExportCSV}
             className="flex items-center gap-2 px-3 py-2 bg-surface border border-border hover:border-accent/30 text-foreground rounded-xl text-sm font-medium transition-all">
             <Download className="w-4 h-4" /> Export
@@ -411,7 +411,7 @@ export default function ExpensesPage() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="glass-card p-4 flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-red-500/10"><TrendingUp className="w-5 h-5 text-red-600" /></div>
           <div><p className="text-xs text-muted">Today</p><p className="text-lg font-bold text-red-600">{formatCurrency(todayTotal)}</p></div>
@@ -496,7 +496,7 @@ export default function ExpensesPage() {
                   />
                 </label>
                 {expForm.receipt && (
-                  <div className="flex items-center gap-1.5">
+                  <div className="ui-actions flex items-center gap-1.5">
                     <a href={expForm.receipt} target="_blank" rel="noreferrer"
                       className="px-2 py-1 rounded-lg text-[11px] font-medium text-accent hover:text-accent-hover border border-border hover:border-accent/40 flex items-center gap-1">
                       <Eye className="w-3 h-3" /> View
@@ -617,7 +617,7 @@ export default function ExpensesPage() {
         <div className="space-y-4">
           {/* Date range + filters */}
           <div className="glass-card p-4 space-y-3">
-            <div className="flex flex-wrap gap-3 items-end">
+            <div className="ui-filters flex flex-wrap gap-3 items-end">
               <div>
                 <label className="block text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">From</label>
                 <input type="date" value={dateRange.from}
@@ -710,7 +710,7 @@ export default function ExpensesPage() {
 
           {/* Desktop: Expense table */}
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table">
                 <thead>
                   <tr>
@@ -792,7 +792,7 @@ export default function ExpensesPage() {
       {tab === 'analytics' && !analyticsLoading && summary && (
         <div className="space-y-4">
           {/* Top-line KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="ui-stat-grid grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="glass-card p-4 text-center">
               <p className="text-xs text-muted mb-1">Total Spent</p>
               <p className="text-xl font-bold text-red-600">{formatCurrency(summary.grandTotal)}</p>
@@ -846,7 +846,7 @@ export default function ExpensesPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Payment mode breakdown */}
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4">Payment Mode Split</h3>
@@ -1069,7 +1069,7 @@ export default function ExpensesPage() {
                 <p className="text-sm mt-1">Add monthly rent, EMIs, subscriptions etc.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 gap-4">
                 {recurring.map(rec => (
                   <div key={rec.id} className={`glass-card p-4 ${!rec.isActive ? 'opacity-60' : ''}`}>
                     <div className="flex items-start justify-between mb-2">
@@ -1092,7 +1092,7 @@ export default function ExpensesPage() {
                         {rec.isActive ? 'Active' : 'Paused'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="ui-actions flex items-center gap-2">
                       <button onClick={async () => { await toggleRecurringExpense(rec.id); await loadData(dateRange.from, dateRange.to); }}
                         className="flex-1 py-1.5 text-xs font-medium rounded-lg border border-border hover:border-accent/30 text-muted hover:text-foreground transition-all text-center">
                         {rec.isActive ? 'Pause' : 'Resume'}
@@ -1123,7 +1123,7 @@ export default function ExpensesPage() {
                 <Plus className="w-4 h-4" /> Add Category
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {categories.map(cat => (
                 <div key={cat.id} className="glass-card p-4">
                   <div className="flex items-center justify-between mb-2">
@@ -1136,7 +1136,7 @@ export default function ExpensesPage() {
                         <p className="text-[11px] text-muted">{cat._count.expenses} expenses</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="ui-actions flex items-center gap-1">
                       <button onClick={() => { setShowBudgetEdit(cat.id); setBudgetVal(cat.budget); }}
                         className="p-1.5 text-muted hover:text-accent rounded-lg hover:bg-surface transition-colors" title="Edit budget">
                         <Edit3 className="w-3.5 h-3.5" />
@@ -1174,7 +1174,7 @@ export default function ExpensesPage() {
             <p className="text-sm text-muted">
               Move <strong className="text-foreground">{expenseToDraft.description || `Expense #${expenseToDraft.id}`}</strong> to drafts? It will be permanently deleted after 30 days.
             </p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={cancelMoveExpenseToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveExpenseToDraft} disabled={deletingExpense} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">
                 {deletingExpense ? 'Moving...' : 'Move to Draft'}
@@ -1186,7 +1186,7 @@ export default function ExpensesPage() {
 
       <Modal isOpen={showAddExpense} onClose={() => { setShowAddExpense(false); setEditingExpenseId(null); setExpForm({ date: today(), categoryId: '', amount: '', description: '', paymentMode: 'Cash', reference: '', vendor: '', notes: '', receipt: '' }); }} title={editingExpenseId ? "Edit Expense" : "Add Expense"}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Date <span className="text-red-500">*</span></label>
               <input type="date" value={expForm.date} onChange={e => setExpForm(f => ({ ...f, date: e.target.value }))}
@@ -1201,7 +1201,7 @@ export default function ExpensesPage() {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Amount (₹) <span className="text-red-500">*</span></label>
               <input type="number" min="1" placeholder="e.g. 5000" value={expForm.amount}
@@ -1222,7 +1222,7 @@ export default function ExpensesPage() {
               onChange={e => setExpForm(f => ({ ...f, description: e.target.value }))}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Vendor / Paid To</label>
               <input type="text" placeholder="e.g. Rajesh Timber Co." value={expForm.vendor}
@@ -1281,7 +1281,7 @@ export default function ExpensesPage() {
               onChange={e => setExpForm(f => ({ ...f, notes: e.target.value }))}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm resize-none focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button onClick={() => setShowAddExpense(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button onClick={handleSaveExpense} disabled={submitting || !expForm.categoryId || !expForm.amount || !expForm.description || receiptUploading}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40">
@@ -1300,7 +1300,7 @@ export default function ExpensesPage() {
               onChange={e => setCatForm(f => ({ ...f, name: e.target.value }))}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Color</label>
               <input type="color" value={catForm.color} onChange={e => setCatForm(f => ({ ...f, color: e.target.value }))}
@@ -1313,7 +1313,7 @@ export default function ExpensesPage() {
                 className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
             </div>
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button onClick={() => setShowAddCategory(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button onClick={handleAddCategory} disabled={submitting || !catForm.name}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40">
@@ -1326,7 +1326,7 @@ export default function ExpensesPage() {
       {/* ═══════ ADD RECURRING MODAL ═══════ */}
       <Modal isOpen={showAddRecurring} onClose={() => setShowAddRecurring(false)} title="Add Recurring Expense">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Category <span className="text-red-500">*</span></label>
               <select value={recForm.categoryId} onChange={e => setRecForm(f => ({ ...f, categoryId: e.target.value }))}
@@ -1349,7 +1349,7 @@ export default function ExpensesPage() {
               onChange={e => setRecForm(f => ({ ...f, description: e.target.value }))}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="ui-form-grid grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Amount (₹) <span className="text-red-500">*</span></label>
               <input type="number" min="1" placeholder="25000" value={recForm.amount}
@@ -1376,7 +1376,7 @@ export default function ExpensesPage() {
               onChange={e => setRecForm(f => ({ ...f, vendor: e.target.value }))}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button onClick={() => setShowAddRecurring(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button onClick={handleAddRecurring} disabled={submitting || !recForm.categoryId || !recForm.amount || !recForm.description}
               className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-40">
@@ -1395,7 +1395,7 @@ export default function ExpensesPage() {
             <input type="number" min="0" value={budgetVal} onChange={e => setBudgetVal(parseInt(e.target.value) || 0)}
               className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button onClick={() => setShowBudgetEdit(null)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button onClick={handleSaveBudget} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
               Save Budget

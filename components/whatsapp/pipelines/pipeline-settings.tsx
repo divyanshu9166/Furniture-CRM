@@ -223,7 +223,7 @@ export function PipelineSettings({
                 </p>
               </div>
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="ui-actions mt-4 flex justify-end gap-2">
               <Button
                 variant="outline"
                 onClick={() => setShowDeleteConfirm(false)}
@@ -392,7 +392,7 @@ function SortableStageRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 rounded-lg border border-border bg-surface-light p-2"
+      className="ui-actions flex items-center gap-2 rounded-lg border border-border bg-surface-light p-2"
     >
       <button
         type="button"

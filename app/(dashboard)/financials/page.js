@@ -268,7 +268,7 @@ export default function FinancialsPage() {
   const renderOverview = () => (
     <div className="space-y-6">
       {/* Header row with Refresh button */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <p className="text-sm text-muted">Key financial indicators for the current financial year</p>
         <button
           onClick={async () => {
@@ -288,7 +288,7 @@ export default function FinancialsPage() {
           Loading financial data...
         </div>
       )}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: 'Accounts Receivable', value: bsData?.currentAssets?.accountsReceivable, color: 'text-amber-400', action: () => { setTab('aging') } },
           { label: 'Cash & Bank', value: bsData?.currentAssets?.cashAndBank, color: 'text-emerald-400', action: () => { setTab('bs'); fetchBS() } },
@@ -654,7 +654,7 @@ export default function FinancialsPage() {
 
       {execData && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="glass-card p-4"><p className="text-xs text-muted">Current Ratio</p><p className="text-xl font-bold text-blue-400">{execData.liquidity.currentRatio !== null ? execData.liquidity.currentRatio.toFixed(2) : '—'}</p></div>
             <div className="glass-card p-4"><p className="text-xs text-muted">DSO</p><p className="text-xl font-bold text-amber-400">{execData.cycle.dso !== null ? `${execData.cycle.dso.toFixed(1)}d` : '—'}</p></div>
             <div className="glass-card p-4"><p className="text-xs text-muted">DPO</p><p className="text-xl font-bold text-purple-400">{execData.cycle.dpo !== null ? `${execData.cycle.dpo.toFixed(1)}d` : '—'}</p></div>
@@ -767,7 +767,7 @@ export default function FinancialsPage() {
         {data && (
           <>
             {data.risk && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="glass-card p-3">
                   <p className="text-xs text-muted">90+ Days Amount</p>
                   <p className="text-lg font-bold text-red-400">{fmt(data.risk.over90Amount)}</p>
@@ -788,7 +788,7 @@ export default function FinancialsPage() {
             )}
 
             {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-5 gap-3">
               {data.summary?.map(b => (
                 <div key={b.bucket} onClick={() => setExpandedBucket(expandedBucket === b.bucket ? null : b.bucket)}
                   className="glass-card p-3 cursor-pointer hover:bg-surface-hover transition-colors">
@@ -811,7 +811,7 @@ export default function FinancialsPage() {
                   <span className="font-medium text-foreground">{data.summary?.find(b => b.bucket === expandedBucket)?.label} — Detail</span>
                   <button onClick={() => setExpandedBucket(null)} className="text-muted hover:text-foreground"><XCircle className="w-4 h-4" /></button>
                 </div>
-                <div className="overflow-x-auto">
+                <div className="ui-table-scroll overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="border-b border-border bg-surface">
                       {agingTab === 'receivables'
@@ -973,12 +973,12 @@ export default function FinancialsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Financial Statements</h1>
           <p className="text-muted text-sm mt-1">P&L · Balance Sheet · Cash Flow · Trial Balance · Aging · Journals</p>
         </div>
-        <div className="flex gap-2">
+        <div className="ui-actions flex gap-2">
           {tab === 'journals' && (
             <button onClick={() => setShowJournalModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2">
               <Plus className="w-4 h-4" /> New Journal
@@ -993,7 +993,7 @@ export default function FinancialsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
+      <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -1015,7 +1015,7 @@ export default function FinancialsPage() {
       {/* Create Journal Modal */}
       <Modal isOpen={showJournalModal} onClose={() => setShowJournalModal(false)} title="Create Manual Journal Entry" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">Date *</label>
               <input type="date" value={journalForm.date}
@@ -1038,7 +1038,7 @@ export default function FinancialsPage() {
                 className="text-xs text-accent hover:underline">+ Add Line</button>
             </div>
             {journalForm.lines.map((line, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 mb-2 items-center">
+              <div key={i} className="ui-form-grid grid grid-cols-12 gap-2 mb-2 items-center">
                 <select value={line.accountId}
                   onChange={e => { const v = [...journalForm.lines]; v[i] = { ...v[i], accountId: e.target.value }; setJournalForm(f => ({ ...f, lines: v })) }}
                   className="col-span-5 px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground">
@@ -1082,7 +1082,7 @@ export default function FinancialsPage() {
       {/* Add Account Modal */}
       <Modal isOpen={showAccountModal} onClose={() => setShowAccountModal(false)} title="Add Custom Account">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">Account Code *</label>
               <input value={accountForm.code} onChange={e => setAccountForm(p => ({ ...p, code: e.target.value }))}

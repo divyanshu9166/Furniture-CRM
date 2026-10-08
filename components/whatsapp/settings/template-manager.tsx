@@ -262,7 +262,7 @@ export function TemplateManager() {
             Meta&quot; to pull your approved list.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="ui-actions flex items-center gap-2 shrink-0">
           <Button
             variant="outline"
             onClick={handleSyncFromMeta}

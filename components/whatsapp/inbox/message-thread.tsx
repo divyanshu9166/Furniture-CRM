@@ -675,7 +675,7 @@ export function MessageThread({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
+      <div className="ui-inbox-header flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -684,7 +684,7 @@ export function MessageThread({
               type="button"
               onClick={onBack}
               aria-label="Back to conversations"
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-foreground hover:bg-surface-light hover:text-foreground lg:hidden"
+              className="ui-icon-button flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-foreground hover:bg-surface-light hover:text-foreground lg:hidden"
             >
               <ArrowLeft className="h-5 w-5" />
             </button>
@@ -725,12 +725,12 @@ export function MessageThread({
             {!conversation.needs_human ? (
               <>
                 <Bot className="h-3 w-3 sm:mr-1" />
-                <span className="hidden sm:inline">AI Active</span>
+                <span className="inline">AI Active</span>
               </>
             ) : (
               <>
                 <User className="h-3 w-3 sm:mr-1" />
-                <span className="hidden sm:inline">Human Mode</span>
+                <span className="inline">Human Mode</span>
               </>
             )}
           </button>
@@ -769,7 +769,7 @@ export function MessageThread({
               )}
             >
               <UserPlus className="h-3 w-3" />
-              <span className="hidden sm:inline">{assignLabel}</span>
+              <span className="inline">{assignLabel}</span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent

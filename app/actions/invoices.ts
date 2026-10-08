@@ -1,16 +1,21 @@
 'use server'
 
 import { prisma } from '@/lib/db'
-import { requireRole } from '@/lib/auth-helpers'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
+import { inventoryError, inventoryTransaction } from '@/lib/inventory/stock'
+import { addInvoicePayment, creditInvoice, finalizeInvoice, saveInvoice, voidInvoice } from '@/lib/commerce/invoices'
+import { indiaBillingPeriods, indiaDay } from '@/lib/commerce/rules'
+import { normalizePhoneForMetaIndia } from '@/lib/whatsapp/phone-utils'
 import { revalidatePath } from 'next/cache'
 import { createInvoiceSchema, updateInvoiceSchema, recordPaymentSchema, createCreditNoteSchema } from '@/lib/validations/invoice'
-import type { PaymentStatus, InvoiceStatus } from '@prisma/client'
+import type { InvoiceStatus } from '@prisma/client'
 
-const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 
 // ─── GET ALL INVOICES ──────────────────────────────────
 
 export async function getInvoices() {
+  await requireAuth()
   const invoices = await prisma.invoice.findMany({
     include: {
       contact: true,
@@ -55,7 +60,7 @@ export async function getInvoices() {
       paymentMethod: inv.paymentMethod,
       paymentStatus: inv.paymentStatus.charAt(0) + inv.paymentStatus.slice(1).toLowerCase() as 'Paid' | 'Partial' | 'Pending',
       invoiceStatus: inv.invoiceStatus as InvoiceStatus,
-      date: inv.date.toISOString().split('T')[0],
+      date: indiaDay(inv.date),
       time: inv.time,
       dueDate: inv.dueDate?.toISOString().split('T')[0] || null,
       salesperson: inv.salesperson?.name || null,
@@ -67,7 +72,7 @@ export async function getInvoices() {
         amount: p.amount,
         method: p.method,
         reference: p.reference,
-        date: p.date.toISOString().split('T')[0],
+        date: indiaDay(p.date),
         notes: p.notes,
       })),
       creditNotes: inv.creditNotes.map(cn => ({
@@ -75,7 +80,7 @@ export async function getInvoices() {
         displayId: cn.displayId,
         amount: cn.amount,
         reason: cn.reason,
-        date: cn.date.toISOString().split('T')[0],
+        date: indiaDay(cn.date),
       })),
     })),
   }
@@ -84,6 +89,7 @@ export async function getInvoices() {
 // ─── GET SINGLE INVOICE ────────────────────────────────
 
 export async function getInvoice(id: number) {
+  await requireAuth()
   const invoice = await prisma.invoice.findUnique({
     where: { id },
     include: {
@@ -100,484 +106,51 @@ export async function getInvoice(id: number) {
 
 // ─── CREATE INVOICE ────────────────────────────────────
 
+async function billingAction<T>(roles: ('ADMIN' | 'MANAGER' | 'STAFF')[], operation: (actor: string) => Promise<T>) {
+  try {
+    const session = await requireRole(...roles)
+    const data = await operation(session.user.name)
+    for (const path of ['/billing', '/inventory', '/godowns']) revalidatePath(path)
+    return { success: true as const, data }
+  } catch (error) { return { success: false as const, error: inventoryError(error) } }
+}
+
 export async function createInvoice(data: unknown) {
   const parsed = createInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const {
-    customer,
-    phone,
-    address,
-    gstNumber,
-    items,
-    discount,
-    discountType,
-    payments,
-    salespersonId,
-    notes,
-    dueDate,
-    isHeld,
-    transportCost,
-    supplyType,
-    placeOfSupply,
-  } = parsed.data
-
-  const gstNumberValue = typeof gstNumber === 'string'
-    ? gstNumber.trim().toUpperCase()
-    : undefined
-
-  // Find or create contact
-  let contact = await prisma.contact.findFirst({ where: { phone } })
-  if (!contact) {
-    contact = await prisma.contact.create({
-      data: {
-        name: customer,
-        phone,
-        address,
-        ...(gstNumberValue ? { gstNumber: gstNumberValue } : {}),
-      },
-    })
-  } else {
-    const updateData: { name?: string; address?: string; gstNumber?: string | null } = {}
-    if (contact.name !== customer) updateData.name = customer
-    if (address && contact.address !== address) updateData.address = address
-    if (gstNumberValue !== undefined && gstNumberValue !== contact.gstNumber) {
-      updateData.gstNumber = gstNumberValue || null
-    }
-    if (Object.keys(updateData).length > 0) {
-      await prisma.contact.update({
-        where: { id: contact.id },
-        data: updateData,
-      })
-    }
-  }
-
-  // Get GST rate and invoice prefix from store settings (not hardcoded)
-  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
-  const gstRate = settings?.gstRate ?? 18
-  const invoicePrefix = (settings?.invoicePrefix || 'INV-').trim() || 'INV-'
-  const invoicePadding = settings?.invoicePadding ?? 4
-
-  // Calculate totals with per-item GST
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  let discountAmount = 0
-  if (discountType === 'flat') discountAmount = Math.min(discount, subtotal)
-  else if (discountType === 'percent') discountAmount = Math.round(subtotal * discount / 100)
-
-  let remainingDiscount = discountAmount
-  const discountSplits = items.map((item, index) => {
-    if (discountAmount <= 0 || subtotal <= 0) return 0
-    if (index === items.length - 1) return remainingDiscount
-    const share = Math.round((item.price * item.quantity / subtotal) * discountAmount)
-    remainingDiscount -= share
-    return share
-  })
-  const resolvedSupplyType = supplyType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE'
-  const itemRows = items.map((item, index) => {
-    const lineTotal = item.price * item.quantity
-    const discountShare = discountSplits[index] || 0
-    const taxableAmount = Math.max(0, lineTotal - discountShare)
-    const rate = typeof item.gstRate === 'number' ? item.gstRate : gstRate
-    const itemGst = Math.round(taxableAmount * rate / 100)
-    const igst = resolvedSupplyType === 'INTERSTATE' ? itemGst : 0
-    const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2)
-    const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst
-    return {
-      ...item,
-      taxableAmount,
-      gstRate: rate,
-      igst,
-      cgst,
-      sgst,
-      cess: 0,
-      gstAmount: itemGst,
-    }
-  })
-
-  const totalTaxable = itemRows.reduce((sum, item) => sum + item.taxableAmount, 0)
-  const totalGst = itemRows.reduce((sum, item) => sum + item.gstAmount, 0)
-  const igst = itemRows.reduce((sum, item) => sum + item.igst, 0)
-  const cgst = itemRows.reduce((sum, item) => sum + item.cgst, 0)
-  const sgst = itemRows.reduce((sum, item) => sum + item.sgst, 0)
-  const total = totalTaxable + totalGst + (transportCost || 0)
-
-  // Calculate total payment
-  const totalPayment = payments.reduce((sum, p) => sum + p.amount, 0)
-  const amountPaid = Math.min(totalPayment, total) // can't overpay
-  const balanceDue = total - amountPaid
-
-  // Determine payment status from actual payments
-  let paymentStatus: PaymentStatus = 'PENDING'
-  if (amountPaid >= total) paymentStatus = 'PAID'
-  else if (amountPaid > 0) paymentStatus = 'PARTIAL'
-
-  // Generate display ID using MAX + 1 (avoids race condition with count())
-  const lastInvoice = await prisma.invoice.findFirst({
-    where: { displayId: { startsWith: invoicePrefix } },
-    orderBy: { id: 'desc' },
-    select: { displayId: true },
-  })
-  let nextNum = 1
-  if (lastInvoice?.displayId) {
-    const match = lastInvoice.displayId.match(new RegExp(`^${escapeRegExp(invoicePrefix)}(\\d+)$`))
-    if (match) nextNum = parseInt(match[1]) + 1
-  }
-  const displayId = `${invoicePrefix}${String(nextNum).padStart(invoicePadding, '0')}`
-
-  const now = new Date()
-
-  const invoice = await prisma.invoice.create({
-    data: {
-      displayId,
-      contactId: contact.id,
-      subtotal,
-      discount: discountAmount,
-      discountType,
-      gst: totalGst,
-      cgst,
-      sgst,
-      igst,
-      transportCost: transportCost || 0,
-      total,
-      amountPaid,
-      balanceDue,
-      paymentMethod: payments[0].method, // primary method
-      paymentStatus,
-      invoiceStatus: 'ACTIVE',
-      supplyType: resolvedSupplyType,
-      placeOfSupply: placeOfSupply?.trim() || null,
-      date: now,
-      time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
-      dueDate: dueDate ? new Date(dueDate) : null,
-      salespersonId,
-      notes,
-      heldAt: isHeld ? now : null,
-      items: {
-        create: itemRows.map(item => ({
-          productId: item.productId,
-          name: item.name,
-          sku: item.sku,
-          quantity: item.quantity,
-          price: item.price,
-          hsnCode: item.hsnCode,
-          gstRate: item.gstRate,
-          cgst: item.cgst,
-          sgst: item.sgst,
-          igst: item.igst,
-          cess: item.cess,
-          taxableAmount: item.taxableAmount,
-        })),
-      },
-      payments: {
-        create: payments.map(p => ({
-          amount: p.amount,
-          method: p.method,
-          reference: p.reference,
-          notes: p.notes,
-          date: now,
-        })),
-      },
-    },
-    include: { items: true, payments: true },
-  })
-
-  revalidatePath('/billing')
-  return { success: true, data: invoice }
+  return billingAction(['ADMIN', 'MANAGER', 'STAFF'], actor => inventoryTransaction(prisma, tx => saveInvoice(tx, parsed.data, actor)))
 }
-
-// ─── UPDATE INVOICE (ADMIN ONLY) ──────────────────────
 
 export async function updateInvoice(invoiceId: number, data: unknown) {
-  try {
-    await requireRole('ADMIN')
-  } catch {
-    return { success: false, error: 'Admin access required to edit invoices' }
-  }
-
   const parsed = updateInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const {
-    customer,
-    phone,
-    address,
-    gstNumber,
-    items,
-    discount,
-    discountType,
-    payments,
-    salespersonId,
-    notes,
-    dueDate,
-    transportCost,
-    supplyType,
-    placeOfSupply,
-  } = parsed.data
-
-  const invoice = await prisma.invoice.findUnique({
-    where: { id: invoiceId },
-    include: { payments: true },
-  })
-  if (!invoice) return { success: false, error: 'Invoice not found' }
-  if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Only active invoices can be edited' }
-
-  const gstNumberValue = typeof gstNumber === 'string'
-    ? gstNumber.trim().toUpperCase()
-    : undefined
-
-  let contact = await prisma.contact.findFirst({ where: { phone } })
-  if (!contact) {
-    contact = await prisma.contact.create({
-      data: {
-        name: customer,
-        phone,
-        address,
-        ...(gstNumberValue ? { gstNumber: gstNumberValue } : {}),
-      },
-    })
-  } else {
-    const updateData: { name?: string; address?: string; gstNumber?: string | null } = {}
-    if (contact.name !== customer) updateData.name = customer
-    if (address && contact.address !== address) updateData.address = address
-    if (gstNumberValue !== undefined && gstNumberValue !== contact.gstNumber) {
-      updateData.gstNumber = gstNumberValue || null
-    }
-    if (Object.keys(updateData).length > 0) {
-      await prisma.contact.update({
-        where: { id: contact.id },
-        data: updateData,
-      })
-    }
-  }
-
-  const settings = await prisma.storeSettings.findFirst({ where: { id: 1 } })
-  const gstRate = settings?.gstRate ?? 18
-
-  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  let discountAmount = 0
-  if (discountType === 'flat') discountAmount = Math.min(discount, subtotal)
-  else if (discountType === 'percent') discountAmount = Math.round(subtotal * discount / 100)
-
-  let remainingDiscount = discountAmount
-  const discountSplits = items.map((item, index) => {
-    if (discountAmount <= 0 || subtotal <= 0) return 0
-    if (index === items.length - 1) return remainingDiscount
-    const share = Math.round((item.price * item.quantity / subtotal) * discountAmount)
-    remainingDiscount -= share
-    return share
-  })
-
-  const resolvedSupplyType = supplyType === 'INTERSTATE' ? 'INTERSTATE' : 'INTRASTATE'
-  const itemRows = items.map((item, index) => {
-    const lineTotal = item.price * item.quantity
-    const discountShare = discountSplits[index] || 0
-    const taxableAmount = Math.max(0, lineTotal - discountShare)
-    const rate = typeof item.gstRate === 'number' ? item.gstRate : gstRate
-    const itemGst = Math.round(taxableAmount * rate / 100)
-    const igst = resolvedSupplyType === 'INTERSTATE' ? itemGst : 0
-    const cgst = resolvedSupplyType === 'INTERSTATE' ? 0 : Math.round(itemGst / 2)
-    const sgst = resolvedSupplyType === 'INTERSTATE' ? 0 : itemGst - cgst
-    return {
-      ...item,
-      taxableAmount,
-      gstRate: rate,
-      igst,
-      cgst,
-      sgst,
-      cess: 0,
-      gstAmount: itemGst,
-    }
-  })
-
-  const totalTaxable = itemRows.reduce((sum, item) => sum + item.taxableAmount, 0)
-  const totalGst = itemRows.reduce((sum, item) => sum + item.gstAmount, 0)
-  const igst = itemRows.reduce((sum, item) => sum + item.igst, 0)
-  const cgst = itemRows.reduce((sum, item) => sum + item.cgst, 0)
-  const sgst = itemRows.reduce((sum, item) => sum + item.sgst, 0)
-  const total = totalTaxable + totalGst + (transportCost || 0)
-
-  const paidSoFar = invoice.payments.reduce((sum, p) => sum + p.amount, 0)
-  const amountPaid = Math.min(paidSoFar, total)
-  const balanceDue = total - amountPaid
-
-  let paymentStatus: PaymentStatus = 'PENDING'
-  if (amountPaid >= total) paymentStatus = 'PAID'
-  else if (amountPaid > 0) paymentStatus = 'PARTIAL'
-
-  const paymentMethod = invoice.payments.length > 0
-    ? invoice.paymentMethod
-    : (payments?.[0]?.method || invoice.paymentMethod || 'Cash')
-
-  const updated = await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: {
-      contactId: contact.id,
-      subtotal,
-      discount: discountAmount,
-      discountType,
-      gst: totalGst,
-      cgst,
-      sgst,
-      igst,
-      transportCost: transportCost || 0,
-      total,
-      amountPaid,
-      balanceDue,
-      paymentMethod,
-      paymentStatus,
-      supplyType: resolvedSupplyType,
-      placeOfSupply: placeOfSupply?.trim() || null,
-      dueDate: dueDate ? new Date(dueDate) : null,
-      salespersonId: salespersonId ?? null,
-      notes: notes || null,
-      items: {
-        deleteMany: {},
-        create: itemRows.map(item => ({
-          productId: item.productId,
-          name: item.name,
-          sku: item.sku,
-          quantity: item.quantity,
-          price: item.price,
-          hsnCode: item.hsnCode,
-          gstRate: item.gstRate,
-          cgst: item.cgst,
-          sgst: item.sgst,
-          igst: item.igst,
-          cess: item.cess,
-          taxableAmount: item.taxableAmount,
-        })),
-      },
-    },
-    include: { items: true },
-  })
-
-  revalidatePath('/billing')
-  return { success: true, data: updated }
+  return billingAction(['ADMIN'], actor => inventoryTransaction(prisma, tx => saveInvoice(tx, parsed.data, actor, invoiceId)))
 }
-
-// ─── RECORD ADDITIONAL PAYMENT ─────────────────────────
 
 export async function recordPayment(data: unknown) {
   const parsed = recordPaymentSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const { invoiceId, amount, method, reference, notes } = parsed.data
-
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
-  if (!invoice) return { success: false, error: 'Invoice not found' }
-  if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Cannot add payment to cancelled/refunded invoice' }
-
-  const maxPayable = invoice.balanceDue
-  if (maxPayable <= 0) return { success: false, error: 'Invoice is already fully paid' }
-
-  const paymentAmount = Math.min(amount, maxPayable)
-  const newAmountPaid = invoice.amountPaid + paymentAmount
-  const newBalanceDue = invoice.total - newAmountPaid
-
-  let paymentStatus: PaymentStatus = 'PARTIAL'
-  if (newBalanceDue <= 0) paymentStatus = 'PAID'
-
-  await prisma.$transaction([
-    prisma.payment.create({
-      data: {
-        invoiceId,
-        amount: paymentAmount,
-        method,
-        reference,
-        notes,
-      },
-    }),
-    prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        amountPaid: newAmountPaid,
-        balanceDue: newBalanceDue,
-        paymentStatus,
-      },
-    }),
-  ])
-
-  revalidatePath('/billing')
-  return { success: true }
+  return billingAction(['ADMIN', 'MANAGER', 'STAFF'], () => inventoryTransaction(prisma, tx => addInvoicePayment(tx, parsed.data)))
 }
-
-// ─── CANCEL INVOICE ────────────────────────────────────
 
 export async function cancelInvoice(invoiceId: number) {
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
-  if (!invoice) return { success: false, error: 'Invoice not found' }
-  if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Invoice is already cancelled or refunded' }
-
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { invoiceStatus: 'CANCELLED' },
-  })
-
-  revalidatePath('/billing')
-  return { success: true }
+  return billingAction(['ADMIN', 'MANAGER'], actor => inventoryTransaction(prisma, tx => voidInvoice(tx, invoiceId, actor)))
 }
-
-// ─── CREATE CREDIT NOTE ────────────────────────────────
 
 export async function createCreditNote(data: unknown) {
   const parsed = createCreditNoteSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const { invoiceId, amount, reason } = parsed.data
-
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
-  if (!invoice) return { success: false, error: 'Invoice not found' }
-  if (invoice.invoiceStatus !== 'ACTIVE') return { success: false, error: 'Cannot create credit note for cancelled invoice' }
-
-  // Generate credit note display ID
-  const lastCN = await prisma.creditNote.findFirst({
-    orderBy: { id: 'desc' },
-    select: { displayId: true },
-  })
-  let nextNum = 1
-  if (lastCN?.displayId) {
-    const match = lastCN.displayId.match(/CN-(\d+)/)
-    if (match) nextNum = parseInt(match[1]) + 1
-  }
-  const displayId = `CN-${String(nextNum).padStart(4, '0')}`
-
-  await prisma.creditNote.create({
-    data: { displayId, invoiceId, amount, reason },
-  })
-
-  // If credit note covers the full invoice, mark as refunded
-  const allCredits = await prisma.creditNote.findMany({ where: { invoiceId } })
-  const totalCredited = allCredits.reduce((sum, cn) => sum + cn.amount, 0)
-  if (totalCredited >= invoice.total) {
-    await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: { invoiceStatus: 'REFUNDED' },
-    })
-  }
-
-  revalidatePath('/billing')
-  return { success: true }
+  return billingAction(['ADMIN', 'MANAGER'], () => inventoryTransaction(prisma, tx => creditInvoice(tx, parsed.data)))
 }
 
-// ─── FINALIZE HELD BILL ────────────────────────────────
-
 export async function finalizeHeldInvoice(invoiceId: number) {
-  const invoice = await prisma.invoice.findUnique({ where: { id: invoiceId } })
-  if (!invoice) return { success: false, error: 'Invoice not found' }
-  if (!invoice.heldAt) return { success: false, error: 'Invoice is not held' }
-
-  await prisma.invoice.update({
-    where: { id: invoiceId },
-    data: { heldAt: null },
-  })
-
-  revalidatePath('/billing')
-  return { success: true }
+  return billingAction(['ADMIN', 'MANAGER', 'STAFF'], actor => inventoryTransaction(prisma, tx => finalizeInvoice(tx, invoiceId, actor)))
 }
 
 // ─── SEARCH CONTACTS (for auto-complete) ───────────────
 
 export async function searchContacts(query: string) {
+  await requireAuth()
   if (!query || query.length < 2) return { success: true, data: [] }
 
   const contacts = await prisma.contact.findMany({
@@ -607,6 +180,7 @@ export async function searchContacts(query: string) {
 // ─── GET CUSTOMER PROFILE (returning customer detection) ──
 
 export async function getCustomerProfile(phone: string, contactId?: number) {
+  await requireAuth()
   const selectFields = {
     id: true,
     name: true,
@@ -615,11 +189,12 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
     address: true,
     gstNumber: true,
     invoices: {
-      where: { invoiceStatus: 'ACTIVE' as const },
-      select: { total: true, date: true },
+      where: { invoiceStatus: 'ACTIVE' as const, heldAt: null },
+      select: { total: true, date: true, creditNotes: { select: { amount: true } } },
       orderBy: { date: 'desc' as const },
     },
     orders: {
+      where: { status: { not: 'CANCELLED' as const } },
       select: { amount: true, date: true },
       orderBy: { date: 'desc' as const },
     },
@@ -636,17 +211,17 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
     contact = await prisma.contact.findUnique({ where: { id: contactId }, select: selectFields })
   } else {
     // Fallback: lookup by phone (last 10 digits) — used when phone is typed directly
-    const phoneSuffix = phone?.replace(/\D/g, '').slice(-10) || ''
-    if (phoneSuffix.length < 6) return { success: true, data: null }
+    const canonical = normalizePhoneForMetaIndia(phone || '')
+    if (canonical.length < 10 || canonical.length > 15) return { success: true, data: null }
     contact = await prisma.contact.findFirst({
-      where: { phone: { contains: phoneSuffix } },
+      where: { phone: { in: [...new Set([phone, canonical, `+${canonical}`, canonical.startsWith('91') && canonical.length === 12 ? canonical.slice(2) : canonical])] } },
       select: selectFields,
     })
   }
 
   if (!contact) return { success: true, data: null }
 
-  const totalInvoiceValue = contact.invoices.reduce((s, i) => s + i.total, 0)
+  const totalInvoiceValue = contact.invoices.reduce((s, i) => s + Math.max(0, i.total - i.creditNotes.reduce((n, credit) => n + credit.amount, 0)), 0)
   const totalOrderValue   = contact.orders.reduce((s, o) => s + o.amount, 0)
   const totalCustomValue  = contact.customOrders.reduce((s, c) => s + (c.quotedPrice || 0), 0)
 
@@ -683,54 +258,29 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
 // ─── GET INVOICE STATS ─────────────────────────────────
 
 export async function getInvoiceStats() {
-  const now = new Date()
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
-
-  const [allInvoices, todayInvoices, monthInvoices, lastMonthInvoices] = await Promise.all([
-    prisma.invoice.findMany({
-      where: { invoiceStatus: 'ACTIVE' },
-      select: { total: true, amountPaid: true, balanceDue: true, paymentStatus: true },
-    }),
-    prisma.invoice.findMany({
-      where: { invoiceStatus: 'ACTIVE', date: { gte: todayStart } },
-      select: { total: true, amountPaid: true },
-    }),
-    prisma.invoice.findMany({
-      where: { invoiceStatus: 'ACTIVE', date: { gte: monthStart } },
-      select: { total: true, amountPaid: true },
-    }),
-    prisma.invoice.findMany({
-      where: { invoiceStatus: 'ACTIVE', date: { gte: lastMonthStart, lte: lastMonthEnd } },
-      select: { total: true },
-    }),
-  ])
-
-  const totalBilled = allInvoices.reduce((s, i) => s + i.total, 0)
-  const totalCollected = allInvoices.reduce((s, i) => s + i.amountPaid, 0)
-  const totalPending = allInvoices.reduce((s, i) => s + i.balanceDue, 0)
-  const overdueCount = allInvoices.filter(i => i.paymentStatus !== 'PAID' && i.balanceDue > 0).length
-
-  const todayRevenue = todayInvoices.reduce((s, i) => s + i.amountPaid, 0)
-  const todayCount = todayInvoices.length
-
-  const monthRevenue = monthInvoices.reduce((s, i) => s + i.total, 0)
-  const lastMonthRevenue = lastMonthInvoices.reduce((s, i) => s + i.total, 0)
-  const monthGrowth = lastMonthRevenue > 0 ? Math.round(((monthRevenue - lastMonthRevenue) / lastMonthRevenue) * 100) : 0
-
+  await requireAuth()
+  const { day: today, todayStart, monthStart, lastMonthStart } = indiaBillingPeriods()
+  const invoices = await prisma.invoice.findMany({
+    where: { invoiceStatus: { not: 'CANCELLED' }, heldAt: null },
+    include: { creditNotes: true, payments: true },
+  })
+  const net = (invoice: typeof invoices[number]) => Math.max(0, invoice.total - invoice.creditNotes.reduce((s, c) => s + c.amount, 0))
+  const monthRevenue = invoices.filter(i => i.date >= monthStart).reduce((s, i) => s + net(i), 0)
+  const lastMonthRevenue = invoices.filter(i => i.date >= lastMonthStart && i.date < monthStart).reduce((s, i) => s + net(i), 0)
   return {
     success: true,
     data: {
-      totalBilled,
-      totalCollected,
-      totalPending,
-      overdueCount,
-      todayRevenue,
-      todayCount,
+      totalBilled: invoices.reduce((s, i) => s + net(i), 0),
+      totalCollected: invoices.reduce((s, i) => s + i.payments.reduce((n, p) => n + p.amount, 0), 0),
+      totalPending: invoices.reduce((s, i) => s + i.balanceDue, 0),
+      overdueCount: invoices.filter(i => i.balanceDue > 0 && i.dueDate && i.dueDate.toISOString().slice(0, 10) < today).length,
+      todayRevenue: invoices.reduce((s, i) => s + i.payments.filter(p => p.date >= todayStart).reduce((n, p) => n + p.amount, 0), 0),
+      todayCount: invoices.filter(i => i.date >= todayStart).length,
       monthRevenue,
-      monthGrowth,
+      monthGrowth: lastMonthRevenue > 0 ? Math.round((monthRevenue - lastMonthRevenue) / lastMonthRevenue * 100) : 0,
+      // Credits are liability adjustments, not bank refunds. Surface excess
+      // collections so operators can reconcile refunds, never delete payments.
+      refundDue: invoices.reduce((s, i) => s + Math.max(0, i.amountPaid - net(i)), 0),
     },
   }
 }

@@ -33,7 +33,8 @@ function shouldRefreshPrismaClient(client: PrismaClient | undefined) {
     typeof (client as any).productionOrder === 'undefined' ||
     typeof (client as any).customOrder === 'undefined' ||
     typeof (client as any).followUpEntry === 'undefined' ||
-    typeof (client as any).followUpReminderConfig === 'undefined'
+    typeof (client as any).followUpReminderConfig === 'undefined' ||
+    typeof client.walkinRequirementSettings === 'undefined'
 }
 
 let prismaClient: PrismaClient = globalForPrisma.prisma ?? createPrismaClient()

@@ -220,12 +220,12 @@ export default function LeadsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out] min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Leads</h1>
           <p className="text-xs md:text-sm text-muted mt-1">{leads.length} total · {leads.filter(l => l.status === 'New').length} new · {leads.filter(l => l.status === 'Won').length} won</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="ui-actions flex items-center gap-3">
           <div className="flex bg-surface rounded-xl border border-border p-0.5">
             <button onClick={() => setView('pipeline')} className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${view === 'pipeline' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>Pipeline</button>
             <button onClick={() => setView('list')} className={`px-4 py-1.5 rounded-lg text-xs font-medium transition-all ${view === 'list' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>List</button>
@@ -332,7 +332,7 @@ export default function LeadsPage() {
 
           {/* Desktop: table */}
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table">
                 <thead><tr><th>Name</th><th>Interest</th><th>Source</th><th>Budget</th><th>Status</th><th>Date</th></tr></thead>
                 <tbody>
@@ -399,7 +399,7 @@ export default function LeadsPage() {
               <input value={convertForm.reason} onChange={e => setConvertForm(f => ({ ...f, reason: e.target.value }))}
                 placeholder="e.g. Buying after 2 months / after Diwali" className="w-full" />
             </div>
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="ui-actions flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => setLeadToConvert(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button type="submit" disabled={converting} className="px-5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-semibold disabled:opacity-50">{converting ? 'Converting...' : 'Create Follow-up'}</button>
             </div>
@@ -411,7 +411,7 @@ export default function LeadsPage() {
         {leadToDraft && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Move <strong className="text-foreground">{leadToDraft.name || leadToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={cancelDelete} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmDelete} disabled={deletingLead} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingLead ? 'Moving...' : 'Move to Draft'}</button>
             </div>
@@ -433,7 +433,7 @@ export default function LeadsPage() {
                   <span className="flex items-center gap-1 text-sm text-muted"><Phone className="w-3.5 h-3.5" /> {selectedLead.phone}</span>
                   {selectedLead.email && <span className="flex items-center gap-1 text-sm text-muted"><Mail className="w-3.5 h-3.5" /> {selectedLead.email}</span>}
                 </div>
-                <div className="flex flex-wrap gap-2 mt-3">
+                <div className="ui-actions flex flex-wrap gap-2 mt-3">
                   <a
                     href={`tel:${selectedLead.phone}`}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20"
@@ -518,7 +518,7 @@ export default function LeadsPage() {
 
               {showFollowUpForm && (
                 <div className="mb-4 p-4 rounded-xl bg-surface border border-border space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="ui-form-grid grid grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-muted mb-1 block">Day #</label>
                       <input type="number" min="1" value={followUpForm.day} onChange={e => setFollowUpForm(f => ({ ...f, day: Number(e.target.value) }))}
@@ -535,7 +535,7 @@ export default function LeadsPage() {
                     <textarea rows={2} value={followUpForm.message} onChange={e => setFollowUpForm(f => ({ ...f, message: e.target.value }))}
                       placeholder="Follow-up message..." className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-border rounded-lg text-sm resize-none focus:outline-none focus:border-accent/50" />
                   </div>
-                  <div className="flex gap-2 justify-end">
+                  <div className="ui-actions flex gap-2 justify-end">
                     <button onClick={() => setShowFollowUpForm(false)} className="px-3 py-1.5 text-xs text-muted hover:text-foreground rounded-lg hover:bg-surface-hover transition-colors">Cancel</button>
                     <button onClick={handleAddFollowUp} disabled={!followUpForm.message || !followUpForm.date}
                       className="px-4 py-1.5 bg-accent text-white rounded-lg text-xs font-medium hover:bg-accent-hover transition-colors disabled:opacity-50">Save</button>
@@ -613,7 +613,7 @@ export default function LeadsPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
             <textarea rows={3} name="notes" placeholder="Additional notes..." className="w-full" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button type="submit" className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">Save Lead</button>
           </div>

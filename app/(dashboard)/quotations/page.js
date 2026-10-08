@@ -1234,20 +1234,20 @@ export default function QuotationsPage() {
 
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Quotation Generator</h1>
           <p className="text-sm text-muted mt-1">Generate structured quotations with inventory-linked items and reference images</p>
         </div>
         <button
           onClick={openNewQuotationModal}
-          className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
+          className="ui-actions flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
         >
           <Plus className="w-4 h-4" /> New Quotation
         </button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="ui-stat-grid grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="glass-card p-4 flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-accent-light"><FileText className="w-5 h-5 text-accent" /></div>
           <div>
@@ -1279,7 +1279,7 @@ export default function QuotationsPage() {
       </div>
 
       <div className="glass-card p-4 space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center gap-3">
+        <div className="ui-filters flex flex-col md:flex-row md:items-center gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
             <input
@@ -1338,7 +1338,7 @@ export default function QuotationsPage() {
                 </div>
                 <span className="text-xs text-muted flex-shrink-0">{quotation.date}</span>
               </div>
-              <div className="flex items-center gap-1 mt-2.5 pt-2.5 border-t border-border">
+              <div className="ui-actions flex items-center gap-1 mt-2.5 pt-2.5 border-t border-border">
                 <button
                   onClick={e => { e.stopPropagation(); handleShareQuotationWhatsApp(quotation) }}
                   className="tap-press-sm p-2 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors"
@@ -1387,7 +1387,7 @@ export default function QuotationsPage() {
         </div>
 
         {/* Desktop: table */}
-        <div className="hidden md:block overflow-x-auto">
+        <div className="ui-table-scroll hidden md:block overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr>
@@ -1425,7 +1425,7 @@ export default function QuotationsPage() {
                     </select>
                   </td>
                   <td>
-                    <div className="flex items-center gap-1">
+                    <div className="ui-actions flex items-center gap-1">
                       <button
                         onClick={() => handleShareQuotationWhatsApp(quotation)}
                         className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors"
@@ -1491,7 +1491,7 @@ export default function QuotationsPage() {
         {quotationToDraft && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Move <strong className="text-foreground">{quotationToDraft.customer || quotationToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={() => setQuotationToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveQuotationToDraft} disabled={deletingQuotation} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingQuotation ? 'Moving...' : 'Move to Draft'}</button>
             </div>
@@ -1718,7 +1718,7 @@ export default function QuotationsPage() {
 
                   return (
                     <div key={index} className="bg-surface border border-border rounded-xl p-3 space-y-2">
-                      <div className="grid grid-cols-12 gap-2">
+                      <div className="ui-form-grid grid grid-cols-12 gap-2">
                         <div className="col-span-12 md:col-span-6">
                           <label className="block text-[11px] text-muted mb-1">Inventory Product (optional)</label>
                           <select
@@ -1858,7 +1858,7 @@ export default function QuotationsPage() {
                   <div className="xl:col-span-2 min-w-0 rounded-xl border border-border/70 bg-background/40 p-3 space-y-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <label className="block text-xs font-medium text-muted">Installation %</label>
-                      <div className="flex flex-wrap items-center gap-1.5">
+                      <div className="ui-actions flex flex-wrap items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => setForm(prev => ({ ...prev, installationPercent: 5 }))}
@@ -1988,7 +1988,7 @@ export default function QuotationsPage() {
             <div className="text-sm text-muted">
               Final Amount: <span className="font-semibold text-foreground">{formatCurrency(previewQuotation.grandTotal)}</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="ui-actions flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowGenerator(false)}
@@ -2016,7 +2016,7 @@ export default function QuotationsPage() {
                 <p className="text-sm text-muted">Quotation</p>
                 <p className="font-mono text-accent font-semibold">{selectedQuotation.id}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <span className={`px-2 py-1 rounded-full text-xs border ${statusColors[selectedQuotation.statusKey]}`}>
                   {selectedQuotation.status}
                 </span>

@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db'
 import { parseFollowUpIntent } from '@/lib/follow-up-intent'
-import { normalizePhone, phonesMatch } from '@/lib/whatsapp/phone-utils'
+import { inventoryTransaction } from '@/lib/inventory/stock'
+import { billingContact } from '@/lib/commerce/documents'
+import { lockFollowUpContact } from '@/lib/commerce/follow-ups'
 
 // ------------------------------------------------------------
 // Chatbot-side auto-conversion: when an inbound WhatsApp message says
@@ -31,36 +33,21 @@ export async function maybeCreateFollowUpFromMessage(args: {
         const intent = parseFollowUpIntent(args.messageText)
         if (!intent.matched || !intent.date) return { created: false, reason: 'no intent' }
 
-        // Resolve the CRM contact using the SAME matching the inquiry-sync uses
-        // (normalized phone + last-10-digit fuzzy match) so we reuse that contact
-        // instead of creating a duplicate.
-        const normalized = normalizePhone(args.phone) || args.phone
-        const last10 = normalized.slice(-10)
-
-        const candidates = await prisma.contact.findMany({
-            where: last10
-                ? { OR: [{ phone: normalized }, { phone: { contains: last10 } }] }
-                : { phone: normalized },
-            take: 10,
-        })
-        let contact = candidates.find((c) => phonesMatch(c.phone, normalized)) || null
-        if (!contact) {
-            contact = await prisma.contact.create({
-                data: { name: args.name || normalized, phone: normalized, source: 'WhatsApp' },
-            })
-        }
+        return await inventoryTransaction(prisma, async tx => {
+        const contact = await billingContact(tx, { customer: args.name || args.phone, phone: args.phone }, false)
+        await lockFollowUpContact(tx, contact.id)
 
         // Never create a second open follow-up for the same contact.
-        const existing = await prisma.followUpEntry.findFirst({
+        const existing = await tx.followUpEntry.findFirst({
             where: { contactId: contact.id, status: { in: OPEN_STATUSES as unknown as any[] } },
         })
         if (existing) return { created: false, reason: 'already open' }
 
-        const entry = await prisma.followUpEntry.create({
+        const entry = await tx.followUpEntry.create({
             data: {
                 contactId: contact.id,
                 reason: intent.reason || 'Customer asked to be contacted later',
-                followUpDate: intent.date,
+                followUpDate: intent.date!,
                 priority: 'Medium',
                 source: 'WhatsApp',
                 status: 'PENDING',
@@ -68,6 +55,7 @@ export async function maybeCreateFollowUpFromMessage(args: {
         })
 
         return { created: true, id: entry.id }
+        })
     } catch (err) {
         console.error('[follow-up-auto] failed:', err)
         return { created: false, error: err instanceof Error ? err.message : String(err) }

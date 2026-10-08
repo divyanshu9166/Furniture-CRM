@@ -255,7 +255,7 @@ export function Step3Personalize({ template, variables, onUpdate, onNext, onBack
         </div>
       )}
 
-      <div className="flex items-center justify-between border-t border-border pt-4">
+      <div className="ui-actions flex items-center justify-between border-t border-border pt-4">
         <Button variant="outline" onClick={onBack} className="border-border text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Back

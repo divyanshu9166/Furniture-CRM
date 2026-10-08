@@ -122,11 +122,11 @@ export default function Sidebar() {
       {/* Sidebar */}
       <aside
         className={`
-          fixed top-0 left-0 h-screen bg-sidebar flex flex-col z-[60] transition-all duration-300
+          fixed top-0 left-0 h-dvh bg-sidebar flex flex-col z-[60] transition-all duration-300
           ${/* Top safe-area clearance so the header clears the mobile status bar/notch */ ''}
           max-md:pt-[max(env(safe-area-inset-top),12px)]
           ${/* Desktop */ ''}
-          max-md:w-[280px]
+          max-md:w-[min(280px,calc(100vw-32px))]
           ${sidebarOpen ? 'max-md:translate-x-0' : 'max-md:translate-x-[-100%]'}
           ${collapsed ? 'md:w-[68px]' : 'md:w-[260px]'}
         `}
@@ -147,7 +147,8 @@ export default function Sidebar() {
           {/* Mobile close button */}
           <button
             onClick={() => setSidebarOpen(false)}
-            className="md:hidden p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
+            className="md:hidden touch-target p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5 transition-colors"
+            aria-label="Close sidebar menu"
           >
             <X className="w-5 h-5" />
           </button>
@@ -164,7 +165,7 @@ export default function Sidebar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive
+                className={`flex items-center gap-3 px-3 py-2 max-md:min-h-11 rounded-lg text-[13px] font-medium transition-all duration-150 ${isActive
                   ? 'bg-white/15 text-white'
                   : 'text-white/50 hover:text-white/80 hover:bg-white/5'
                   }`}

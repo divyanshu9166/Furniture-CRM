@@ -23,7 +23,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-end md:items-center justify-center" role="dialog" aria-modal="true">
+    <div className="ui-modal fixed inset-0 z-[100] flex items-end md:items-center justify-center" role="dialog" aria-modal="true">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s_ease]"
@@ -32,7 +32,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
 
       {/* Sheet on mobile, centered modal on desktop */}
       <div className={`
-        relative w-full ${sizeClasses[size]}
+        ui-modal-panel relative w-full ${sizeClasses[size]}
         bg-surface border border-border shadow-2xl
         flex flex-col
         max-h-[92dvh] md:max-h-[85vh]
@@ -46,8 +46,8 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 md:px-6 py-3 md:py-4 border-b border-border flex-shrink-0">
-          <h2 className="text-base md:text-lg font-semibold text-foreground">{title}</h2>
+        <div className="flex items-center justify-between gap-2 px-5 md:px-6 py-3 md:py-4 border-b border-border flex-shrink-0">
+          <h2 className="ui-modal-title text-base md:text-lg font-semibold text-foreground">{title}</h2>
           <button
             onClick={onClose}
             className="p-2 rounded-xl hover:bg-surface-hover text-muted hover:text-foreground transition-colors touch-target flex items-center justify-center"
@@ -58,7 +58,7 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' })
         </div>
 
         {/* Content */}
-        <div className="px-5 md:px-6 pt-4 md:pt-5 pb-[calc(env(safe-area-inset-bottom)+2rem+5px)] md:pb-6 overflow-y-auto flex-1">
+        <div className="ui-modal-body px-5 md:px-6 pt-4 md:pt-5 pb-[calc(env(safe-area-inset-bottom)+2rem+5px)] md:pb-6 overflow-y-auto flex-1">
           {children}
         </div>
       </div>

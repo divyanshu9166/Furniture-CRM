@@ -299,14 +299,14 @@ export default function PaymentsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Daily Payment Register</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
             Track daily cash flow, UPI, cards and bank transfers
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           <button onClick={handleExportCSV}
             className="flex items-center gap-2 px-3 py-2 bg-surface border border-border hover:border-accent/30 text-foreground rounded-xl text-sm font-medium transition-all">
             <Download className="w-4 h-4" /> Export
@@ -319,7 +319,7 @@ export default function PaymentsPage() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="glass-card p-4 flex flex-col gap-2 relative overflow-hidden">
           <div className="absolute -right-4 -top-4 w-16 h-16 bg-green-500/10 rounded-full blur-xl pointer-events-none" />
           <p className="text-xs text-muted flex items-center gap-1.5"><TrendingUp className="w-3.5 h-3.5 text-green-500" /> Total In</p>
@@ -423,7 +423,7 @@ export default function PaymentsPage() {
       {tab === 'all' && (
         <div className="space-y-4">
           <div className="glass-card p-4 space-y-3">
-            <div className="flex flex-wrap gap-3 items-end">
+            <div className="ui-filters flex flex-wrap gap-3 items-end">
               <div>
                 <label className="block text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">From</label>
                 <input type="date" value={dateRange.from}
@@ -561,7 +561,7 @@ export default function PaymentsPage() {
 
           {/* Desktop: table */}
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table">
                 <thead>
                   <tr>
@@ -722,7 +722,7 @@ export default function PaymentsPage() {
                 ))}
               </div>
               {selectedPayments.size > 0 && (
-                <div className="mt-4 flex gap-2">
+                <div className="ui-actions mt-4 flex gap-2">
                   <button onClick={() => setShowReconcileModal(true)} className="flex-1 px-4 py-2 bg-accent text-white rounded-xl text-sm font-semibold hover:bg-accent-hover transition-colors">
                     Reconcile Selected ({selectedPayments.size})
                   </button>
@@ -756,7 +756,7 @@ export default function PaymentsPage() {
       {tab === 'analytics' && (
         <div className="space-y-4">
           {/* Top-line KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="ui-stat-grid grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="glass-card p-4 text-center">
               <p className="text-xs text-muted mb-1">Total In</p>
               <p className="text-xl font-bold text-green-600">{formatCurrency(totalIn)}</p>
@@ -775,7 +775,7 @@ export default function PaymentsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Payment Methods Chart (Horizontal Bars) */}
             <div className="glass-card p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4">Payment Methods (Received)</h3>
@@ -863,7 +863,7 @@ export default function PaymentsPage() {
               <div className="bg-surface rounded-xl p-4 border border-border">
                 <p className="text-xs text-muted mb-1">Opening Cash</p>
                 {editingCash ? (
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="ui-actions flex items-center gap-2 mt-2">
                     <input
                       type="number"
                       value={openingCashInput}
@@ -935,7 +935,7 @@ export default function PaymentsPage() {
                   onChange={(e) => setSelectedPaymentForAction({ ...selectedPaymentForAction, reversalReason: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded-xl text-sm focus:border-accent/50 outline-none resize-none" />
               </div>
-              <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <div className="ui-actions flex justify-end gap-3 pt-4 border-t border-border">
                 <button onClick={() => setShowReverseModal(false)} className="px-4 py-2 bg-surface text-foreground rounded-xl text-sm font-medium hover:bg-surface-hover">Cancel</button>
                 <button onClick={() => handleReversePayment(selectedPaymentForAction.reversalReason)} disabled={submitting} className="px-6 py-2 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
                   {submitting ? <RefreshCw className="w-4 h-4 animate-spin inline mr-2" /> : null}
@@ -977,7 +977,7 @@ export default function PaymentsPage() {
                   onChange={(e) => setSelectedPaymentForAction({ ...selectedPaymentForAction, bounceNotes: e.target.value })}
                   className="w-full px-3 py-2 bg-background border border-border rounded-xl text-sm focus:border-accent/50 outline-none" />
               </div>
-              <div className="flex justify-end gap-3 pt-4 border-t border-border">
+              <div className="ui-actions flex justify-end gap-3 pt-4 border-t border-border">
                 <button onClick={() => setShowBounceModal(false)} className="px-4 py-2 bg-surface text-foreground rounded-xl text-sm font-medium hover:bg-surface-hover">Cancel</button>
                 <button onClick={() => handleMarkChequeBounced(selectedPaymentForAction.bounceReason)} disabled={submitting} className="px-6 py-2 bg-orange-600 text-white rounded-xl text-sm font-semibold hover:bg-orange-700 disabled:opacity-50">
                   {submitting ? <RefreshCw className="w-4 h-4 animate-spin inline mr-2" /> : null}
@@ -1003,7 +1003,7 @@ export default function PaymentsPage() {
             <p className="text-sm text-muted">These payments will be marked as &quot;Reconciled&quot; in the system.</p>
             <p className="text-xs text-muted">Note: Ensure you've matched these payments with your bank statement before confirming.</p>
           </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+          <div className="ui-actions flex justify-end gap-3 pt-4 border-t border-border">
             <button onClick={() => setShowReconcileModal(false)} className="px-4 py-2 bg-surface text-foreground rounded-xl text-sm font-medium hover:bg-surface-hover">Cancel</button>
             <button onClick={handleReconcile} disabled={submitting} className="px-6 py-2 bg-green-600 text-white rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
               {submitting ? <RefreshCw className="w-4 h-4 animate-spin inline mr-2" /> : null}
@@ -1016,7 +1016,7 @@ export default function PaymentsPage() {
       {/* Record Payment Modal */}
       <Modal isOpen={showAddPayment} onClose={() => setShowAddPayment(false)} title="Record Payment">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <label className={`cursor-pointer p-3 border rounded-xl text-center transition-all ${form.type === 'IN' ? 'border-green-500 bg-green-500/10 text-green-500' : 'border-border text-muted hover:border-border-hover'}`}>
               <input type="radio" className="hidden" checked={form.type === 'IN'} onChange={() => setForm(f => ({ ...f, type: 'IN' }))} />
               <div className="text-sm font-semibold">Money In</div>
@@ -1029,7 +1029,7 @@ export default function PaymentsPage() {
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1">Amount *</label>
               <div className="relative">
@@ -1047,7 +1047,7 @@ export default function PaymentsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1">GST Amount (Optional)</label>
               <div className="relative">
@@ -1065,7 +1065,7 @@ export default function PaymentsPage() {
 
           {/* Cheque-specific fields */}
           {form.method === 'Cheque' && (
-            <div className="grid grid-cols-2 gap-4 p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
+            <div className="ui-form-grid grid grid-cols-2 gap-4 p-3 bg-blue-500/10 rounded-xl border border-blue-500/20">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1">Cheque Number *</label>
                 <input type="text" value={form.chequeNumber} onChange={e => setForm(f => ({ ...f, chequeNumber: e.target.value }))}
@@ -1079,7 +1079,7 @@ export default function PaymentsPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1">Date</label>
               <input type="datetime-local" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
@@ -1108,7 +1108,7 @@ export default function PaymentsPage() {
                 <input type="file" className="hidden" accept="image/*,.pdf" onChange={e => handleReceiptUpload(e.target.files?.[0])} disabled={receiptUploading} />
               </label>
               {form.attachment && (
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   <a href={form.attachment} target="_blank" rel="noreferrer" className="p-2 border border-border rounded-xl hover:bg-surface text-accent">
                     <Eye className="w-4 h-4" />
                   </a>
@@ -1121,7 +1121,7 @@ export default function PaymentsPage() {
             {receiptError && <p className="text-[10px] text-red-500 mt-1">{receiptError}</p>}
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-border">
+          <div className="ui-actions flex justify-end gap-3 pt-4 border-t border-border">
             <button onClick={() => setShowAddPayment(false)} className="px-4 py-2 bg-surface text-foreground rounded-xl text-sm font-medium hover:bg-surface-hover">Cancel</button>
             <button onClick={handleAddPayment} disabled={submitting || !form.amount || receiptUploading} className="px-6 py-2 bg-accent text-white rounded-xl text-sm font-semibold hover:bg-accent-hover disabled:opacity-50">
               Save Payment

@@ -6,15 +6,10 @@ import {
   Eye, FileText, ArrowDownCircle, Clock, AlertTriangle,
   Download, MessageSquare, Mail
 } from 'lucide-react'
-import {
-  getSuppliers, createSupplier, updateSupplier, getPurchaseOrders, createPurchaseOrder,
-  approvePurchaseOrder, receivePurchaseOrder, cancelPurchaseOrder,
-  getPurchaseReturns, createPurchaseReturn, getPurchaseStats, recordPurchaseOrderPayment,
-  updatePurchaseOrder
-} from '@/app/actions/purchases'
-import { getProducts, createProduct } from '@/app/actions/products'
-import { getStoreSettings } from '@/app/actions/settings'
-import { movePurchaseOrderToDraft } from '@/app/actions/drafts'
+import {getSuppliers as getSuppliersAction, createSupplier as createSupplierAction, updateSupplier as updateSupplierAction, getPurchaseOrders as getPurchaseOrdersAction, createPurchaseOrder as createPurchaseOrderAction, approvePurchaseOrder as approvePurchaseOrderAction, receivePurchaseOrder as receivePurchaseOrderAction, cancelPurchaseOrder as cancelPurchaseOrderAction, getPurchaseReturns as getPurchaseReturnsAction, createPurchaseReturn as createPurchaseReturnAction, getPurchaseStats as getPurchaseStatsAction, recordPurchaseOrderPayment as recordPurchaseOrderPaymentAction, updatePurchaseOrder as updatePurchaseOrderAction} from '@/app/actions/purchases'
+import {getProducts as getProductsAction, createProduct as createProductAction} from '@/app/actions/products'
+import {getStoreSettings as getStoreSettingsAction} from '@/app/actions/settings'
+import {movePurchaseOrderToDraft as movePurchaseOrderToDraftAction} from '@/app/actions/drafts'
 import Modal from '@/components/Modal'
 import { useAlertToast } from '@/components/AlertToastProvider'
 
@@ -294,8 +289,29 @@ const createEmptySupplierForm = () => ({
   paymentTerms: 30,
 })
 
+import { calculateBill } from '@/lib/commerce/rules'
+import { safeAction } from '@/lib/safe-action';
+const getSuppliers = safeAction(getSuppliersAction);
+const createSupplier = safeAction(createSupplierAction);
+const updateSupplier = safeAction(updateSupplierAction);
+const getPurchaseOrders = safeAction(getPurchaseOrdersAction);
+const createPurchaseOrder = safeAction(createPurchaseOrderAction);
+const approvePurchaseOrder = safeAction(approvePurchaseOrderAction);
+const receivePurchaseOrder = safeAction(receivePurchaseOrderAction);
+const cancelPurchaseOrder = safeAction(cancelPurchaseOrderAction);
+const getPurchaseReturns = safeAction(getPurchaseReturnsAction);
+const createPurchaseReturn = safeAction(createPurchaseReturnAction);
+const getPurchaseStats = safeAction(getPurchaseStatsAction);
+const recordPurchaseOrderPayment = safeAction(recordPurchaseOrderPaymentAction);
+const updatePurchaseOrder = safeAction(updatePurchaseOrderAction);
+const getProducts = safeAction(getProductsAction);
+const createProduct = safeAction(createProductAction);
+const getStoreSettings = safeAction(getStoreSettingsAction);
+const movePurchaseOrderToDraft = safeAction(movePurchaseOrderToDraftAction);
+
 export default function PurchasesPage() {
   const [tab, setTab] = useState('orders')
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true)
   const [orders, setOrders] = useState([])
   const [suppliers, setSuppliers] = useState([])
@@ -330,6 +346,7 @@ export default function PurchasesPage() {
 
   const loadData = () => {
     setLoading(true)
+    setLoadError('')
     Promise.all([
       getPurchaseOrders(),
       getSuppliers(),
@@ -339,6 +356,8 @@ export default function PurchasesPage() {
       getStoreSettings(),
     ])
       .then(([poRes, supRes, retRes, prodRes, statsRes, settingsRes]) => {
+        const failed = [poRes, supRes, retRes, prodRes, statsRes, settingsRes].find(res => !res.success)
+        if (failed) setLoadError(failed.error || 'Could not load purchases')
         if (poRes.success) setOrders(poRes.data)
         if (supRes.success) setSuppliers(supRes.data)
         if (retRes.success) setReturns(retRes.data)
@@ -349,7 +368,7 @@ export default function PurchasesPage() {
       })
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { const timer = setTimeout(() => { loadData() }, 0); return () => clearTimeout(timer) }, [])
 
   const filteredOrders = useMemo(() => orders.filter(o =>
     (statusFilter === 'All' || o.status === statusFilter) &&
@@ -370,21 +389,14 @@ export default function PurchasesPage() {
         const quantity = Math.max(1, Number(item.quantity) || 1)
         const unitCost = Math.max(0, Number(item.unitCost) || 0)
         const gstRate = poForm.applyGst ? Math.max(0, Number(item.gstRate) || 0) : 0
-        return { amount: quantity * unitCost, gstRate }
+        return { quantity, price: unitCost, gstRate }
       })
 
-    const subtotal = rows.reduce((sum, row) => sum + row.amount, 0)
-    const discount = Math.min(subtotal, Math.max(0, Number(poForm.discount) || 0))
-    const taxable = Math.max(0, subtotal - discount)
-    const grossGst = rows.reduce((sum, row) => sum + Math.round(row.amount * row.gstRate / 100), 0)
-    const gst = Math.max(0, Math.round(grossGst * (subtotal > 0 ? taxable / subtotal : 1)))
-
-    return {
-      subtotal,
-      discount,
-      taxable,
-      gst,
-      total: taxable + gst,
+    try {
+      const bill = calculateBill(rows, Math.max(0, Number(poForm.discount) || 0), 'flat')
+      return { subtotal: bill.subtotal, discount: bill.discount, taxable: bill.subtotal - bill.discount, gst: bill.gst, total: bill.total }
+    } catch {
+      return { subtotal: 0, discount: 0, taxable: 0, gst: 0, total: 0 }
     }
   }, [poForm.items, poForm.discount, poForm.applyGst])
 
@@ -782,17 +794,18 @@ export default function PurchasesPage() {
     { id: 'returns', label: 'Returns', icon: RotateCcw },
   ]
 
+  if (loadError && !loading) return <div role="alert" className="glass-card p-6 text-center"><p>{loadError}</p><button onClick={loadData} className="mt-3 px-4 py-2 bg-accent text-white rounded-lg">Retry</button></div>
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="ui-page-header flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Purchase Management</h1>
           <p className="text-muted text-sm mt-1">Manage suppliers, purchase orders & returns</p>
         </div>
-        <div className="flex gap-2 w-full md:w-auto flex-wrap">
+        <div className="ui-actions flex gap-2 w-full md:w-auto flex-wrap">
           {tab === 'orders' && <button onClick={openCreatePOModal} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> New PO</button>}
           {tab === 'suppliers' && <button onClick={openCreateSupplierModal} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> Add Supplier</button>}
           {tab === 'returns' && <button onClick={() => setShowReturnModal(true)} className="w-full md:w-auto px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center justify-center gap-2"><Plus className="w-4 h-4" /> New Return</button>}
@@ -801,7 +814,7 @@ export default function PurchasesPage() {
 
       {/* Stats */}
       {stats && (
-        <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-3 xl:grid-cols-5 md:gap-4">
+        <div className="ui-stat-strip flex gap-3 overflow-x-auto hide-scrollbar pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:grid md:grid-cols-3 xl:grid-cols-5 md:gap-4">
           {[
             { label: 'Total POs', value: stats.totalPOs, icon: FileText, color: 'text-blue-400' },
             { label: 'Open Payables', value: `₹${(stats.outstandingPayables || 0).toLocaleString('en-IN')}`, icon: Truck, color: 'text-emerald-400' },
@@ -824,7 +837,7 @@ export default function PurchasesPage() {
 
       {/* Tabs */}
       <div className="overflow-x-auto hide-scrollbar -mx-4 md:mx-0 px-4 md:px-0">
-        <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 w-max">
+        <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 w-max">
           {tabs.map(t => (
             <button key={t.id} onClick={() => { setTab(t.id); setSearch(''); setStatusFilter('All') }}
               className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all whitespace-nowrap ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -835,7 +848,7 @@ export default function PurchasesPage() {
       </div>
 
       {/* Search */}
-      <div className="flex flex-col sm:flex-row items-center gap-3">
+      <div className="ui-filters flex flex-col sm:flex-row items-center gap-3">
         <div className="relative w-full sm:flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50" />
@@ -849,7 +862,7 @@ export default function PurchasesPage() {
 
       {/* Purchase Orders Tab */}
       {tab === 'orders' && (
-        <div className="glass-card overflow-x-auto">
+        <div className="ui-table-scroll glass-card overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap md:whitespace-normal">
             <thead><tr className="border-b border-border">
               {['PO #', 'Supplier', 'Date', 'Expected', 'Items', 'Total', 'Paid', 'Balance', 'Compliance', 'Status', 'Actions'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
@@ -943,7 +956,7 @@ export default function PurchasesPage() {
 
       {/* Suppliers Tab */}
       {tab === 'suppliers' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredSuppliers.map(s => (
             <div key={s.id} className="glass-card p-5">
               <div className="flex items-start justify-between mb-3">
@@ -976,7 +989,7 @@ export default function PurchasesPage() {
 
       {/* Returns Tab */}
       {tab === 'returns' && (
-        <div className="glass-card overflow-x-auto">
+        <div className="ui-table-scroll glass-card overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap md:whitespace-normal">
             <thead><tr className="border-b border-border">
               {['Return #', 'PO Ref', 'Supplier', 'Reason', 'Amount', 'Date', 'Status'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase">{h}</th>)}
@@ -1039,7 +1052,7 @@ export default function PurchasesPage() {
                 {selectedPO.supplier?.paymentTerms && <p className="text-xs text-muted">Payment Terms: <span className="text-foreground">{selectedPO.supplier.paymentTerms} days</span></p>}
               </div>
             </div>
-            <div className="overflow-x-auto border border-border rounded-lg">
+            <div className="ui-table-scroll overflow-x-auto border border-border rounded-lg">
               <table className="w-full text-sm whitespace-nowrap">
                 <thead><tr className="bg-surface-hover">
                 {['Product', 'SKU', 'HSN', 'Qty', 'Received', 'Unit Cost', 'GST', 'Amount'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-medium text-muted">{h}</th>)}
@@ -1089,7 +1102,7 @@ export default function PurchasesPage() {
 
             <div className="border-t border-border pt-3 space-y-2">
               <p className="text-xs font-semibold text-muted uppercase tracking-wide">Share & Download</p>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="ui-actions flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => handleDownloadPO(selectedPO)}
                   className="px-3 py-1.5 rounded-lg bg-surface border border-border text-xs font-medium text-muted hover:text-foreground"
@@ -1187,7 +1200,7 @@ export default function PurchasesPage() {
       <Modal isOpen={!!poToCancel} onClose={() => setPoToCancel(null)} title="Cancel Purchase Order" size="sm">
         <div className="space-y-4">
           <p className="text-sm text-muted">Are you sure you want to cancel this purchase order?</p>
-          <div className="flex justify-end gap-3">
+          <div className="ui-actions flex justify-end gap-3">
             <button onClick={() => setPoToCancel(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">No</button>
             <button onClick={confirmCancelPO} disabled={cancelingPo} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{cancelingPo ? 'Cancelling...' : 'Yes, Cancel'}</button>
           </div>
@@ -1197,7 +1210,7 @@ export default function PurchasesPage() {
       <Modal isOpen={!!poToDraft} onClose={() => setPoToDraft(null)} title="Move Purchase Order to Draft" size="sm">
         <div className="space-y-4">
           <p className="text-sm text-muted">Move this purchase order to drafts? It will be permanently deleted after 30 days.</p>
-          <div className="flex justify-end gap-3">
+          <div className="ui-actions flex justify-end gap-3">
             <button onClick={() => setPoToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
             <button onClick={confirmMovePOToDraft} disabled={movingPoToDraft} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{movingPoToDraft ? 'Moving...' : 'Move to Draft'}</button>
           </div>
@@ -1301,7 +1314,7 @@ export default function PurchasesPage() {
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm text-muted">Items</label>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <button onClick={addPOItem} className="text-xs text-accent hover:underline">+ Add Inventory</button>
                 <button onClick={addCustomPOItem} className="text-xs text-amber-400 hover:underline">+ Add Custom</button>
               </div>

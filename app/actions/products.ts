@@ -2,8 +2,12 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
-import { createProductSchema, updateStockSchema } from '@/lib/validations/product'
+import { createProductSchema, updateProductSchema, updateStockSchema } from '@/lib/validations/product'
 import { moveProductToDraft } from './drafts'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
+import { inventoryError, inventoryTransaction, moveStock, moveTotalStock, prepareStock, reconcileStock } from '@/lib/inventory/stock'
+import { createInventoryProduct, updateInventoryMetadata } from '@/lib/inventory/products'
+import { canonicalInventoryCategory } from '@/lib/inventory/category'
 
 export interface BulkRawMaterialRow {
   name: string
@@ -20,11 +24,6 @@ export interface BulkRawMaterialRow {
   image?: string
 }
 
-const toNumber = (value: unknown, fallback = 0) => {
-  const n = Number(value)
-  return Number.isFinite(n) ? n : fallback
-}
-
 const toRequiredNumber = (value: unknown) => {
   const text = String(value ?? '').trim()
   if (!text) return Number.NaN
@@ -33,6 +32,7 @@ const toRequiredNumber = (value: unknown) => {
 }
 
 export async function getProducts() {
+  await requireAuth()
   const products = await prisma.product.findMany({
     include: {
       category: true,
@@ -45,8 +45,8 @@ export async function getProducts() {
   return {
     success: true,
     data: products.map(p => {
-      const isRawMaterial = p.category.name === 'Raw Material'
-      const isConsumable = p.category.name === 'Consumable'
+      const isRawMaterial = canonicalInventoryCategory(p.category.name) === 'Raw Material'
+      const isConsumable = canonicalInventoryCategory(p.category.name) === 'Consumable'
       return {
         id: p.id,
         sku: p.sku,
@@ -73,6 +73,7 @@ export async function getProducts() {
         color: p.color,
         description: p.description,
         warehouse: p.warehouse?.name || 'Unassigned',
+        createdAt: p.createdAt.toISOString(),
         lastRestocked: p.lastRestocked?.toISOString().split('T')[0] || null,
       }
     }),
@@ -80,6 +81,7 @@ export async function getProducts() {
 }
 
 export async function getProduct(id: number) {
+  await requireAuth()
   const product = await prisma.product.findUnique({
     where: { id },
     include: { category: true, warehouse: true },
@@ -90,98 +92,26 @@ export async function getProduct(id: number) {
 }
 
 export async function createProduct(data: unknown) {
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { category, warehouse, unitOfMeasure, unitSize, godownId, stockGroupId, ...rest } = parsed.data
-
-  if (stockGroupId) {
-    const group = await prisma.stockGroup.findUnique({ where: { id: stockGroupId }, select: { id: true } })
-    if (!group) return { success: false, error: 'Selected stock group was not found' }
-  }
-
-  // Find or create category
-  const cat = await prisma.category.upsert({
-    where: { name: category },
-    create: { name: category },
-    update: {},
-  })
-
-  // Find or create warehouse if provided
-  let warehouseId: number | undefined
-  if (warehouse) {
-    const wh = await prisma.warehouse.upsert({
-      where: { name: warehouse },
-      create: { name: warehouse },
-      update: {},
-    })
-    warehouseId = wh.id
-  }
-
-  // Check for duplicate SKU before creating
-  const existingSku = await prisma.product.findUnique({ where: { sku: rest.sku } })
-  if (existingSku) {
-    return { success: false, error: `A product with SKU "${rest.sku}" already exists. Please use a unique SKU.` }
-  }
-
-  // Create the product with stock = 0 initially (sync engine will set it)
-  const normalizedUnitSize = Number(unitSize) > 0 ? Number(unitSize) : 1
-  const initialStockQty = rest.stock || 0
-  const initialStock = initialStockQty * normalizedUnitSize
-  let product
   try {
-    product = await prisma.product.create({
-      data: {
-        ...rest,
-        stock: 0, // Will be set by sync engine
-        unitOfMeasure: unitOfMeasure || 'PCS',
-        unitSize: normalizedUnitSize,
-        categoryId: cat.id,
-        warehouseId,
-        stockGroupId: stockGroupId ?? null,
-      },
-    })
-  } catch (err: any) {
-    if (err.code === 'P2002') {
-      return { success: false, error: `A product with SKU "${rest.sku}" already exists. Please use a unique SKU.` }
-    }
-    return { success: false, error: err.message || 'Failed to create product' }
+    const actor = (await requireAuth()).user.name
+    const product = await inventoryTransaction(prisma, tx => createInventoryProduct(tx, parsed.data, actor))
+    revalidatePath('/inventory')
+    revalidatePath('/godowns')
+    revalidatePath('/manufacturing')
+    return { success: true, data: product }
+  } catch (error) {
+    return { success: false, error: inventoryError(error) }
   }
-
-  // Allocate initial stock to the selected godown (like Odoo's stock.move on receipt)
-  if (initialStock > 0) {
-    const { adjustGodownStock, getOrCreateDefaultGodown } = await import('./godowns')
-    const godownCount = await prisma.godown.count()
-
-    if (godownCount > 0) {
-      // Use selected godown, or fall back to default
-      let targetGodownId = godownId
-      if (!targetGodownId) {
-        const defaultGodown = await getOrCreateDefaultGodown()
-        targetGodownId = defaultGodown.id
-      }
-
-      await adjustGodownStock(product.id, targetGodownId, initialStock, 'IN', {
-        referenceType: 'Manual',
-        notes: `Initial stock on product creation`,
-        createdBy: 'Admin',
-      })
-    } else {
-      // No godowns exist — set stock directly (legacy)
-      await prisma.product.update({
-        where: { id: product.id },
-        data: { stock: initialStock },
-      })
-    }
-  }
-
-  revalidatePath('/inventory')
-  revalidatePath('/godowns')
-  return { success: true, data: product }
 }
 
 export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
-  if (!rows || rows.length === 0) return { success: false, error: 'No raw materials to import' }
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No raw materials to import' }
+  if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
 
   const validRows = rows
     .map(r => ({
@@ -189,15 +119,14 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       brand: String(r.brand || '').trim(),
       sku: String(r.sku || '').trim(),
       sizeLabel: String(r.size ?? '').trim(),
-      costPrice: toNumber(r.costPrice, 0),
+      costPrice: r.costPrice === undefined || r.costPrice === '' ? 0 : toRequiredNumber(r.costPrice),
       stockQuantity: toRequiredNumber(r.instock ?? r.stockQuantity),
-      unitSize: Math.max(1, toNumber(r.unitSize, 1)),
+      unitSize: r.unitSize === undefined || r.unitSize === '' ? 1 : toRequiredNumber(r.unitSize),
       unitOfMeasure: String(r.unitOfMeasure || '').trim().toUpperCase() || 'PCS',
-      reorderLevel: Math.max(0, toNumber(r.reorderLevel, 5)),
+      reorderLevel: r.reorderLevel === undefined || r.reorderLevel === '' ? 5 : toRequiredNumber(r.reorderLevel),
       description: String(r.description || '').trim(),
       image: String(r.image || '').trim(),
     }))
-    .filter(r => r.name && Number.isFinite(r.stockQuantity))
 
   if (validRows.length === 0) {
     return { success: false, error: 'No valid rows found. Product name, size, and in-stock are required.' }
@@ -209,24 +138,24 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
 
   let created = 0
   let skipped = 0
+  const errors: { row: number; name: string; error: string }[] = []
 
   let counter = (await prisma.product.count({ where: { category: { name: 'Raw Material' } } })) + 1
 
   const makeUniqueSku = (preferredSku: string) => {
     const baseSku = String(preferredSku || '').trim()
     let candidate = baseSku || `RM-${String(counter).padStart(3, '0')}`
-    let suffix = 1
-
-    while (existingSkus.has(candidate)) {
-      candidate = baseSku ? `${baseSku}-${suffix++}` : `RM-${String((counter + suffix - 1)).padStart(3, '0')}`
-    }
-
-    existingSkus.add(candidate)
+    while (!baseSku && existingSkus.has(candidate)) candidate = `RM-${String(++counter).padStart(3, '0')}`
     return candidate
   }
 
   for (const row of validRows) {
     const sku = makeUniqueSku(row.sku)
+    if (existingSkus.has(sku)) {
+      skipped++
+      errors.push({ row: created + skipped, name: row.name, error: `SKU "${sku}" already exists; existing item was preserved` })
+      continue
+    }
 
     const res = await createProduct({
       name: row.name,
@@ -234,8 +163,8 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       sku,
       category: 'Raw Material',
       price: 0,
-      costPrice: Math.max(0, row.costPrice),
-      stock: Math.max(0, row.stockQuantity),
+      costPrice: row.costPrice,
+      stock: row.stockQuantity,
       unitOfMeasure: row.unitOfMeasure || 'PCS',
       unitSize: row.unitSize,
       reorderLevel: row.reorderLevel,
@@ -245,8 +174,10 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
 
     if (res.success) {
       created++
+      existingSkus.add(sku)
     } else {
       skipped++
+      errors.push({ row: created + skipped, name: row.name, error: res.error || 'Unable to import item' })
     }
 
     counter++
@@ -261,6 +192,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       total: validRows.length,
       created,
       skipped,
+      errors,
     },
   }
 }
@@ -279,7 +211,9 @@ export interface BulkProductRow {
 }
 
 export async function bulkImportProducts(rows: BulkProductRow[]) {
-  if (!rows || rows.length === 0) return { success: false, error: 'No products to import' }
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No products to import' }
+  if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
 
   const validRows = rows
     .map(r => ({
@@ -291,10 +225,9 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
       description: String(r.description || '').trim(),
       material: String(r.material || '').trim(),
       color: String(r.color || '').trim(),
-      reorderLevel: Math.max(0, toNumber(r.reorderLevel, 5)),
+      reorderLevel: r.reorderLevel === undefined || r.reorderLevel === '' ? 5 : toRequiredNumber(r.reorderLevel),
       warehouse: String(r.warehouse || '').trim(),
     }))
-    .filter(r => r.name && Number.isFinite(r.price) && Number.isFinite(r.instock))
 
   if (validRows.length === 0) {
     return { success: false, error: 'No valid rows found. Product name, price, and in-stock quantity are required.' }
@@ -306,32 +239,32 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
 
   let created = 0
   let skipped = 0
+  const errors: { row: number; name: string; error: string }[] = []
 
   let counter = (await prisma.product.count()) + 1
 
   const makeUniqueSku = (preferredSku: string) => {
     const baseSku = String(preferredSku || '').trim()
     let candidate = baseSku || `PRD-${String(counter).padStart(4, '0')}`
-    let suffix = 1
-
-    while (existingSkus.has(candidate)) {
-      candidate = baseSku ? `${baseSku}-${suffix++}` : `PRD-${String((counter + suffix - 1)).padStart(4, '0')}`
-    }
-
-    existingSkus.add(candidate)
+    while (!baseSku && existingSkus.has(candidate)) candidate = `PRD-${String(++counter).padStart(4, '0')}`
     return candidate
   }
 
   for (const row of validRows) {
     const sku = makeUniqueSku(row.sku)
+    if (existingSkus.has(sku)) {
+      skipped++
+      errors.push({ row: created + skipped, name: row.name, error: `SKU "${sku}" already exists; existing item was preserved` })
+      continue
+    }
 
     const res = await createProduct({
       name: row.name,
       sku,
       category: row.category,
-      price: Math.max(0, row.price as number),
+      price: row.price,
       costPrice: 0,
-      stock: Math.max(0, row.instock as number),
+      stock: row.instock,
       reorderLevel: row.reorderLevel,
       description: row.description || undefined,
       material: row.material || undefined,
@@ -343,8 +276,10 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
 
     if (res.success) {
       created++
+      existingSkus.add(sku)
     } else {
       skipped++
+      errors.push({ row: created + skipped, name: row.name, error: res.error || 'Unable to import item' })
     }
 
     counter++
@@ -354,7 +289,7 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
 
   return {
     success: true,
-    data: { total: validRows.length, created, skipped },
+    data: { total: validRows.length, created, skipped, errors },
   }
 }
 
@@ -363,81 +298,99 @@ export async function updateProduct(id: number, data: Partial<{
   material: string; brand: string; color: string; description: string; image: string; unitSize: number; unitOfMeasure: string;
   stockGroupId: number | null;
 }>) {
-  if (data.stockGroupId !== undefined && data.stockGroupId !== null) {
-    const group = await prisma.stockGroup.findUnique({ where: { id: data.stockGroupId }, select: { id: true } })
-    if (!group) return { success: false, error: 'Selected stock group was not found' }
-  }
-  const product = await prisma.product.update({
-    where: { id },
-    data,
-  })
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  if (!Number.isSafeInteger(id) || id <= 0) return { success: false, error: 'Invalid product' }
+  const parsed = updateProductSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  try {
+    const product = await inventoryTransaction(prisma, tx => updateInventoryMetadata(tx, id, parsed.data))
+    revalidatePath('/inventory')
+    revalidatePath('/manufacturing')
+    revalidatePath('/godowns')
+    return { success: true, data: product }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
 
-  revalidatePath('/inventory')
-  return { success: true, data: product }
+export async function updateRawMaterialInventory(id: number, metadata: unknown, adjustment: unknown) {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER', 'STAFF')).user.name } catch { return { success: false, error: 'Access denied' } }
+  const fields = updateProductSchema.safeParse(metadata)
+  const stock = updateStockSchema.safeParse(adjustment)
+  if (!fields.success) return { success: false, error: fields.error.issues[0].message }
+  if (!stock.success) return { success: false, error: stock.error.issues[0].message }
+  if (stock.data.id !== id || stock.data.godownId) return { success: false, error: 'Invalid raw-material adjustment' }
+  try {
+    const product = await inventoryTransaction(prisma, async tx => {
+      const item = await tx.product.findUnique({ where: { id }, include: { category: true } })
+      if (!item || canonicalInventoryCategory(item.category.name) !== 'Raw Material') throw new Error('Raw material not found')
+      await updateInventoryMetadata(tx, id, fields.data)
+      const current = await prepareStock(tx, id)
+      const input = stock.data
+      if (input.mode === 'SET' && input.expectedStock !== undefined && Math.abs(current.stock - input.expectedStock) > 0.000001) throw new Error('Stock changed. Refresh before setting a balance.')
+      const delta = input.mode === 'ADD' ? input.stock : input.mode === 'REMOVE' ? -input.stock : input.stock - current.stock
+      if (delta) await moveTotalStock(tx, id, delta, input.mode === 'SET' ? 'ADJUSTMENT' : delta > 0 ? 'IN' : 'OUT', { referenceType: 'Manual', notes: input.reason || 'Manufacturing raw material adjustment', createdBy: actor })
+      return tx.product.findUniqueOrThrow({ where: { id } })
+    })
+    revalidatePath('/manufacturing'); revalidatePath('/inventory'); revalidatePath('/godowns')
+    return { success: true, data: product }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateStock(data: unknown) {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER', 'STAFF')).user.name } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateStockSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
-  const { adjustGodownStock, getOrCreateDefaultGodown } = await import('./godowns')
-
-  // Check if godowns exist
-  const godownCount = await prisma.godown.count()
-
-  if (godownCount > 0) {
-    // Route through godown sync engine
-    const product = await prisma.product.findUnique({ where: { id: parsed.data.id } })
-    if (!product) return { success: false, error: 'Product not found' }
-
-    // Determine target godown: user-selected or default
-    let targetGodownId = parsed.data.godownId
-    if (!targetGodownId) {
-      const defaultGodown = await getOrCreateDefaultGodown()
-      targetGodownId = defaultGodown.id
-    }
-
-    // Get current stock at this specific godown
-    const godownStock = await prisma.godownStock.findUnique({
-      where: { productId_godownId: { productId: parsed.data.id, godownId: targetGodownId } },
+  try {
+    const { id, stock, mode, godownId, expectedStock, reason, notes } = parsed.data
+    const product = await inventoryTransaction(prisma, async tx => {
+      const current = await prepareStock(tx, id)
+      const location = godownId ? await tx.godownStock.findUnique({ where: { productId_godownId: { productId: id, godownId } } }) : null
+      const currentQty = godownId ? location?.quantity ?? 0 : current.stock
+      if (mode === 'SET' && expectedStock !== undefined && Math.abs(currentQty - expectedStock) > 0.000001) throw new Error('Stock changed since this form was opened. Refresh before setting a balance.')
+      if (mode !== 'SET' && stock === 0) throw new Error('Quantity must be greater than zero')
+      const diff = mode === 'ADD' ? stock : mode === 'REMOVE' ? -stock : stock - currentQty
+      const options = { referenceType: 'Manual', notes: [reason, notes].filter(Boolean).join(' — ') || `Stock ${mode.toLowerCase()} adjustment`, createdBy: actor }
+      const entryType = mode === 'ADD' ? 'IN' : mode === 'REMOVE' ? 'OUT' : 'ADJUSTMENT'
+      if (godownId) await moveStock(tx, id, godownId, diff, entryType, options)
+      else await moveTotalStock(tx, id, diff, entryType, options)
+      return tx.product.findUniqueOrThrow({ where: { id } })
     })
-    const currentGodownQty = godownStock?.quantity || 0
-    const diff = parsed.data.stock - currentGodownQty
-
-    if (diff === 0) return { success: true, data: product }
-
-    const entryType = diff > 0 ? 'IN' : 'OUT'
-    await adjustGodownStock(parsed.data.id, targetGodownId, diff, entryType, {
-      referenceType: 'Manual',
-      notes: `Stock adjusted at godown (${currentGodownQty} → ${parsed.data.stock})`,
-      createdBy: 'Admin',
-    })
-    await prisma.product.update({
-      where: { id: parsed.data.id },
-      data: { lastRestocked: diff > 0 ? new Date() : undefined },
-    })
-  } else {
-    // No godowns — direct update (legacy behavior)
-    await prisma.product.update({
-      where: { id: parsed.data.id },
-      data: { stock: parsed.data.stock, lastRestocked: new Date() },
-    })
+    revalidatePath('/inventory')
+    revalidatePath('/godowns')
+    revalidatePath('/manufacturing')
+    return { success: true, data: product }
+  } catch (error) {
+    return { success: false, error: inventoryError(error) }
   }
-
-  revalidatePath('/inventory')
-  revalidatePath('/godowns')
-  return { success: true, data: await prisma.product.findUnique({ where: { id: parsed.data.id } }) }
 }
 
 export async function getCategories() {
+  await requireAuth()
   return prisma.category.findMany({ orderBy: { name: 'asc' } })
 }
 
+export async function reconcileInventoryStock(id: number, basis: 'PRODUCT' | 'LOCATIONS', expectedProduct: number, expectedLocations: number) {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
+  if (!['PRODUCT', 'LOCATIONS'].includes(basis)) return { success: false, error: 'Choose the balance to use' }
+  try {
+    const product = await inventoryTransaction(prisma, tx => reconcileStock(tx, id, basis, expectedProduct, expectedLocations, actor))
+    revalidatePath('/inventory')
+    revalidatePath('/godowns')
+    revalidatePath('/manufacturing')
+    return { success: true, data: product }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
+
 export async function getWarehouses() {
+  await requireAuth()
   return prisma.warehouse.findMany({ orderBy: { name: 'asc' } })
 }
 
 export async function getLowStockProducts() {
+  await requireAuth()
   const products = await prisma.product.findMany({
     where: {},
     include: { category: true },
@@ -460,39 +413,8 @@ export async function deleteProduct(id: number) {
 }
 
 export async function deleteRawMaterial(id: number) {
-  try {
-    // Get the product
-    const product = await prisma.product.findUnique({
-      where: { id },
-      include: { category: true },
-    })
-    
-    if (!product) {
-      return { success: false, error: 'Product not found' }
-    }
-
-    // Only allow deletion for raw materials
-    if (product.category.name !== 'Raw Material') {
-      return { success: false, error: 'Only raw materials can be deleted using this function' }
-    }
-
-    // Delete in transaction:
-    // 1. Delete stock ledger entries
-    // 2. Delete godown stock entries
-    // 3. Delete other potential dependencies (batches, BOM items)
-    // 4. Delete the product itself
-    await prisma.$transaction([
-      prisma.stockLedger.deleteMany({ where: { productId: id } }),
-      prisma.godownStock.deleteMany({ where: { productId: id } }),
-      prisma.productBatch.deleteMany({ where: { productId: id } }),
-      prisma.bomItem.deleteMany({ where: { rawMaterialId: id } }),
-      prisma.product.delete({ where: { id } }),
-    ])
-
-    revalidatePath('/manufacturing')
-    return { success: true }
-  } catch (err: unknown) {
-    const errMsg = err instanceof Error ? err.message : 'Failed to delete raw material'
-    return { success: false, error: errMsg }
-  }
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  const product = await prisma.product.findUnique({ where: { id }, include: { category: true } })
+  if (!product || product.category.name !== 'Raw Material') return { success: false, error: 'Raw material not found' }
+  return moveProductToDraft(id)
 }

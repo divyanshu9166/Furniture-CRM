@@ -248,7 +248,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 4A — B2B (Registered Buyers)" count={d.b2b?.length} sectionKey="b2b" badge="GSTIN Buyers" />
           {expandedSections.b2b && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['Invoice', 'Date', 'Customer', 'GSTIN', 'Place of Supply', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total'].map(h =>
@@ -280,7 +280,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 5 — B2CL (Interstate > ₹2.5L, Unregistered)" count={d.b2cl?.length} sectionKey="b2cl" />
           {expandedSections.b2cl && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['Invoice', 'Date', 'Customer', 'Place of Supply', 'Taxable', 'IGST', 'Total'].map(h =>
@@ -309,7 +309,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 7 — B2CS (Small B2C / Intrastate)" count={d.b2cs?.length} sectionKey="b2cs" />
           {expandedSections.b2cs && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['Invoice', 'Date', 'Customer', 'Supply Type', 'Taxable', 'CGST', 'SGST', 'Total'].map(h =>
@@ -339,7 +339,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 9B — CDNR (Credit Notes to Registered)" count={d.cdnr?.length} sectionKey="cdnr" />
           {expandedSections.cdnr && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['Credit Note', 'Date', 'Customer', 'GSTIN', 'Amount', 'Reason'].map(h =>
@@ -377,7 +377,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 6A — Exports" count={d.exports?.length} sectionKey="exports" />
           {expandedSections.exports && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['Invoice', 'Date', 'Customer', 'Taxable', 'IGST', 'Total'].map(h =>
@@ -426,7 +426,7 @@ export default function GSTPage() {
         <div className="glass-card overflow-hidden">
           <SectionHeader title="Table 12 — HSN-wise Summary" count={d.hsnSummary?.length} sectionKey="hsn" />
           {expandedSections.hsn && (
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
                 <thead><tr className="border-b border-border bg-surface">
                   {['HSN', 'Description', 'UQC', 'Qty', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Cess'].map(h =>
@@ -507,7 +507,7 @@ export default function GSTPage() {
         {/* ITC Classification — Table 4 */}
         <div className="glass-card p-4">
           <h4 className="text-sm font-medium text-foreground mb-3">Table 4 — ITC Classification</h4>
-          <div className="overflow-x-auto">
+          <div className="ui-table-scroll overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border">
                 {['Category', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Total ITC'].map(h =>
@@ -568,7 +568,7 @@ export default function GSTPage() {
         {/* Supplier-wise detail */}
         <div className="glass-card overflow-hidden">
           <h4 className="text-sm font-medium text-foreground px-4 py-3 border-b border-border">Supplier-wise Inward Supplies</h4>
-          <div className="overflow-x-auto">
+          <div className="ui-table-scroll overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border bg-surface">
                 {['PO #', 'Date', 'Supplier', 'GSTIN', 'Category', 'Taxable', 'CGST', 'SGST', 'IGST', 'ITC', 'RCM'].map(h =>
@@ -619,7 +619,7 @@ export default function GSTPage() {
         {/* Table 3.1 */}
         <div className="glass-card p-4">
           <h4 className="text-sm font-medium text-foreground mb-3">3.1 — Outward Supplies and Tax Payable</h4>
-          <div className="overflow-x-auto">
+          <div className="ui-table-scroll overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border">
                 {['', 'Taxable Value', 'CGST', 'SGST', 'IGST', 'Cess'].map(h =>
@@ -658,7 +658,7 @@ export default function GSTPage() {
         {/* Table 4 ITC */}
         <div className="glass-card p-4">
           <h4 className="text-sm font-medium text-foreground mb-3">4 — Eligible ITC</h4>
-          <div className="overflow-x-auto">
+          <div className="ui-table-scroll overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="border-b border-border">
                 {['', 'CGST', 'SGST', 'IGST', 'Total'].map(h =>
@@ -768,12 +768,12 @@ export default function GSTPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">GST Compliance</h1>
           <p className="text-muted text-sm mt-1">GSTR-1, GSTR-2, GSTR-3B, GSTR-9 · HSN Master · e-Way Bills</p>
         </div>
-        <div className="flex gap-2">
+        <div className="ui-actions flex gap-2">
           {tab === 'hsn' && (
             <button onClick={() => setShowHsnModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2">
               <Plus className="w-4 h-4" /> Add HSN Code
@@ -788,7 +788,7 @@ export default function GSTPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
+      <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
         {tabs.map(t => (
           <button key={t.id} onClick={() => { setTab(t.id); setGeneratedData(null) }}
             className={`px-3 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-1.5 ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -815,7 +815,7 @@ export default function GSTPage() {
             </div>
             {generatedData && (
               <div className="pt-5">
-                <div className="flex items-center gap-2">
+                <div className="ui-actions flex items-center gap-2">
                   <button onClick={() => handleExportJSON(generatedData)}
                     className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
                     <Download className="w-4 h-4" /> Export JSON
@@ -862,7 +862,7 @@ export default function GSTPage() {
             </div>
             {generatedData && (
               <div className="pt-5">
-                <div className="flex items-center gap-2">
+                <div className="ui-actions flex items-center gap-2">
                   <button onClick={() => handleExportJSON(generatedData)}
                     className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
                     <Download className="w-4 h-4" /> Export JSON
@@ -963,7 +963,7 @@ export default function GSTPage() {
                   <td className="px-4 py-3 text-foreground">{r.period}</td>
                   <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[r.status] || ''}`}>{r.status}</span></td>
                   <td className="px-4 py-3 text-muted">{r.filedAt ? fmtDate(r.filedAt) : '—'}</td>
-                  <td className="px-4 py-3 flex items-center gap-2">
+                  <td className="ui-actions px-4 py-3 flex items-center gap-2">
                     {r.status === 'DRAFT' && (
                       <button onClick={() => handleMarkFiled(r.id)}
                         className="px-3 py-1 bg-emerald-500/10 text-emerald-400 rounded-lg text-xs hover:bg-emerald-500/20 flex items-center gap-1">
@@ -1022,7 +1022,7 @@ export default function GSTPage() {
       <Modal isOpen={showEwbModal} onClose={() => setShowEwbModal(false)} title="Record e-Way Bill">
         <div className="space-y-3">
           <p className="text-xs text-muted bg-surface-hover p-2 rounded">Generate the actual EWB on the GST portal first, then record the details here for tracking.</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             {[
               { key: 'ewbNumber', label: 'EWB Number', placeholder: 'From GST portal' },
               { key: 'vehicleNo', label: 'Vehicle No.', placeholder: 'MH12AB1234' },

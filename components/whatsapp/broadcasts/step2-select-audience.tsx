@@ -404,7 +404,7 @@ export function Step2SelectAudience({ audience, onUpdate, onNext, onBack }: Step
               )}
             </ScrollArea>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="ui-actions flex items-center justify-between">
             <Button variant="outline" size="sm" onClick={() => setManualPage((p) => Math.max(0, p - 1))} disabled={!manualHasPrev} className="border-border text-foreground">Previous</Button>
             <span className="text-xs text-muted">Page {manualPage + 1} of {manualTotalPages}</span>
             <Button variant="outline" size="sm" onClick={() => setManualPage((p) => manualHasNext ? p + 1 : p)} disabled={!manualHasNext} className="border-border text-foreground">Next</Button>
@@ -461,7 +461,7 @@ export function Step2SelectAudience({ audience, onUpdate, onNext, onBack }: Step
         )}
       </div>
 
-      <div className="flex items-center justify-between border-t border-border pt-4">
+      <div className="ui-actions flex items-center justify-between border-t border-border pt-4">
         <Button variant="outline" onClick={onBack} className="border-border text-foreground">
           <ArrowLeft className="h-4 w-4" />
           Back

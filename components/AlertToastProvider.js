@@ -116,7 +116,7 @@ export default function AlertToastProvider({ children }) {
     <AlertToastContext.Provider value={value}>
       {children}
 
-      <div className="pointer-events-none fixed inset-x-0 bottom-3 z-[120] px-3 md:bottom-5 md:px-6">
+      <div className="ui-toast-stack pointer-events-none fixed inset-x-0 bottom-3 z-[120] px-3 md:bottom-5 md:px-6">
         <div className="mx-auto flex w-full max-w-xl flex-col gap-2 md:mr-0 md:max-w-md">
           {toasts.map((toast) => {
             const style = VARIANT_STYLES[toast.variant] || VARIANT_STYLES.info;
@@ -131,7 +131,7 @@ export default function AlertToastProvider({ children }) {
               >
                 <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" />
 
-                <p className="flex-1 text-xs md:text-sm font-medium whitespace-pre-line leading-relaxed text-foreground">
+                <p className="flex-1 min-w-0 break-words text-xs md:text-sm font-medium whitespace-pre-line leading-relaxed text-foreground">
                   {toast.text}
                 </p>
 

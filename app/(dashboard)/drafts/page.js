@@ -153,7 +153,7 @@ export default function DraftsPage() {
       </div>
 
       {/* Search & Filter */}
-      <div className="flex items-center gap-3">
+      <div className="ui-filters flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
@@ -185,7 +185,7 @@ export default function DraftsPage() {
           <p className="text-xs text-muted mt-1">Deleted items will appear here for 30 days</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map(draft => {
             const data = draft.data;
             const deletedDate = new Date(draft.deletedAt);
@@ -236,7 +236,7 @@ export default function DraftsPage() {
                   />
                 </div>
 
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   <button
                     onClick={(e) => { e.stopPropagation(); handleRestore(draft.id); }}
                     disabled={saving}
@@ -498,7 +498,7 @@ export default function DraftsPage() {
               </div>
 
               {/* Actions */}
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="ui-actions flex justify-end gap-3 pt-2">
                 <button onClick={() => setSelectedDraft(null)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
                   Close
                 </button>
@@ -525,7 +525,7 @@ export default function DraftsPage() {
       <Modal isOpen={confirmAction.open} onClose={closeConfirm} title={confirmAction.type === 'delete' ? 'Confirm Deletion' : 'Confirm Action'} size="sm">
         <div className="space-y-4">
           <p className="text-sm text-muted">{confirmAction.message}</p>
-          <div className="flex justify-end gap-3">
+          <div className="ui-actions flex justify-end gap-3">
             <button onClick={closeConfirm} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
             <button onClick={runConfirmed} disabled={saving} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{saving ? 'Processing...' : (confirmAction.type === 'delete' ? 'Delete Forever' : 'Confirm')}</button>
           </div>

@@ -1,6 +1,8 @@
 'use server'
 
 import { prisma } from '@/lib/db'
+import { requireAuth } from '@/lib/auth-helpers'
+import { validateSellableItems } from '@/lib/inventory/products'
 import { revalidatePath } from 'next/cache'
 import { createQuotationSchema, updateQuotationSchema, updateQuotationStatusSchema } from '@/lib/validations/quotation'
 import type { Quotation, QuotationItem, QuotationStatus, Contact, Product } from '@prisma/client'
@@ -208,8 +210,11 @@ export async function getQuotation(id: number) {
 }
 
 export async function createQuotation(data: unknown) {
+  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = createQuotationSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  const inventoryError = await validateSellableItems(prisma, parsed.data.items.flatMap(item => item.productId ? [item.productId] : []))
+  if (inventoryError) return { success: false, error: inventoryError }
 
   const {
     customer,
@@ -375,8 +380,11 @@ export async function createQuotation(data: unknown) {
 }
 
 export async function updateQuotation(data: unknown) {
+  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateQuotationSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  const inventoryError = await validateSellableItems(prisma, parsed.data.items.flatMap(item => item.productId ? [item.productId] : []))
+  if (inventoryError) return { success: false, error: inventoryError }
 
   const {
     id,

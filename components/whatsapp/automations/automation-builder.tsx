@@ -249,7 +249,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
       {/* Top bar. At sub-sm widths the "Active" label is hidden and the
           switch moves to the right of the save button, so the name input
           gets maximum width. */}
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-3 sm:gap-3 sm:px-4">
+      <header className="ui-actions flex flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3 py-3 sm:gap-3 sm:px-4">
         <button
           type="button"
           onClick={() => router.push("/automations")}
@@ -566,7 +566,7 @@ function StepRenderer({
                 onChange={(next) => props.updateStep(path, () => next)}
               />
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
-                <div className="flex gap-1">
+                <div className="ui-actions flex gap-1">
                   <Button
                     variant="ghost"
                     size="icon"

@@ -173,7 +173,7 @@ export function BroadcastsTab() {
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="ui-page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Broadcasts</h1>
           <p className="mt-1 text-sm text-muted">

@@ -1001,7 +1001,7 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ui-actions flex items-center gap-2">
                     <button
                       type="submit"
                       disabled={inviting}
@@ -1069,7 +1069,7 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ui-actions flex items-center gap-2">
                     <button
                       type="submit"
                       disabled={assigningLogin}
@@ -1151,7 +1151,7 @@ export default function SettingsPage() {
                       <input type="password" value={editForm.loginPassword} onChange={e => setEditForm(prev => ({ ...prev, loginPassword: e.target.value }))} placeholder="Leave blank to keep current" className="w-full" />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ui-actions flex items-center gap-2">
                     <button type="submit" disabled={editingMember} className="flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white rounded-xl text-sm font-semibold transition-all">
                       {editingMember ? 'Saving...' : 'Save Member'}
                     </button>

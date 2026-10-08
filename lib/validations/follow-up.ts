@@ -26,7 +26,7 @@ export const createFollowUpSchema = z.object({
     reason: z.string().trim().max(1_000).optional(),
     followUpDate,
     priority: z.enum(FOLLOW_UP_PRIORITIES).default('Medium'),
-    assignedToId: z.number().nullable().optional(),
+    assignedToId: z.number().int().positive().nullable().optional(),
     notes: z.string().trim().max(5_000).optional(),
 })
 

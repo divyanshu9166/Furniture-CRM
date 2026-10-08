@@ -1,3 +1,4 @@
+import { indiaDay } from './commerce/rules'
 // ------------------------------------------------------------
 // Deterministic "contact me later" intent parser.
 //
@@ -39,22 +40,23 @@ function toNumber(token: string): number | null {
 
 function addDays(d: Date, n: number): Date {
     const x = new Date(d)
-    x.setDate(x.getDate() + n)
+    x.setUTCDate(x.getUTCDate() + n)
     return x
 }
 
 // Calendar-correct month add (e.g. Jan 31 + 1 month → Feb 28/29).
 function addMonths(d: Date, n: number): Date {
     const x = new Date(d)
-    const day = x.getDate()
-    x.setDate(1)
-    x.setMonth(x.getMonth() + n)
-    const lastDay = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate()
-    x.setDate(Math.min(day, lastDay))
+    const day = x.getUTCDate()
+    x.setUTCDate(1)
+    x.setUTCMonth(x.getUTCMonth() + n)
+    const lastDay = new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth() + 1, 0)).getUTCDate()
+    x.setUTCDate(Math.min(day, lastDay))
     return x
 }
 
 export function parseFollowUpIntent(rawText: string, now: Date = new Date()): FollowUpIntent {
+    const businessToday = new Date(`${indiaDay(now)}T00:00:00.000Z`)
     const text = String(rawText || '').toLowerCase().trim()
     if (!text) return { matched: false }
     if (!CONTACT_CUE.test(text)) return { matched: false }
@@ -66,15 +68,15 @@ export function parseFollowUpIntent(rawText: string, now: Date = new Date()): Fo
 
     // tomorrow → +1 day
     if (/\btomorrow\b/.test(text)) {
-        return { matched: true, date: addDays(now, 1), amount: 1, unit: 'day', reason }
+        return { matched: true, date: addDays(businessToday, 1), amount: 1, unit: 'day', reason }
     }
 
     // next week / next month
     if (/\bnext\s+week\b/.test(text)) {
-        return { matched: true, date: addDays(now, 7), amount: 1, unit: 'week', reason }
+        return { matched: true, date: addDays(businessToday, 7), amount: 1, unit: 'week', reason }
     }
     if (/\bnext\s+month\b/.test(text)) {
-        return { matched: true, date: addMonths(now, 1), amount: 1, unit: 'month', reason }
+        return { matched: true, date: addMonths(businessToday, 1), amount: 1, unit: 'month', reason }
     }
 
     // "after/in N <unit>"  or  "N <unit> later"
@@ -90,13 +92,13 @@ export function parseFollowUpIntent(rawText: string, now: Date = new Date()): Fo
             if (!amount) continue
             const unitRaw = m[2].toLowerCase()
             if (unitRaw.startsWith('day')) {
-                return { matched: true, date: addDays(now, amount), amount, unit: 'day', reason }
+                return { matched: true, date: addDays(businessToday, amount), amount, unit: 'day', reason }
             }
             if (unitRaw.startsWith('week')) {
-                return { matched: true, date: addDays(now, amount * 7), amount, unit: 'week', reason }
+                return { matched: true, date: addDays(businessToday, amount * 7), amount, unit: 'week', reason }
             }
             if (unitRaw.startsWith('month')) {
-                return { matched: true, date: addMonths(now, amount), amount, unit: 'month', reason }
+                return { matched: true, date: addMonths(businessToday, amount), amount, unit: 'month', reason }
             }
         }
     }

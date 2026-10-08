@@ -616,7 +616,7 @@ export default function StaffPortalPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center text-lg font-bold text-accent">{me.avatar}</div>
           <div>
@@ -627,8 +627,8 @@ export default function StaffPortalPage() {
             <p className="text-sm text-muted mt-0.5">Staff Portal — Shift: 9:00 AM – 8:00 PM</p>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-3">
+        <div className="ui-actions flex flex-col items-end gap-2">
+          <div className="ui-actions flex items-center gap-3">
             {/* GPS Clock In/Out */}
             {!isClockedIn ? (
               <button onClick={handleClockIn} disabled={gpsLoading} className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl text-sm font-semibold transition-all">
@@ -639,7 +639,7 @@ export default function StaffPortalPage() {
                 )}
               </button>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs font-medium text-emerald-700">
                   <div className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
                   Clocked in at {clockInTime}
@@ -675,7 +675,7 @@ export default function StaffPortalPage() {
       {tab === 'dashboard' && (
         <div className="space-y-6">
           {/* Quick Stats */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="glass-card p-4 flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-success-light"><DollarSign className="w-5 h-5 text-success" /></div>
               <div><p className="text-xs text-muted">Total Revenue</p><p className="text-lg font-bold text-success">₹{(stats.revenue / 100000).toFixed(1)}L</p></div>
@@ -696,7 +696,7 @@ export default function StaffPortalPage() {
 
           {/* Target + Commission */}
           {target.monthly > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-5">
               {/* Target Card */}
               <div className="glass-card p-5">
                 <div className="flex items-center justify-between mb-3">
@@ -772,7 +772,7 @@ export default function StaffPortalPage() {
           </div>
 
           {/* Today's Activity + Upcoming */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-5">
             {/* Activity Log */}
             <div className="glass-card p-5">
               <div className="flex items-center justify-between mb-4">
@@ -1025,7 +1025,7 @@ export default function StaffPortalPage() {
                           />
                         </div>
 
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="ui-actions flex items-center justify-between gap-3">
                           <button
                             disabled={stepUpdating === `qty-${order.id}` || order.actualQty <= 0}
                             onClick={async () => {
@@ -1319,7 +1319,7 @@ export default function StaffPortalPage() {
             </button>
           </div>
           <div className="glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>
@@ -1669,7 +1669,7 @@ export default function StaffPortalPage() {
                 <Fingerprint className="w-5 h-5 text-accent" />
                 <h3 className="text-base font-semibold text-foreground">Attendance</h3>
               </div>
-              <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
+              <div className="ui-actions flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
                 <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-surface-hover transition-colors text-muted hover:text-foreground">
                   <ChevronLeft className="w-4 h-4" />
                 </button>
@@ -1878,7 +1878,7 @@ export default function StaffPortalPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-sm font-semibold text-foreground">Recent Sales</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr><th>Product</th><th>Customer</th><th>Date</th><th>Amount</th></tr>
@@ -1921,7 +1921,7 @@ export default function StaffPortalPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Description</label>
             <textarea value={activityText} onChange={e => setActivityText(e.target.value)} placeholder="Describe the activity..." rows={3} className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm resize-none" required />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="ui-actions flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setShowLogActivity(false)} className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button type="submit" className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">Log Activity</button>
           </div>
@@ -1986,7 +1986,7 @@ export default function StaffPortalPage() {
           </div>
 
           {/* Action & Quantity */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Action</label>
               <select value={stockAction} onChange={e => setStockAction(e.target.value)} className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm">
@@ -2022,7 +2022,7 @@ export default function StaffPortalPage() {
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="ui-actions flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => { setShowLogStock(false); setStockMsg(''); setStockProduct(null); setStockProductSearch(''); setStockQty(''); }} className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button type="submit" disabled={stockSaving || !stockProduct} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
               {stockSaving ? 'Updating...' : 'Update Stock'}
@@ -2084,7 +2084,7 @@ export default function StaffPortalPage() {
             <input type="text" value={visitMeasurements} onChange={e => setVisitMeasurements(e.target.value)} placeholder="length: 8 ft, width: 4 ft, height: 3 ft" className="w-full px-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
             <p className="text-[10px] text-muted mt-1">Format: key: value, key: value</p>
           </div>
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="ui-actions flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => setShowLogVisit(false)} className="px-4 py-2 text-sm text-muted hover:text-foreground transition-colors">Cancel</button>
             <button type="submit" disabled={uploadingPhotos} className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
               {uploadingPhotos ? 'Uploading...' : 'Schedule Visit'}
@@ -2125,7 +2125,7 @@ export default function StaffPortalPage() {
               <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
                 <Ruler className="w-4 h-4 text-accent" /> Measurements
               </h4>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="ui-form-grid grid grid-cols-2 gap-3">
                 <div><label className="block text-xs text-muted mb-1">Length</label><input type="text" name="length" defaultValue={editingVisit.measurements?.length || editingVisit.existingMeasurements?.length || ''} placeholder="e.g., 12 ft" className="w-full px-3 py-2.5 rounded-xl text-sm" /></div>
                 <div><label className="block text-xs text-muted mb-1">Width</label><input type="text" name="width" defaultValue={editingVisit.measurements?.width || editingVisit.existingMeasurements?.width || ''} placeholder="e.g., 8 ft" className="w-full px-3 py-2.5 rounded-xl text-sm" /></div>
                 <div><label className="block text-xs text-muted mb-1">Height</label><input type="text" name="height" defaultValue={editingVisit.measurements?.height || editingVisit.existingMeasurements?.height || ''} placeholder="e.g., 9 ft" className="w-full px-3 py-2.5 rounded-xl text-sm" /></div>
@@ -2147,7 +2147,7 @@ export default function StaffPortalPage() {
               <textarea name="staffNotes" rows={2} defaultValue={editingVisit.staffNotes || ''} placeholder="Notes about the visit, site conditions, customer preferences..." className="w-full px-4 py-2.5 rounded-xl text-sm resize-none" />
             </div>
 
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="ui-actions flex justify-end gap-3 pt-2">
               <button type="button" onClick={() => { setShowUpdateVisit(false); setEditingVisit(null); }} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
               <button type="submit" disabled={visitSaving} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
                 {visitSaving ? 'Saving...' : 'Save Updates'}

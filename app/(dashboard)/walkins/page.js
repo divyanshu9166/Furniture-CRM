@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Search, Plus, UserPlus, Users, Clock, TrendingUp, CheckCircle2,
   Phone, Mail, DollarSign, Eye, Filter, ShoppingBag, ArrowRight, MessageSquare,
-  X, UserCheck, UserX, Timer, QrCode, Download, Printer, Trash2,
+  X, UserCheck, UserX, Timer, QrCode, Download, Printer, Trash2, Settings2,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { getWalkins, createWalkin, updateWalkinStatus } from '@/app/actions/walkins';
@@ -15,6 +15,12 @@ import { getStaff } from '@/app/actions/staff';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
+import { getWalkinRequirements } from '@/app/actions/walkin-requirements';
+import { useSession } from '@/components/AuthProvider';
+import RequirementManager from '@/components/walkins/RequirementManager';
+import { safeAction } from '@/lib/safe-action';
+
+const loadRequirements = safeAction(getWalkinRequirements);
 
 const walkinStatuses = ['All', 'Browsing', 'Interested', 'Follow-up', 'Converted', 'Left'];
 
@@ -46,6 +52,8 @@ const buildWalkinWhatsAppMessage = (walkin) => {
 };
 
 export default function WalkinsPage() {
+  const { data: session } = useSession();
+  const canManageRequirements = ['ADMIN', 'MANAGER'].includes(session?.user?.role);
   const router = useRouter();
   const alertToast = useAlertToast?.() || { notify: (m) => alert(m) };
   
@@ -64,11 +72,29 @@ export default function WalkinsPage() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [walkinToDraft, setWalkinToDraft] = useState(null);
   const [deletingWalkin, setDeletingWalkin] = useState(false);
+  const [requirements, setRequirements] = useState([]);
+  const [requirementsLoading, setRequirementsLoading] = useState(true);
+  const [requirementsError, setRequirementsError] = useState('');
+  const [showRequirementsManager, setShowRequirementsManager] = useState(false);
+
+  const refreshRequirements = async () => {
+    setRequirementsLoading(true);
+    setRequirementsError('');
+    const result = await loadRequirements();
+    if (result.success) {
+      setRequirements(result.data.options);
+      setForm(current => ({ ...current, requirement: result.data.options.includes(current.requirement) ? current.requirement : '' }));
+    } else setRequirementsError(result.error);
+    setRequirementsLoading(false);
+  };
 
   useEffect(() => {
-    Promise.all([getWalkins(), getStaff()]).then(([walkinsRes, staffRes]) => {
+    Promise.all([safeAction(getWalkins)(), safeAction(getStaff)(), loadRequirements()]).then(([walkinsRes, staffRes, requirementsRes]) => {
       if (walkinsRes.success) setWalkins(walkinsRes.data);
       if (staffRes.success) setStaff(staffRes.data);
+      if (requirementsRes.success) setRequirements(requirementsRes.data.options);
+      else setRequirementsError(requirementsRes.error);
+      setRequirementsLoading(false);
       setLoading(false);
     });
   }, []);
@@ -165,6 +191,7 @@ export default function WalkinsPage() {
   };
 
   const handleRegister = async () => {
+    if (submitting || requirementsLoading || requirementsError) return;
     if (!form.name || !form.phone || !form.requirement) return;
     setSubmitting(true);
     try {
@@ -179,14 +206,19 @@ export default function WalkinsPage() {
       };
       const res = await createWalkin(payload);
       if (res.success) {
-        const refreshed = await getWalkins();
-        if (refreshed.success) setWalkins(refreshed.data);
         setForm({ name: '', phone: '', email: '', requirement: '', budget: '', assignedToId: '', notes: '' });
         setShowRegisterModal(false);
         alertToast.notify?.('Walk-in registered successfully', 'success');
+        const refreshed = await safeAction(getWalkins)();
+        if (refreshed.success) setWalkins(refreshed.data);
+        else alertToast.notify?.('Walk-in is saved, but the list could not refresh. Reload the page; do not register it again.', 'error');
+      } else {
+        alertToast.notify?.(res.error || 'Failed to register walk-in', 'error');
+        if (res.requirementsChanged) await refreshRequirements();
       }
     } catch (err) {
       console.error('Failed to register walk-in:', err);
+      alertToast.notify?.('Could not register the walk-in. Please try again.', 'error');
     } finally {
       setSubmitting(false);
     }
@@ -267,16 +299,17 @@ export default function WalkinsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Walk-in Customers</h1>
           <p className="text-sm text-muted mt-1">Reception desk — Log & track every visitor</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center flex-wrap gap-2">
+          {canManageRequirements && <button onClick={() => setShowRequirementsManager(true)} className="flex items-center gap-2 px-4 py-2.5 border border-border text-foreground hover:bg-surface-hover rounded-xl text-sm font-medium transition-all"><Settings2 className="w-4 h-4" /> Manage Requirements</button>}
           <button onClick={() => generateQr()} className="flex items-center gap-2 px-4 py-2.5 border border-border text-foreground hover:bg-surface-hover rounded-xl text-sm font-medium transition-all">
             <QrCode className="w-4 h-4" /> QR Code
           </button>
-          <button onClick={() => setShowRegisterModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+          <button onClick={() => { setShowRegisterModal(true); refreshRequirements(); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
             <UserPlus className="w-4 h-4" /> Register Walk-in
           </button>
         </div>
@@ -286,7 +319,7 @@ export default function WalkinsPage() {
           {walkinToDraft && (
             <div className="space-y-4">
               <p className="text-sm text-muted">Move <strong className="text-foreground">{walkinToDraft.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-              <div className="flex justify-end gap-3">
+              <div className="ui-actions flex justify-end gap-3">
                 <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
                 <button onClick={confirmMoveToDraft} disabled={deletingWalkin} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingWalkin ? 'Moving...' : 'Move to Draft'}</button>
               </div>
@@ -295,7 +328,7 @@ export default function WalkinsPage() {
         </Modal>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="glass-card p-4 flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-accent-light"><Users className="w-5 h-5 text-accent" /></div>
           <div><p className="text-xs text-muted">Today&apos;s Walk-ins</p><p className="text-lg font-bold text-foreground">{todayWalkins.length}</p></div>
@@ -315,7 +348,7 @@ export default function WalkinsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="ui-filters flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input type="search" name="walkin-search" autoComplete="off" role="searchbox" placeholder="Search by name, phone, or requirement..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
@@ -329,7 +362,7 @@ export default function WalkinsPage() {
 
       {/* Walk-in Table */}
       <div className="glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="ui-table-scroll overflow-x-auto">
           <table className="crm-table">
             <thead>
                 <tr>
@@ -381,9 +414,15 @@ export default function WalkinsPage() {
       </div>
 
       {/* Register Walk-in Modal */}
+      <RequirementManager isOpen={showRequirementsManager} onClose={() => setShowRequirementsManager(false)} onSaved={data => {
+        setRequirements(data.options);
+        setRequirementsError('');
+        setForm(current => ({ ...current, requirement: data.options.includes(current.requirement) ? current.requirement : '' }));
+        alertToast.notify?.('Requirement options updated', 'success');
+      }} />
       <Modal isOpen={showRegisterModal} onClose={() => setShowRegisterModal(false)} title="Register Walk-in Customer" size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Customer Name *</label>
               <input type="text" name="customer-name" autoComplete="name" placeholder="Full name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50" />
@@ -393,31 +432,22 @@ export default function WalkinsPage() {
               <input type="tel" name="customer-phone" autoComplete="tel" placeholder="+91 XXXXX XXXXX" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Email (optional)</label>
               <input type="email" name="customer-email" autoComplete="email" placeholder="email@example.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50" />
             </div>
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Requirement *</label>
-              <select value={form.requirement} onChange={e => setForm(f => ({ ...f, requirement: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50">
+              <select disabled={requirementsLoading || !!requirementsError} value={form.requirement} onChange={e => setForm(f => ({ ...f, requirement: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50">
                 <option value="">What are they looking for?</option>
-                <option>Sofa / Sofa Set</option>
-                <option>Bed</option>
-                <option>Dining Table</option>
-                <option>Wardrobe</option>
-                <option>Office Chair</option>
-                <option>TV Unit</option>
-                <option>Bookshelf / Storage</option>
-                <option>Kids Furniture</option>
-                <option>Modular Kitchen</option>
-                <option>Dressing Table</option>
-                <option>Center Table</option>
-                <option>Other</option>
+                {requirements.map(option => <option key={option} value={option}>{option}</option>)}
               </select>
+              {requirementsLoading && <p role="status" className="text-xs text-muted mt-2">Loading requirements...</p>}
+              {requirementsError && <div className="text-xs text-red-500 mt-2" role="alert">{requirementsError} <button type="button" onClick={refreshRequirements} className="underline">Retry</button></div>}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Budget Range</label>
               <select value={form.budget} onChange={e => setForm(f => ({ ...f, budget: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50">
@@ -444,9 +474,9 @@ export default function WalkinsPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
             <textarea rows={3} placeholder="Any specific preferences, color, size, etc." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowRegisterModal(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
-            <button onClick={handleRegister} disabled={submitting || !form.name || !form.phone || !form.requirement} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            <button onClick={handleRegister} disabled={submitting || requirementsLoading || !!requirementsError || !form.name || !form.phone || !form.requirement} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
               {submitting ? 'Registering...' : 'Register Customer'}
             </button>
           </div>
@@ -588,7 +618,7 @@ export default function WalkinsPage() {
                 <p className="text-[11px] text-muted mt-1.5">Share this link via WhatsApp, SMS, or display it on a tablet at your entrance.</p>
               </div>
 
-              <div className="flex gap-2">
+              <div className="ui-actions flex gap-2">
                 <button onClick={downloadQr} className="flex-1 flex items-center justify-center gap-2 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors">
                   <Download className="w-4 h-4" /> Download
                 </button>

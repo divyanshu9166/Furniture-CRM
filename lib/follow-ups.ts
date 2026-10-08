@@ -3,19 +3,13 @@
 // Deterministic (no hidden "now") so the logic is easy to reason about.
 // ------------------------------------------------------------
 
+import { indiaDay } from './commerce/rules'
 export type DueBucket = 'overdue' | 'today' | 'upcoming'
-
-/** Strip time-of-day so comparisons are by calendar day in local time. */
-function startOfDay(d: Date): number {
-    const x = new Date(d)
-    x.setHours(0, 0, 0, 0)
-    return x.getTime()
-}
 
 /** Whole-day difference: (followUpDate - now), positive = future. */
 export function daysUntil(followUpDate: Date, now: Date): number {
     const MS = 86_400_000
-    return Math.round((startOfDay(followUpDate) - startOfDay(now)) / MS)
+    return Math.round((Date.parse(followUpDate.toISOString().slice(0, 10)) - Date.parse(indiaDay(now))) / MS)
 }
 
 export function dueBucket(followUpDate: Date, now: Date): DueBucket {

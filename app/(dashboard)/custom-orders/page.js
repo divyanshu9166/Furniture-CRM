@@ -13,16 +13,12 @@ import {
 } from 'lucide-react';
 import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
-import {
-  getCustomOrders, createCustomOrder, updateCustomOrderStatus,
-  scheduleVisit, updateMeasurements, updateMeasurementsWithPhotos, updateReferenceImages,
-  addTimelineEntry, sendProgressNotification,
-} from '@/app/actions/custom-orders';
-import { moveCustomOrderToDraft } from '@/app/actions/drafts';
-import { getStaff } from '@/app/actions/staff';
-import { getProducts } from '@/app/actions/products';
-import { getChannelConfigs } from '@/app/actions/channels';
-import { searchContacts, getCustomerProfile } from '@/app/actions/invoices';
+import {getCustomOrders as getCustomOrdersAction, createCustomOrder as createCustomOrderAction, updateCustomOrderStatus as updateCustomOrderStatusAction, scheduleVisit as scheduleVisitAction, updateMeasurements as updateMeasurementsAction, updateMeasurementsWithPhotos as updateMeasurementsWithPhotosAction, updateReferenceImages as updateReferenceImagesAction, addTimelineEntry as addTimelineEntryAction, sendProgressNotification as sendProgressNotificationAction} from '@/app/actions/custom-orders';
+import {moveCustomOrderToDraft as moveCustomOrderToDraftAction} from '@/app/actions/drafts';
+import {getStaff as getStaffAction} from '@/app/actions/staff';
+import {getProducts as getProductsAction} from '@/app/actions/products';
+import {getChannelConfigs as getChannelConfigsAction} from '@/app/actions/channels';
+import {searchContacts as searchContactsAction, getCustomerProfile as getCustomerProfileAction} from '@/app/actions/invoices';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 
 const customOrderStatuses = ['All', 'Measurement Scheduled', 'In Production', 'Quality Check', 'Delivered'];
@@ -53,10 +49,28 @@ const statusConfig = {
 
 const statusSteps = ['Measurement Scheduled', 'In Production', 'Quality Check', 'Delivered'];
 
+import { safeAction } from '@/lib/safe-action';
+const getCustomOrders = safeAction(getCustomOrdersAction);
+const createCustomOrder = safeAction(createCustomOrderAction);
+const updateCustomOrderStatus = safeAction(updateCustomOrderStatusAction);
+const scheduleVisit = safeAction(scheduleVisitAction);
+const updateMeasurements = safeAction(updateMeasurementsAction);
+const updateMeasurementsWithPhotos = safeAction(updateMeasurementsWithPhotosAction);
+const updateReferenceImages = safeAction(updateReferenceImagesAction);
+const addTimelineEntry = safeAction(addTimelineEntryAction);
+const sendProgressNotification = safeAction(sendProgressNotificationAction);
+const moveCustomOrderToDraft = safeAction(moveCustomOrderToDraftAction);
+const getStaff = safeAction(getStaffAction);
+const getProducts = safeAction(getProductsAction);
+const getChannelConfigs = safeAction(getChannelConfigsAction);
+const searchContacts = safeAction(searchContactsAction);
+const getCustomerProfile = safeAction(getCustomerProfileAction);
+
 export default function CustomOrdersPage() {
   const [customOrders, setCustomOrders] = useState([]);
   const [staff, setStaff] = useState([]);
   const [products, setProducts] = useState([]);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -95,11 +109,14 @@ export default function CustomOrdersPage() {
 
   const reload = useCallback(async () => {
     const res = await getCustomOrders();
-    if (res.success) setCustomOrders(res.data);
+    if (res.success) { setCustomOrders(res.data); setLoadError(''); }
+    else setLoadError(res.error || 'Could not load custom orders');
   }, []);
 
   useEffect(() => {
     Promise.all([getCustomOrders(), getStaff(), getProducts()]).then(([ordersRes, staffRes, productsRes]) => {
+      const failed = [ordersRes, staffRes, productsRes].find(res => !res.success);
+      if (failed) setLoadError(failed.error || 'Could not load custom orders');
       if (ordersRes.success) setCustomOrders(ordersRes.data);
       if (staffRes.success) setStaff(staffRes.data);
       if (productsRes.success) setProducts(productsRes.data);
@@ -115,7 +132,7 @@ export default function CustomOrdersPage() {
 
   const activeOrders = customOrders.filter(o => o.status !== 'Delivered').length;
   const totalValue = customOrders.reduce((s, o) => s + (o.quotedPrice || 0), 0);
-  const pendingPayment = customOrders.reduce((s, o) => s + ((o.quotedPrice || 0) - o.advancePaid), 0);
+  const pendingPayment = customOrders.reduce((s, o) => s + Math.max(0, (o.quotedPrice || 0) - o.advancePaid), 0);
   const measurementsPending = customOrders.filter(o => o.status === 'Measurement Scheduled').length;
 
   const activeStaff = staff.filter(s => s.status === 'Active');
@@ -133,6 +150,7 @@ export default function CustomOrdersPage() {
         if (updated) setSelectedOrder(updated);
       }
     }
+    else notify(res.error || 'Could not update order status', { variant: 'danger' });
     setSaving(false);
   };
 
@@ -156,7 +174,7 @@ export default function CustomOrdersPage() {
         if (updated) setSelectedOrder(updated);
       }
       setShowScheduleVisit(false);
-    }
+    } else notify(res.error || 'Could not schedule visit', { variant: 'danger' });
     setSaving(false);
   };
 
@@ -263,7 +281,8 @@ export default function CustomOrdersPage() {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (data.success && data.urls?.length > 0) {
-        await updateReferenceImages(orderId, data.urls);
+        const saved = await updateReferenceImages(orderId, data.urls);
+        if (!saved.success) throw new Error(saved.error || 'Could not save reference images');
         await reload();
         if (selectedOrder?.dbId === orderId) {
           const updated = (await getCustomOrders()).data?.find(o => o.dbId === orderId);
@@ -395,6 +414,7 @@ export default function CustomOrdersPage() {
 
   // ─── LOADING STATE ────────────────────────────────────
 
+  if (loadError && !loading) return <div role="alert" className="glass-card p-6 text-center"><p>{loadError}</p><button onClick={() => window.location.reload()} className="mt-3 px-4 py-2 bg-accent text-white rounded-lg">Retry</button></div>;
   if (loading) {
     return (
       <div className="space-y-6 animate-pulse">
@@ -408,18 +428,18 @@ export default function CustomOrdersPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Custom Orders</h1>
           <p className="text-sm text-muted mt-1">On-site measurements, custom furniture & production tracking</p>
         </div>
-        <button onClick={() => setShowNewOrderModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+        <button onClick={() => setShowNewOrderModal(true)} className="ui-actions flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
           <Plus className="w-4 h-4" /> New Custom Order
         </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="glass-card p-4 flex items-center gap-3">
           <div className="p-2.5 rounded-xl bg-accent-light"><Hammer className="w-5 h-5 text-accent" /></div>
           <div><p className="text-xs text-muted">Active Orders</p><p className="text-lg font-bold text-foreground">{activeOrders}</p></div>
@@ -439,7 +459,7 @@ export default function CustomOrdersPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="ui-filters flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input type="text" placeholder="Search orders..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
@@ -458,7 +478,7 @@ export default function CustomOrdersPage() {
           <p className="text-sm text-muted">No custom orders found</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-4">
           {filtered.map(order => {
             const sc = statusConfig[order.status] || statusConfig['Measurement Scheduled'];
             const StatusIcon = sc.icon;
@@ -626,7 +646,7 @@ export default function CustomOrdersPage() {
               </div>
 
               {/* Quick Actions */}
-              <div className="flex gap-2 flex-wrap">
+              <div className="ui-actions flex gap-2 flex-wrap">
                 <button onClick={() => { setScheduleOrderId(selectedOrder.dbId); setShowScheduleVisit(true); }} className="flex items-center gap-1.5 px-3 py-2 bg-surface hover:bg-surface-hover rounded-lg text-xs font-medium text-foreground border border-border transition-all">
                   <MapPinned className="w-3.5 h-3.5 text-blue-700" /> Schedule Visit
                 </button>
@@ -825,7 +845,7 @@ export default function CustomOrdersPage() {
                   </div>
                   {selectedOrder.inventoryItems.some(i => i.status === 'READY') && (
                     <p className="text-xs text-emerald-600 mt-3 font-medium">
-                      🎯 Items are ready — update order status to "Delivered" and notify the customer.
+                      🎯 Items are ready — update order status to &quot;Delivered&quot; and notify the customer.
                     </p>
                   )}
                 </div>
@@ -871,7 +891,7 @@ export default function CustomOrdersPage() {
         {customOrderToDraft && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Move <strong className="text-foreground">{customOrderToDraft.id}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex justify-end gap-3">
+            <div className="ui-actions flex justify-end gap-3">
               <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveToDraft} disabled={deletingCustomOrder} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingCustomOrder ? 'Moving...' : 'Move to Draft'}</button>
             </div>
@@ -906,7 +926,7 @@ export default function CustomOrdersPage() {
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Visit Date *</label>
               <input type="date" name="date" required className="w-full px-4 py-2.5 rounded-xl text-sm" />
@@ -926,7 +946,7 @@ export default function CustomOrdersPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
             <textarea name="notes" rows={2} placeholder="Any special instructions..." className="w-full px-4 py-2.5 rounded-xl text-sm resize-none" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowScheduleVisit(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button type="submit" disabled={saving} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
               {saving ? 'Scheduling...' : 'Schedule Visit'}
@@ -948,7 +968,7 @@ export default function CustomOrdersPage() {
           const meas = order?.measurements || {};
           return (
             <form onSubmit={handleMeasurementsUpdate} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="ui-form-grid grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-muted mb-1">Length</label>
                   <input type="text" name="length" defaultValue={meas.length || ''} placeholder="e.g., 12 ft" className="w-full px-3 py-2.5 rounded-xl text-sm" />
@@ -994,7 +1014,7 @@ export default function CustomOrdersPage() {
                 </div>
                 <input ref={measurementPhotoInputRef} type="file" accept="image/*" multiple onChange={handleMeasurementPhotoAdd} className="hidden" />
               </div>
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="ui-actions flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => { setShowMeasurements(false); setMeasurementPhotos([]); }} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
                 <button type="submit" disabled={saving || uploadingMeasurementPhotos} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
                   {uploadingMeasurementPhotos ? 'Uploading...' : saving ? 'Saving...' : 'Save Measurements'}
@@ -1032,7 +1052,7 @@ export default function CustomOrdersPage() {
               {/* Channel selection */}
               <div>
                 <p className="text-xs font-medium text-muted mb-2 uppercase tracking-wide">Send via</p>
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   <button
                     type="button"
                     onClick={() => setNotifyChannels(p => ({ ...p, whatsapp: !p.whatsapp }))}
@@ -1277,7 +1297,7 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
       <input type="hidden" name="referenceImagesJson" defaultValue="" />
       {/* Customer Info */}
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="ui-form-grid grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Customer Name *</label>
             <input type="text" name="customer" required placeholder="Full name"
@@ -1402,7 +1422,7 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
         <h4 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
           <Ruler className="w-4 h-4 text-accent" /> Measurements (if available)
         </h4>
-        <div className="grid grid-cols-4 gap-3">
+        <div className="ui-form-grid grid grid-cols-4 gap-3">
           <div><label className="block text-xs text-muted mb-1">Length</label><input type="text" name="length" placeholder="e.g., 12 ft" className="w-full px-3 py-2 rounded-xl text-sm" /></div>
           <div><label className="block text-xs text-muted mb-1">Width</label><input type="text" name="width" placeholder="e.g., 8 ft" className="w-full px-3 py-2 rounded-xl text-sm" /></div>
           <div><label className="block text-xs text-muted mb-1">Height</label><input type="text" name="height" placeholder="e.g., 9 ft" className="w-full px-3 py-2 rounded-xl text-sm" /></div>
@@ -1415,11 +1435,11 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
       </div>
 
       {/* Materials, Color, Price */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="ui-form-grid grid grid-cols-2 gap-4">
         <div><label className="block text-xs font-medium text-muted mb-1.5">Materials</label><input type="text" name="materials" placeholder="e.g., Marine Plywood, Marble" className="w-full px-4 py-2.5 rounded-xl text-sm" /></div>
         <div><label className="block text-xs font-medium text-muted mb-1.5">Color / Finish</label><input type="text" name="color" placeholder="e.g., White Glossy" className="w-full px-4 py-2.5 rounded-xl text-sm" /></div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="ui-form-grid grid grid-cols-3 gap-4">
         <div><label className="block text-xs font-medium text-muted mb-1.5">Quoted Price (₹)</label><input type="number" name="quotedPrice" placeholder="0" className="w-full px-4 py-2.5 rounded-xl text-sm" /></div>
         <div><label className="block text-xs font-medium text-muted mb-1.5">Advance Paid (₹)</label><input type="number" name="advancePaid" placeholder="0" className="w-full px-4 py-2.5 rounded-xl text-sm" /></div>
         <div><label className="block text-xs font-medium text-muted mb-1.5">Est. Delivery</label><input type="date" name="estimatedDelivery" className="w-full px-4 py-2.5 rounded-xl text-sm" /></div>
@@ -1438,7 +1458,7 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
           <span className="text-sm font-medium text-foreground">Schedule a field visit</span>
         </label>
         {scheduleVisitChecked && (
-          <div className="mt-3 grid grid-cols-3 gap-3 p-3 bg-surface rounded-xl">
+          <div className="ui-form-grid mt-3 grid grid-cols-3 gap-3 p-3 bg-surface rounded-xl">
             <div>
               <label className="block text-xs text-muted mb-1">Visit Date *</label>
               <input type="date" name="visitDate" required={scheduleVisitChecked} className="w-full px-3 py-2 rounded-xl text-sm" />
@@ -1466,7 +1486,7 @@ function NewOrderForm({ staff, products, saving, onSubmit, onCancel }) {
         )}
       </div>
 
-      <div className="flex justify-end gap-3 pt-2">
+      <div className="ui-actions flex justify-end gap-3 pt-2">
         <button type="button" onClick={onCancel} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
         <button type="submit" disabled={saving || uploadingImages} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">
           {uploadingImages ? 'Uploading...' : saving ? 'Creating...' : 'Create Order'}

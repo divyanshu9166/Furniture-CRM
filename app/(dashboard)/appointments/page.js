@@ -120,12 +120,12 @@ export default function AppointmentsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Appointments</h1>
           <p className="text-sm text-muted mt-1">{appointments.filter(a => a.status === 'Scheduled').length} upcoming · {appointments.filter(a => a.status === 'Completed').length} completed</p>
         </div>
-        <button onClick={() => setShowBookModal(true)} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
+        <button onClick={() => setShowBookModal(true)} className="ui-actions flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
           <Plus className="w-4 h-4" /> Book Appointment
         </button>
       </div>
@@ -133,7 +133,7 @@ export default function AppointmentsPage() {
       <Modal isOpen={!!appointmentToCancel} onClose={() => setAppointmentToCancel(null)} title="Cancel Appointment" size="sm">
         <div className="space-y-4">
           <p className="text-sm text-muted">Are you sure you want to cancel this appointment?</p>
-          <div className="flex justify-end gap-3">
+          <div className="ui-actions flex justify-end gap-3">
             <button onClick={() => setAppointmentToCancel(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">No</button>
             <button onClick={confirmCancel} disabled={cancelling} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{cancelling ? 'Cancelling...' : 'Yes, Cancel'}</button>
           </div>
@@ -143,7 +143,7 @@ export default function AppointmentsPage() {
       <Modal isOpen={!!appointmentToDraft} onClose={() => setAppointmentToDraft(null)} title="Move Appointment to Draft" size="sm">
         <div className="space-y-4">
           <p className="text-sm text-muted">Move this appointment to drafts? It will be permanently deleted after 30 days.</p>
-          <div className="flex justify-end gap-3">
+          <div className="ui-actions flex justify-end gap-3">
             <button onClick={() => setAppointmentToDraft(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
             <button onClick={confirmMoveToDraft} disabled={deletingAppointment} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">{deletingAppointment ? 'Moving...' : 'Move to Draft'}</button>
           </div>
@@ -160,7 +160,7 @@ export default function AppointmentsPage() {
                 {appointments.filter(a => a.date && a.date.startsWith(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}`)).length} appointments this month
               </p>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="ui-actions flex items-center gap-1.5">
               <button
                 onClick={() => { const t = new Date(); setCurrentMonth(t.getMonth()); setCurrentYear(t.getFullYear()); setSelectedDate(t.toISOString().split('T')[0]); }}
                 className="tap-press-sm px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
@@ -225,7 +225,7 @@ export default function AppointmentsPage() {
                   <p className="text-xs text-accent mb-2">{apt.purpose}</p>
                   {apt.notes && <p className="text-xs text-muted mb-3">{apt.notes}</p>}
                   {apt.status === 'Scheduled' && (
-                    <div className="flex gap-2">
+                    <div className="ui-actions flex gap-2">
                       <button onClick={() => handleComplete(apt.id)}
                         className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-success-light text-success text-xs font-medium hover:bg-success/20 transition-colors">
                         <Check className="w-3.5 h-3.5" /> Complete
@@ -257,7 +257,7 @@ export default function AppointmentsPage() {
         <div className="px-5 py-4 border-b border-border">
           <h2 className="text-base font-semibold text-foreground">All Appointments</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div className="ui-table-scroll overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr><th>Customer</th><th>Date</th><th>Time</th><th>Purpose</th><th>Status</th><th>Actions</th></tr>
@@ -282,7 +282,7 @@ export default function AppointmentsPage() {
                   <td><span className={`badge ${statusColors[apt.status]}`}>{apt.status}</span></td>
                   <td>
                     {apt.status === 'Scheduled' && (
-                      <div className="flex gap-1">
+                      <div className="ui-actions flex gap-1">
                         <button onClick={() => handleComplete(apt.id)} title="Mark Complete"
                           className="p-1.5 rounded-lg bg-success-light text-success hover:bg-success/20 transition-colors">
                           <Check className="w-3.5 h-3.5" />
@@ -325,7 +325,7 @@ export default function AppointmentsPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Phone</label>
             <input type="tel" name="phone" required placeholder="+91..." className="w-full" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Date</label>
               <input type="date" name="date" required className="w-full" />
@@ -351,7 +351,7 @@ export default function AppointmentsPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
             <textarea rows={3} name="notes" placeholder="Additional notes..." className="w-full" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowBookModal(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button type="submit" className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">Book Appointment</button>
           </div>

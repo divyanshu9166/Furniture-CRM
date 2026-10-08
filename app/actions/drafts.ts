@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '@/lib/auth-helpers'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
-import { syncProductStockFromGodowns } from './godowns'
+import { inventoryError, inventoryTransaction, lockProducts, moveStock, moveTotalStock } from '@/lib/inventory/stock'
 import {
   InvoiceStatus,
   LeadStatus,
@@ -15,6 +15,8 @@ import {
   QuotationStatus,
   WalkinStatus,
 } from '@prisma/client'
+
+import { activeStaff, nextDocumentId } from '@/lib/commerce/documents'
 
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -43,41 +45,17 @@ async function adjustGodownStockWithTx(tx: any, params: {
   referenceId?: number
   notes?: string
   createdBy?: string
+  reverseBatches?: boolean
 }) {
-  const existing = await tx.godownStock.findUnique({
-    where: { productId_godownId: { productId: params.productId, godownId: params.godownId } },
-  })
-  const currentQty = existing?.quantity || 0
-  const newQty = Math.max(0, currentQty + params.quantity)
-
-  await tx.godownStock.upsert({
-    where: { productId_godownId: { productId: params.productId, godownId: params.godownId } },
-    create: { productId: params.productId, godownId: params.godownId, quantity: newQty },
-    update: { quantity: newQty },
-  })
-
-  await tx.stockLedger.create({
-    data: {
-      productId: params.productId,
-      godownId: params.godownId,
-      entryType: params.entryType,
-      quantity: params.quantity,
-      balanceAfter: newQty,
-      referenceType: params.referenceType,
-      referenceId: params.referenceId,
-      notes: params.notes,
-      createdBy: params.createdBy,
-    },
-  })
-
-  await syncProductStockFromGodowns(params.productId, tx)
-
-  return newQty
+  const { productId, godownId, quantity, entryType, ...options } = params
+  return (await moveStock(tx, productId, godownId, quantity, entryType, options)).godownBalance
 }
 
 // ─── MOVE CUSTOM ORDER TO DRAFT ────────────────────────
 
 export async function moveCustomOrderToDraft(orderId: number) {
+  try {
+  await requireRole('ADMIN', 'MANAGER')
   const order = await prisma.customOrder.findUnique({
     where: { id: orderId },
     include: {
@@ -101,6 +79,9 @@ export async function moveCustomOrderToDraft(orderId: number) {
     type: order.type,
     status: order.status,
     assignedStaff: order.assignedStaff?.name || null,
+    assignedStaffId: order.assignedStaffId,
+    referenceProductId: order.referenceProductId,
+    photos: order.photos,
     date: order.date.toISOString(),
     estimatedDelivery: order.estimatedDelivery?.toISOString() || null,
     measurements: order.measurements,
@@ -120,32 +101,21 @@ export async function moveCustomOrderToDraft(orderId: number) {
     })),
   }
 
-  await prisma.$transaction([
-    prisma.draft.create({
-      data: {
-        sourceType: 'CustomOrder',
-        sourceId: order.displayId,
-        data: snapshot,
-        deletedBy: 'Manager',
-        deletedAt: now,
-        expiresAt,
-      },
-    }),
-    // Delete timeline entries first (cascade should handle but being explicit)
-    prisma.customOrderTimeline.deleteMany({ where: { customOrderId: orderId } }),
-    // Unlink field visits from this order (don't delete visits, just unlink)
-    prisma.fieldVisit.updateMany({
-      where: { customOrderId: orderId },
-      data: { customOrderId: null },
-    }),
-    // Delete the custom order
-    prisma.customOrder.delete({ where: { id: orderId } }),
-  ])
+  await inventoryTransaction(prisma, async tx => {
+    await tx.$queryRaw`SELECT id FROM "CustomOrder" WHERE id = ${orderId} FOR UPDATE`
+    const current = await tx.customOrder.findUnique({ where: { id: orderId } })
+    if (!current || current.updatedAt.getTime() !== order.updatedAt.getTime()) throw new Error('Order changed; refresh before moving to drafts')
+    if (current.status !== 'MEASUREMENT_SCHEDULED' || current.advancePaid > 0) throw new Error('Only unstarted custom orders without advances can move to drafts')
+    if (await tx.fieldVisit.count({ where: { customOrderId: orderId } }) || await tx.productionOrder.count({ where: { customOrderId: orderId } }) || await tx.customOrderInventory.count({ where: { customOrderId: orderId } }) || await tx.dailyPayment.count({ where: { customOrderId: orderId } })) throw new Error('Custom order has visit, production, inventory or financial history and cannot be deleted')
+    await tx.draft.create({ data: { sourceType: 'CustomOrder', sourceId: order.displayId, data: snapshot, deletedBy: 'Manager', deletedAt: now, expiresAt } })
+    await tx.customOrder.delete({ where: { id: orderId } })
+  })
 
   revalidatePath('/custom-orders')
   revalidatePath('/staff-portal')
   revalidatePath('/drafts')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── MOVE SELF VISIT TO DRAFT ─────────────────────────
@@ -360,6 +330,8 @@ export async function moveAppointmentToDraft(appointmentId: number) {
 // ─── MOVE ORDER TO DRAFT ────────────────────────────
 
 export async function moveOrderToDraft(orderId: number) {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
@@ -396,7 +368,11 @@ export async function moveOrderToDraft(orderId: number) {
     subtitle: order.product?.name ? `${order.product.name} · Qty ${order.quantity}` : 'Order',
   }
 
-  await prisma.$transaction(async (tx) => {
+  await inventoryTransaction(prisma, async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${orderId} FOR UPDATE`
+    const current = await tx.order.findUnique({ where: { id: orderId } })
+    if (!current || current.updatedAt.getTime() !== order.updatedAt.getTime()) throw new Error('Order changed. Refresh before moving it to drafts.')
+    await lockProducts(tx, [order.productId])
     if (shouldDeductStock) {
       if (order.godownId) {
         await adjustGodownStockWithTx(tx, {
@@ -408,16 +384,19 @@ export async function moveOrderToDraft(orderId: number) {
           referenceId: order.id,
           notes: `Reversal for deleted order ${order.displayId}`,
           createdBy: 'Orders',
+          reverseBatches: true,
         })
-        const newSold = Math.max(0, (order.product?.sold || 0) - order.quantity)
+        const currentProduct = await tx.product.findUniqueOrThrow({ where: { id: order.productId } })
+        const newSold = Math.max(0, currentProduct.sold - order.quantity)
         await tx.product.update({ where: { id: order.productId }, data: { sold: newSold } })
       } else {
         const product = await tx.product.findUnique({ where: { id: order.productId }, select: { sold: true } })
         if (!product) throw new Error('Product not found')
         const newSold = Math.max(0, (product.sold || 0) - order.quantity)
+        await moveTotalStock(tx, order.productId, order.quantity, 'IN', { referenceType: 'Order', referenceId: order.id, notes: `Reversal for deleted order ${order.displayId}`, createdBy: 'Orders', reverseBatches: true })
         await tx.product.update({
           where: { id: order.productId },
-          data: { stock: { increment: order.quantity }, sold: newSold },
+          data: { sold: newSold },
         })
       }
     }
@@ -439,7 +418,9 @@ export async function moveOrderToDraft(orderId: number) {
   revalidatePath('/orders')
   revalidatePath('/inventory')
   revalidatePath('/drafts')
+  revalidatePath('/godowns')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── MOVE QUOTATION TO DRAFT ────────────────────────
@@ -519,6 +500,8 @@ export async function moveQuotationToDraft(quotationId: number) {
 // ─── MOVE INVOICE TO DRAFT ──────────────────────────
 
 export async function moveInvoiceToDraft(invoiceId: number) {
+  try {
+  await requireRole('ADMIN', 'MANAGER')
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
     include: {
@@ -615,7 +598,11 @@ export async function moveInvoiceToDraft(invoiceId: number) {
     subtitle: `Invoice · ${invoice.displayId}`,
   }
 
-  await prisma.$transaction(async (tx) => {
+  await inventoryTransaction(prisma, async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Invoice" WHERE id = ${invoiceId} FOR UPDATE`
+    const current = await tx.invoice.findUnique({ where: { id: invoiceId }, include: { payments: true, creditNotes: true, eWayBills: true } })
+    if (!current || current.updatedAt.getTime() !== invoice.updatedAt.getTime()) throw new Error('Invoice changed; refresh before moving to drafts')
+    if (current.amountPaid || current.payments.length || current.creditNotes.length || current.eWayBills.length || await tx.dailyPayment.count({ where: { invoiceId } }) || await tx.stockLedger.count({ where: { referenceType: 'Invoice', referenceId: invoiceId } })) throw new Error('Invoice has stock/financial history. Cancel an unpaid invoice or use a credit note; do not delete its audit trail')
     await tx.draft.create({
       data: {
         sourceType: 'Invoice',
@@ -635,12 +622,14 @@ export async function moveInvoiceToDraft(invoiceId: number) {
   revalidatePath('/billing')
   revalidatePath('/drafts')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── MOVE PURCHASE ORDER TO DRAFT ───────────────────
 
 export async function movePurchaseOrderToDraft(poId: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try {
 
   const po = await prisma.purchaseOrder.findUnique({
     where: { id: poId },
@@ -718,13 +707,17 @@ export async function movePurchaseOrderToDraft(poId: number) {
     subtitle: `PO · ${po.displayId}`,
   }
 
-  await prisma.$transaction(async (tx) => {
+  await inventoryTransaction(prisma, async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${poId} FOR UPDATE`
+    const current = await tx.purchaseOrder.findUnique({ where: { id: poId } })
+    if (!current || current.updatedAt.getTime() !== po.updatedAt.getTime()) throw new Error('Purchase order changed. Refresh before moving it to drafts.')
+    if (current.amountPaid > 0 || await tx.purchasePayment.count({ where: { poId } }) || await tx.purchaseReturn.count({ where: { poId } })) throw new Error('A purchase with payments or returns cannot move to drafts; preserve its financial history')
+    await lockProducts(tx, receivedItems.map(item => item.productId))
     if (receivedItems.length > 0) {
       for (const item of receivedItems) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.receivedQty } },
-        })
+        const receipts = await tx.batchMovement.findMany({ where: { quantity: { gt: 0 }, stockLedger: { productId: item.productId, referenceType: 'PurchaseOrder', referenceId: poId } } })
+        const batchIds = [...new Set(receipts.flatMap((row: { batchId: number | null }) => row.batchId ? [row.batchId] : []))]
+        await moveTotalStock(tx, item.productId, -item.receivedQty, 'OUT', { referenceType: 'PurchaseOrder', referenceId: poId, notes: `Reversal for deleted PO ${po.displayId}`, createdBy: 'Purchases', reverseBatches: true, ...(batchIds.length ? { onlyBatchIds: batchIds } : {}) })
         await tx.stockUpdate.create({
           data: {
             product: item.name,
@@ -755,7 +748,9 @@ export async function movePurchaseOrderToDraft(poId: number) {
   revalidatePath('/purchases')
   revalidatePath('/inventory')
   revalidatePath('/drafts')
+  revalidatePath('/godowns')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── MOVE EXPENSE TO DRAFT ──────────────────────────
@@ -824,23 +819,27 @@ export async function moveExpenseToDraft(expenseId: number) {
 // ─── MOVE PRODUCT TO DRAFT ──────────────────────────
 
 export async function moveProductToDraft(productId: number) {
-  const product = await prisma.product.findUnique({
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try {
+  const result = await inventoryTransaction(prisma, async tx => {
+  await lockProducts(tx, [productId])
+  const product = await tx.product.findUnique({
     where: { id: productId },
     include: { category: true, warehouse: true, stockGroup: true },
   })
   if (!product) return { success: false, error: 'Product not found' }
 
-  const usageChecks = await prisma.$transaction([
-    prisma.bomItem.count({ where: { rawMaterialId: productId } }),
-    prisma.billOfMaterials.count({ where: { finishedProductId: productId } }),
-    prisma.productionOrder.count({ where: { finishedProductId: productId } }),
-    prisma.order.count({ where: { productId } }),
-    prisma.quotationItem.count({ where: { productId } }),
-    prisma.invoiceItem.count({ where: { productId } }),
-    prisma.purchaseOrderItem.count({ where: { productId } }),
-    prisma.purchaseReturnItem.count({ where: { productId } }),
-    prisma.godownStock.count({ where: { productId } }),
-    prisma.stockLedger.count({ where: { productId } }),
+  const usageChecks = await Promise.all([
+    tx.bomItem.count({ where: { rawMaterialId: productId } }),
+    tx.billOfMaterials.count({ where: { finishedProductId: productId } }),
+    tx.productionOrder.count({ where: { finishedProductId: productId } }),
+    tx.order.count({ where: { productId } }),
+    tx.quotationItem.count({ where: { productId } }),
+    tx.invoiceItem.count({ where: { productId } }),
+    tx.purchaseOrderItem.count({ where: { productId } }),
+    tx.purchaseReturnItem.count({ where: { productId } }),
+    tx.godownStock.count({ where: { productId } }),
+    tx.stockLedger.count({ where: { productId } }),
   ])
 
   const [bomUsage, bomFinished, prodUsage, orderUsage, quotationUsage, invoiceUsage, poUsage, prUsage, godownUsage, ledgerUsage] = usageChecks
@@ -851,6 +850,14 @@ export async function moveProductToDraft(productId: number) {
   if (poUsage > 0 || prUsage > 0) return { success: false, error: 'Cannot delete: product is linked to purchase documents.' }
   if (godownUsage > 0) return { success: false, error: 'Cannot delete: product has godown stock entries.' }
   if (ledgerUsage > 0) return { success: false, error: 'Cannot delete: product has stock ledger history.' }
+  const extraUsage = await Promise.all([
+    tx.productBatch.count({ where: { productId } }),
+    tx.materialConsumption.count({ where: { rawMaterialId: productId } }),
+    tx.scrapInventory.count({ where: { rawMaterialId: productId } }),
+    tx.customOrderInventory.count({ where: { productId } }),
+    tx.godownTransferItem.count({ where: { productId } }),
+  ])
+  if (extraUsage.some(count => count > 0)) return { success: false, error: 'Cannot delete: product has batch, production, transfer or custom-order history.' }
 
   const now = new Date()
   const expiresAt = getDraftExpiry(now)
@@ -862,6 +869,10 @@ export async function moveProductToDraft(productId: number) {
     categoryId: product.categoryId,
     categoryName: product.category?.name,
     price: product.price,
+    bulkPrice: product.bulkPrice,
+    brand: product.brand,
+    unitSize: product.unitSize,
+    createdAt: product.createdAt.toISOString(),
     stock: product.stock,
     sold: product.sold,
     reorderLevel: product.reorderLevel,
@@ -881,10 +892,7 @@ export async function moveProductToDraft(productId: number) {
     subtitle: `Product · ${product.sku}`,
   }
 
-  await prisma.$transaction([
-    prisma.stockLedger.deleteMany({ where: { productId } }),
-    prisma.godownStock.deleteMany({ where: { productId } }),
-    prisma.draft.create({
+  await tx.draft.create({
       data: {
         sourceType: 'Product',
         sourceId: product.sku,
@@ -893,13 +901,16 @@ export async function moveProductToDraft(productId: number) {
         deletedAt: now,
         expiresAt,
       },
-    }),
-    prisma.product.delete({ where: { id: productId } }),
-  ])
+    })
+  await tx.product.delete({ where: { id: productId } })
+  return { success: true }
+  })
 
   revalidatePath('/inventory')
   revalidatePath('/drafts')
-  return { success: true }
+  revalidatePath('/manufacturing')
+  return result
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── GET ALL DRAFTS ────────────────────────────────────
@@ -933,56 +944,36 @@ export async function getDrafts() {
 
 export async function restoreFromDraft(draftId: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try {
   const draft = await prisma.draft.findUnique({ where: { id: draftId } })
   if (!draft) return { success: false, error: 'Draft not found' }
 
   if (draft.sourceType === 'CustomOrder') {
-    const data = draft.data as Record<string, unknown>
-
-    // Find or create the contact
-    let contact = await prisma.contact.findFirst({
-      where: { phone: data.phone as string },
+    const data = draft.data as Record<string, any>
+    const displayId = await inventoryTransaction(prisma, async tx => {
+      await tx.$queryRaw`SELECT id FROM "Draft" WHERE id = ${draftId} FOR UPDATE`
+      if (!await tx.draft.findUnique({ where: { id: draftId } })) throw new Error('Draft was already restored')
+      let contact = await tx.contact.findFirst({ where: { phone: data.phone } })
+      if (!contact) contact = await tx.contact.create({ data: { name: data.customer, phone: data.phone, address: data.address, source: 'Custom Order' } })
+      const displayId = await nextDocumentId(tx, 'customOrder', 'CUS-')
+      await activeStaff(tx, data.assignedStaffId)
+      const referenceProductId = data.referenceProductId || data.referenceProduct?.id || null
+      if (referenceProductId && !await tx.product.findUnique({ where: { id: referenceProductId } })) throw new Error('Reference product no longer exists')
+      await tx.customOrder.create({ data: {
+        displayId, contactId: contact.id, phone: data.phone, address: data.address, type: data.type,
+        status: ['MEASUREMENT_SCHEDULED', 'IN_PRODUCTION', 'QUALITY_CHECK', 'DELIVERED'].includes(data.status) ? data.status : 'MEASUREMENT_SCHEDULED',
+        assignedStaffId: data.assignedStaffId || null, referenceProductId,
+        date: data.date ? new Date(data.date) : draft.deletedAt,
+        estimatedDelivery: data.estimatedDelivery ? new Date(data.estimatedDelivery) : null,
+        measurements: data.measurements || undefined, photos: data.photos || [], referenceImages: data.referenceImages || [],
+        materials: data.materials || null, color: data.color || null, quotedPrice: data.quotedPrice ?? null,
+        advancePaid: data.advancePaid || 0, productionNotes: data.productionNotes || null,
+        timeline: { create: (data.timeline || []).map((entry: any) => ({ ...entry, date: new Date(entry.date) })) },
+      } })
+      await tx.draft.delete({ where: { id: draftId } })
+      return displayId
     })
-    if (!contact) {
-      contact = await prisma.contact.create({
-        data: {
-          name: data.customer as string,
-          phone: data.phone as string,
-          address: data.address as string || '',
-          source: 'Custom Order',
-        },
-      })
-    }
-
-    // Generate new displayId
-    const lastOrder = await prisma.customOrder.findFirst({ orderBy: { id: 'desc' } })
-    const nextNum = lastOrder ? lastOrder.id + 1 : 1
-    const displayId = `CUS-${String(nextNum).padStart(3, '0')}`
-
-    await prisma.$transaction([
-      prisma.customOrder.create({
-        data: {
-          displayId,
-          contactId: contact.id,
-          phone: data.phone as string,
-          address: data.address as string,
-          type: data.type as string,
-          status: 'MEASUREMENT_SCHEDULED',
-          date: new Date(),
-          measurements: data.measurements as object || undefined,
-          referenceImages: (data.referenceImages as string[]) || [],
-          materials: data.materials as string || undefined,
-          color: data.color as string || undefined,
-          quotedPrice: data.quotedPrice as number || undefined,
-          advancePaid: (data.advancePaid as number) || 0,
-          productionNotes: data.productionNotes as string || undefined,
-        },
-      }),
-      prisma.draft.delete({ where: { id: draftId } }),
-    ])
-
-    revalidatePath('/custom-orders')
-    revalidatePath('/drafts')
+    revalidatePath('/custom-orders'); revalidatePath('/staff-portal'); revalidatePath('/drafts')
     return { success: true, data: { displayId } }
   }
 
@@ -1245,7 +1236,10 @@ export async function restoreFromDraft(draftId: number) {
     }
     const displayId = `${prefix}-${String(nextNum).padStart(4, '0')}`
 
-    await prisma.$transaction(async (tx) => {
+    await inventoryTransaction(prisma, async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Draft" WHERE id = ${draftId} FOR UPDATE`
+      if (!await tx.draft.findUnique({ where: { id: draftId } })) throw new Error('Draft was already restored')
+      await lockProducts(tx, [productId])
       const created = await tx.order.create({
         data: {
           displayId,
@@ -1277,13 +1271,13 @@ export async function restoreFromDraft(draftId: number) {
           })
           await tx.product.update({
             where: { id: productId },
-            data: { sold: product.sold + quantity },
+            data: { sold: { increment: quantity } },
           })
         } else {
+          await moveTotalStock(tx, productId, -quantity, 'OUT', { referenceType: 'Order', referenceId: created.id, notes: `Restored order ${displayId}`, createdBy: 'Orders' })
           await tx.product.update({
             where: { id: productId },
             data: {
-              stock: { decrement: quantity },
               sold: { increment: quantity },
             },
           })
@@ -1388,9 +1382,12 @@ export async function restoreFromDraft(draftId: number) {
   if (draft.sourceType === 'Invoice') {
     const data = draft.data as Record<string, any>
 
-    let contact = await prisma.contact.findFirst({ where: { phone: data.phone as string } })
+    const restoredDisplayId = await inventoryTransaction(prisma, async tx => {
+    await tx.$queryRaw`SELECT id FROM "Draft" WHERE id = ${draftId} FOR UPDATE`
+    if (!await tx.draft.findUnique({ where: { id: draftId } })) throw new Error('Draft was already restored')
+    let contact = await tx.contact.findFirst({ where: { phone: data.phone as string } })
     if (!contact) {
-      contact = await prisma.contact.create({
+      contact = await tx.contact.create({
         data: {
           name: data.customer as string,
           phone: data.phone as string,
@@ -1403,7 +1400,7 @@ export async function restoreFromDraft(draftId: number) {
       (data.customer && contact.name !== data.customer) ||
       (data.address && contact.address !== data.address)
     ) {
-      contact = await prisma.contact.update({
+      contact = await tx.contact.update({
         where: { id: contact.id },
         data: {
           name: data.customer as string,
@@ -1413,23 +1410,16 @@ export async function restoreFromDraft(draftId: number) {
     }
 
     const items = Array.isArray(data.items) ? data.items : []
-    if (items.length === 0) return { success: false, error: 'Invoice items missing' }
+    if (items.length === 0) throw new Error('Invoice items missing')
 
     const productIds = Array.from(new Set(items.map((item: any) => item.productId)))
-    const products = await prisma.product.findMany({ where: { id: { in: productIds } }, select: { id: true } })
+    const products = await tx.product.findMany({ where: { id: { in: productIds } }, select: { id: true } })
     const existingIds = new Set(products.map(p => p.id))
     const missing = productIds.filter(id => !existingIds.has(id))
-    if (missing.length > 0) return { success: false, error: 'One or more products for this invoice no longer exist' }
+    if (missing.length > 0) throw new Error('One or more products for this invoice no longer exist')
 
-    const lastInvoice = await prisma.invoice.findFirst({ orderBy: { id: 'desc' }, select: { displayId: true } })
-    let nextNum = 1
-    if (lastInvoice?.displayId) {
-      const match = lastInvoice.displayId.match(/INV-(\d+)/)
-      if (match) nextNum = parseInt(match[1]) + 1
-    }
-    const displayId = `INV-${String(nextNum).padStart(4, '0')}`
-
-    await prisma.$transaction(async (tx) => {
+    const settings = await tx.storeSettings.findUnique({ where: { id: 1 } })
+    const displayId = await nextDocumentId(tx, 'invoice', (settings?.invoicePrefix || 'INV-').trim() || 'INV-', settings?.invoicePadding ?? 4)
       const invoice = await tx.invoice.create({
         data: {
           displayId,
@@ -1462,11 +1452,11 @@ export async function restoreFromDraft(draftId: number) {
             create: items.map((item: any) => ({
               productId: item.productId,
               name: item.name,
-              sku: item.sku || null,
+              sku: item.sku || '',
               quantity: item.quantity,
               price: item.price,
               hsnCode: item.hsnCode || null,
-              gstRate: item.gstRate || 18,
+              gstRate: item.gstRate ?? 18,
               cgst: item.cgst || 0,
               sgst: item.sgst || 0,
               igst: item.igst || 0,
@@ -1489,22 +1479,10 @@ export async function restoreFromDraft(draftId: number) {
       })
 
       if (Array.isArray(data.creditNotes) && data.creditNotes.length > 0) {
-        const lastCN = await tx.creditNote.findFirst({ orderBy: { id: 'desc' }, select: { displayId: true } })
-        let nextCN = 1
-        if (lastCN?.displayId) {
-          const match = lastCN.displayId.match(/CN-(\d+)/)
-          if (match) nextCN = parseInt(match[1]) + 1
+        for (const cn of data.creditNotes) {
+          const creditDisplayId = await nextDocumentId(tx, 'creditNote', 'CN-')
+          await tx.creditNote.create({ data: { displayId: creditDisplayId, invoiceId: invoice.id, amount: cn.amount, reason: cn.reason, date: cn.date ? new Date(cn.date) : new Date() } })
         }
-
-        await tx.creditNote.createMany({
-          data: data.creditNotes.map((cn: any, idx: number) => ({
-            displayId: `CN-${String(nextCN + idx).padStart(4, '0')}`,
-            invoiceId: invoice.id,
-            amount: cn.amount,
-            reason: cn.reason,
-            date: cn.date ? new Date(cn.date) : new Date(),
-          })),
-        })
       }
 
       if (Array.isArray(data.eWayBills) && data.eWayBills.length > 0) {
@@ -1531,11 +1509,12 @@ export async function restoreFromDraft(draftId: number) {
       }
 
       await tx.draft.delete({ where: { id: draftId } })
+      return displayId
     })
 
     revalidatePath('/billing')
     revalidatePath('/drafts')
-    return { success: true, data: { displayId } }
+    return { success: true, data: { displayId: restoredDisplayId } }
   }
 
   if (draft.sourceType === 'PurchaseOrder') {
@@ -1579,7 +1558,10 @@ export async function restoreFromDraft(draftId: number) {
     const count = await prisma.purchaseOrder.count()
     const displayId = `PO-${String(count + 1).padStart(4, '0')}`
 
-    await prisma.$transaction(async (tx) => {
+    await inventoryTransaction(prisma, async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Draft" WHERE id = ${draftId} FOR UPDATE`
+      if (!await tx.draft.findUnique({ where: { id: draftId } })) throw new Error('Draft was already restored')
+      await lockProducts(tx, productIds)
       const created = await tx.purchaseOrder.create({
         data: {
           displayId,
@@ -1633,10 +1615,10 @@ export async function restoreFromDraft(draftId: number) {
       const receivedItems = items.filter((item: any) => item.receivedQty > 0)
       if (receivedItems.length > 0) {
         for (const item of receivedItems) {
+          await moveTotalStock(tx, item.productId, item.receivedQty, 'IN', { referenceType: 'PurchaseOrder', referenceId: created.id, notes: `Restored ${created.displayId}`, createdBy: 'Purchases' })
           await tx.product.update({
             where: { id: item.productId },
             data: {
-              stock: { increment: item.receivedQty },
               costPrice: item.unitCost,
               lastRestocked: new Date(),
             },
@@ -1780,13 +1762,21 @@ export async function restoreFromDraft(draftId: number) {
       stockGroupId = stockGroup.id
     }
 
-    const product = await prisma.product.create({
+    const product = await inventoryTransaction(prisma, async tx => {
+    // A repeated restore cannot create a second product after the draft is consumed.
+    await tx.$queryRaw`SELECT id FROM "Draft" WHERE id = ${draftId} FOR UPDATE`
+    if (!await tx.draft.findUnique({ where: { id: draftId } })) throw new Error('Draft was already restored')
+    const restored = await tx.product.create({
       data: {
         sku: data.sku as string,
         name: data.name as string,
         categoryId,
         price: data.price as number,
-        stock: data.stock as number,
+        stock: 0,
+        unitSize: (data.unitSize as number) ?? 1,
+        createdAt: data.createdAt ? new Date(data.createdAt as string) : undefined,
+        brand: (data.brand as string) || null,
+        bulkPrice: (data.bulkPrice as number) ?? null,
         sold: data.sold as number,
         reorderLevel: data.reorderLevel as number,
         image: (data.image as string) || null,
@@ -1801,8 +1791,11 @@ export async function restoreFromDraft(draftId: number) {
         stockGroupId: stockGroupId || null,
       },
     })
-
-    await prisma.draft.delete({ where: { id: draftId } })
+    if ((data.stock as number) > 0) await moveTotalStock(tx, restored.id, data.stock as number, 'IN', { referenceType: 'Manual', notes: 'Product restored from draft', createdBy: 'Manager' })
+    await tx.product.update({ where: { id: restored.id }, data: { lastRestocked: data.lastRestocked ? new Date(data.lastRestocked as string) : null } })
+    await tx.draft.delete({ where: { id: draftId } })
+    return restored
+    })
 
     revalidatePath('/inventory')
     revalidatePath('/drafts')
@@ -1810,6 +1803,7 @@ export async function restoreFromDraft(draftId: number) {
   }
 
   return { success: false, error: 'Unsupported draft type' }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── PERMANENTLY DELETE A DRAFT ────────────────────────

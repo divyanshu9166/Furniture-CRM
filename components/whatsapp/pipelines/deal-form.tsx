@@ -373,7 +373,7 @@ export function DealForm({
                 <p className="text-xs font-medium uppercase tracking-wider text-muted">
                   Status
                 </p>
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   <Button
                     type="button"
                     onClick={() => handleStatusChange("won")}
@@ -421,7 +421,7 @@ export function DealForm({
           </div>
 
           <div className="border-t border-border bg-surface p-4">
-            <div className="flex gap-2">
+            <div className="ui-actions flex gap-2">
               <Button
                 variant="outline"
                 onClick={() => onOpenChange(false)}
@@ -442,7 +442,7 @@ export function DealForm({
               (confirmDelete ? (
                 <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs">
                   <span className="text-red-300">Delete this deal?</span>
-                  <div className="flex gap-1">
+                  <div className="ui-actions flex gap-1">
                     <button
                       type="button"
                       onClick={() => setConfirmDelete(false)}

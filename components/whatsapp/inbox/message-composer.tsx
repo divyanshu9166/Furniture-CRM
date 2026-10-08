@@ -76,7 +76,7 @@ export function MessageComposer({
   );
 
   return (
-    <div className="shrink-0 border-t border-border bg-surface p-3 pb-[calc(0.75rem+60px+env(safe-area-inset-bottom))] md:pb-3">
+    <div className="ui-inbox-composer shrink-0 border-t border-border bg-surface p-3 pb-[calc(0.75rem+60px+env(safe-area-inset-bottom))] md:pb-3">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -88,7 +88,7 @@ export function MessageComposer({
       )}
 
       {sessionExpired && (
-        <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
+        <div className="ui-actions mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
           <p className="text-xs text-amber-400">
             24-hour session expired. Use a template to re-engage.
           </p>
@@ -104,13 +104,14 @@ export function MessageComposer({
         </div>
       )}
 
-      <div className="flex items-end gap-2">
+      <div className="ui-message-input-row flex items-end gap-2">
         <Button
           variant="ghost"
           size="sm"
           className="h-9 w-9 shrink-0 p-0 text-muted hover:text-foreground"
           onClick={onOpenTemplates}
           title="Send template"
+          aria-label="Send template"
         >
           <LayoutTemplate className="h-4 w-4" />
         </Button>
@@ -138,6 +139,7 @@ export function MessageComposer({
           className="h-9 w-9 shrink-0 bg-accent p-0 hover:bg-accent disabled:opacity-40"
           disabled={!text.trim() || sessionExpired || sending}
           onClick={handleSend}
+          aria-label="Send message"
         >
           <Send className="h-4 w-4" />
         </Button>

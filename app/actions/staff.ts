@@ -1,4 +1,5 @@
 'use server'
+import { inventoryError, inventoryTransaction, lockProducts, moveTotalStock } from '@/lib/inventory/stock'
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
@@ -615,25 +616,21 @@ export async function staffStockUpdate(data: unknown) {
   if (action === 'Received') delta = quantity
   else if (action === 'Stock Out' || action === 'Dispatched') delta = -quantity
 
-  const newStock = product.stock + delta
-  if (newStock < 0) return { success: false, error: `Cannot reduce stock below 0. Current stock: ${product.stock}` }
-
   const now = new Date()
   const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
 
-  // Update product stock (skip for Low Stock Alert — it's informational)
+  try {
+  const balances = await inventoryTransaction(prisma, async tx => {
+  await lockProducts(tx, [productId])
+  const current = await tx.product.findUnique({ where: { id: productId } })
+  if (!current) throw new Error('Product not found')
+  // Low Stock Alert stays informational; every physical movement has location and ledger entries.
   if (delta !== 0) {
-    await prisma.product.update({
-      where: { id: productId },
-      data: {
-        stock: { increment: delta },
-        ...(action === 'Received' ? { lastRestocked: now } : {}),
-      },
-    })
+    await moveTotalStock(tx, productId, delta, delta > 0 ? 'IN' : 'OUT', { referenceType: 'Manual', notes: `Staff ${staffId}: ${action}`, createdBy: `Staff ${staffId}` })
   }
 
   // Log the stock update
-  await prisma.stockUpdate.create({
+  await tx.stockUpdate.create({
     data: {
       staffId,
       product: product.name,
@@ -644,19 +641,24 @@ export async function staffStockUpdate(data: unknown) {
       time,
     },
   })
+  const updated = await tx.product.findUniqueOrThrow({ where: { id: productId } })
+  return { previousStock: current.stock, newStock: updated.stock }
+  })
 
   revalidatePath('/inventory')
   revalidatePath('/staff-portal')
   revalidatePath('/staff')
+  revalidatePath('/godowns')
 
   return {
     success: true,
     data: {
       productName: product.name,
-      previousStock: product.stock,
-      newStock: delta !== 0 ? newStock : product.stock,
+      previousStock: balances.previousStock,
+      newStock: balances.newStock,
       action,
       quantity,
     },
   }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }

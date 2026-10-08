@@ -359,7 +359,7 @@ export default function PayrollPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           { label: 'Active Staff', value: staffList.length, sub: `${staffConfigured} configured`, icon: Users, color: 'text-blue-400' },
           { label: 'Payroll Runs', value: history.length, sub: `${pendingApproval} pending`, icon: Calendar, color: 'text-purple-400' },
@@ -379,7 +379,7 @@ export default function PayrollPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
+      <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -402,7 +402,7 @@ export default function PayrollPage() {
             <p className="text-xs text-muted mt-1">Fields used: Basic Salary → HRA (40%) + DA (10%) auto-computed. PT deducted per state slab. TDS is fixed monthly amount.</p>
           </div>
 
-          <div className="glass-card overflow-x-auto">
+          <div className="ui-table-scroll glass-card overflow-x-auto">
             <table className="w-full text-sm min-w-[1200px]">
               <thead>
                 <tr className="border-b border-border bg-surface-hover">
@@ -446,7 +446,7 @@ export default function PayrollPage() {
                         <td className="px-3 py-2"><input value={staffForm.bankAccount} onChange={e => setStaffForm(p => ({ ...p, bankAccount: e.target.value }))} className="w-24 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground" placeholder="Acct No." /></td>
                         <td className="px-3 py-2"><input value={staffForm.panNumber} onChange={e => setStaffForm(p => ({ ...p, panNumber: e.target.value }))} className="w-20 px-2 py-1 bg-surface border border-border rounded text-xs text-foreground" placeholder="PAN" /></td>
                         <td className="px-3 py-2">
-                          <div className="flex gap-1">
+                          <div className="ui-actions flex gap-1">
                             <button onClick={handleSaveStaff} disabled={savingStaff} className="p-1.5 rounded bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"><Save className="w-3.5 h-3.5" /></button>
                             <button onClick={() => setEditingStaff(null)} className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"><X className="w-3.5 h-3.5" /></button>
                           </div>
@@ -561,7 +561,7 @@ export default function PayrollPage() {
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">{period}</span>
                 {attLoading && <div className="animate-spin rounded-full h-3.5 w-3.5 border-b-2 border-accent" />}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <p className="text-[11px] text-muted hidden md:block">Salary = (Basic / Working Days) × Payable Days + OT − LOP</p>
                 <button onClick={() => { loadAttendanceSummary(period) }}
                   className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-accent" title="Refresh">
@@ -613,7 +613,7 @@ export default function PayrollPage() {
             )}
 
             {showAttPanel && (
-              <div className="overflow-x-auto">
+              <div className="ui-table-scroll overflow-x-auto">
                 <table className="w-full text-xs min-w-[900px]">
                   <thead>
                     <tr className="border-b border-border">
@@ -744,7 +744,7 @@ export default function PayrollPage() {
               </div>
 
               {/* Per-staff table */}
-              <div className="overflow-x-auto">
+              <div className="ui-table-scroll overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-hover">
@@ -802,7 +802,7 @@ export default function PayrollPage() {
             )}
           </div>
 
-          <div className="glass-card overflow-x-auto">
+          <div className="ui-table-scroll glass-card overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
@@ -831,7 +831,7 @@ export default function PayrollPage() {
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${statusColors[ps.payrollRun?.status] || ''}`}>{ps.payrollRun?.status}</span>
                     </td>
                     <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
+                      <div className="ui-actions flex items-center gap-1">
                         <button onClick={() => handleSharePayslipWhatsApp(ps)}
                           className="p-1.5 rounded hover:bg-emerald-500/10 text-muted hover:text-emerald-700" title="Share on WhatsApp">
                           <MessageSquare className="w-3.5 h-3.5" />
@@ -912,7 +912,7 @@ export default function PayrollPage() {
 
       {/* ── HISTORY TAB ── */}
       {tab === 'history' && (
-        <div className="glass-card overflow-x-auto">
+        <div className="ui-table-scroll glass-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
@@ -934,7 +934,7 @@ export default function PayrollPage() {
                   <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[h.status] || ''}`}>{h.status}</span></td>
                   <td className="px-4 py-3 text-muted text-xs">{h.paidAt ? new Date(h.paidAt).toLocaleDateString('en-IN') : '—'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1">
+                    <div className="ui-actions flex items-center gap-1">
                       <button onClick={() => viewRun(h.id)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="View"><Eye className="w-4 h-4" /></button>
                       <button onClick={() => openBankAdvice(h)} className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-foreground" title="Bank Advice"><Landmark className="w-4 h-4" /></button>
                       {h.status === 'DRAFT' && <button onClick={() => handleApprove(h.id)} className="p-1.5 rounded hover:bg-blue-500/10 text-muted hover:text-blue-400" title="Approve"><ShieldCheck className="w-4 h-4" /></button>}
@@ -969,7 +969,7 @@ export default function PayrollPage() {
                 </div>
               ))}
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
@@ -1031,7 +1031,7 @@ export default function PayrollPage() {
             <label className="text-sm text-muted mb-1 block">Purpose *</label>
             <input value={loanForm.purpose} onChange={e => setLoanForm(p => ({ ...p, purpose: e.target.value }))} placeholder="e.g. Medical emergency, Home repair" className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">Principal Amount (₹) *</label>
               <input type="number" min="1" value={loanForm.principalAmount} onChange={e => setLoanForm(p => ({ ...p, principalAmount: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />

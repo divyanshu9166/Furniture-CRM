@@ -2,9 +2,15 @@
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
-import { requireRole } from '@/lib/auth-helpers'
+import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import { createSupplierSchema, createPurchaseOrderSchema, createPurchaseReturnSchema } from '@/lib/validations/purchase'
 import { sendEmail } from '@/lib/email'
+import { inventoryError, inventoryTransaction, lockProducts, moveTotalStock } from '@/lib/inventory/stock'
+
+import { assertId, nextDocumentId } from '@/lib/commerce/documents'
+import { calculateBill, indiaDay, wholeMoney } from '@/lib/commerce/rules'
+import { cancelPurchase, lockedPurchase, payPurchase, validateLinkedReturn } from '@/lib/commerce/purchases'
+import { normalizePhoneForMetaIndia } from '@/lib/whatsapp/phone-utils'
 
 function escapeHtml(value: string | number | null | undefined) {
   return String(value || '')
@@ -17,13 +23,11 @@ function escapeHtml(value: string | number | null | undefined) {
 
 function formatDate(dateValue?: Date | null) {
   if (!dateValue) return '—'
-  return new Date(dateValue).toLocaleDateString('en-IN')
+  return new Date(dateValue).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' })
 }
 
 function normalizeIndianPhone(phone: string) {
-  const digits = phone.replace(/\D/g, '').replace(/^0+/, '')
-  if (!digits) return ''
-  return digits.startsWith('91') ? digits : `91${digits}`
+  return normalizePhoneForMetaIndia(phone)
 }
 
 async function sendSupplierWhatsApp(phoneNumberId: string, apiToken: string, to: string, text: string) {
@@ -40,6 +44,7 @@ async function sendSupplierWhatsApp(phoneNumberId: string, apiToken: string, to:
         type: 'text',
         text: { body: text },
       }),
+      signal: AbortSignal.timeout(15000),
     })
 
     if (!response.ok) {
@@ -51,6 +56,17 @@ async function sendSupplierWhatsApp(phoneNumberId: string, apiToken: string, to:
   } catch (error) {
     const message = error instanceof Error ? error.message : 'WhatsApp send failed'
     return { success: false, error: message }
+  }
+}
+
+async function validatePurchaseItems(tx: import('@prisma/client').Prisma.TransactionClient, supplierId: number, items: { productId: number; name: string; sku: string }[]) {
+  assertId(supplierId)
+  if (!await tx.supplier.findUnique({ where: { id: supplierId } })) throw new Error('Supplier not found')
+  await lockProducts(tx, items.map(item => item.productId))
+  const products = await tx.product.findMany({ where: { id: { in: items.map(item => item.productId) } } })
+  for (const item of items) {
+    const product = products.find(row => row.id === item.productId)
+    if (!product || product.name !== item.name || product.sku !== item.sku) throw new Error('Selected product details changed; refresh and select the item again')
   }
 }
 
@@ -248,6 +264,7 @@ async function notifySupplierForPurchaseOrder(poId: number, source: 'approved' |
 // ─── SUPPLIERS ───────────────────────────────────────
 
 export async function getSuppliers() {
+  await requireAuth()
   const suppliers = await prisma.supplier.findMany({
     orderBy: { name: 'asc' },
     include: {
@@ -258,6 +275,7 @@ export async function getSuppliers() {
 }
 
 export async function createSupplier(data: unknown) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createSupplierSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -265,9 +283,11 @@ export async function createSupplier(data: unknown) {
   const supplier = await prisma.supplier.create({ data: parsed.data })
   revalidatePath('/purchases')
   return { success: true, data: supplier }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateSupplier(id: number, data: unknown) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createSupplierSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -275,22 +295,26 @@ export async function updateSupplier(id: number, data: unknown) {
   const supplier = await prisma.supplier.update({ where: { id }, data: parsed.data })
   revalidatePath('/purchases')
   return { success: true, data: supplier }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── PURCHASE ORDERS ─────────────────────────────────
 
 export async function getPurchaseOrders() {
+  await requireAuth()
   const pos = await prisma.purchaseOrder.findMany({
     orderBy: { date: 'desc' },
     include: {
       supplier: { select: { name: true, phone: true, email: true, contactPerson: true, gstNumber: true, address: true, paymentTerms: true } },
       items: { include: { product: { select: { name: true, sku: true } } } },
+      payments: { orderBy: { paidAt: 'desc' } },
     },
   })
   return { success: true, data: pos }
 }
 
 export async function createPurchaseOrder(data: unknown) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createPurchaseOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -298,25 +322,15 @@ export async function createPurchaseOrder(data: unknown) {
   const { supplierId, expectedDate, notes, discount, isRCM, itcEligible, itcCategory, items } = parsed.data
 
   // Calculate totals
-  const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitCost, 0)
-  const discountAmt = Math.min(discount, subtotal)
-  const taxable = Math.max(0, subtotal - discountAmt)
-  const grossGst = items.reduce((sum, i) => {
-    const lineAmount = i.quantity * i.unitCost
-    const rate = typeof i.gstRate === 'number' ? i.gstRate : 18
-    return sum + Math.round(lineAmount * rate / 100)
-  }, 0)
-  const discountFactor = subtotal > 0 ? (taxable / subtotal) : 1
-  const gst = Math.max(0, Math.round(grossGst * discountFactor))
-  const cgst = Math.round(gst / 2)
-  const sgst = gst - cgst
-  const total = taxable + gst
+  const bill = calculateBill(items.map(item => ({ ...item, price: item.unitCost })), discount, 'flat')
+  const { subtotal, gst, cgst, sgst, total } = bill
+  const discountAmt = bill.discount
 
   // Generate displayId
-  const count = await prisma.purchaseOrder.count()
-  const displayId = `PO-${String(count + 1).padStart(4, '0')}`
-
-  const po = await prisma.purchaseOrder.create({
+  const po = await inventoryTransaction(prisma, async tx => {
+  const displayId = await nextDocumentId(tx, 'purchaseOrder', 'PO-')
+  await validatePurchaseItems(tx, supplierId, items)
+  return tx.purchaseOrder.create({
     data: {
       displayId,
       supplierId,
@@ -348,11 +362,14 @@ export async function createPurchaseOrder(data: unknown) {
     include: { items: true },
   })
 
+  })
   revalidatePath('/purchases')
   return { success: true, data: po }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updatePurchaseOrder(id: number, data: unknown) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createPurchaseOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -370,25 +387,18 @@ export async function updatePurchaseOrder(id: number, data: unknown) {
   const { supplierId, expectedDate, notes, discount, isRCM, itcEligible, itcCategory, items } = parsed.data
 
   // Recalculate PO totals from updated line items.
-  const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitCost, 0)
-  const discountAmt = Math.min(discount, subtotal)
-  const taxable = Math.max(0, subtotal - discountAmt)
-  const grossGst = items.reduce((sum, i) => {
-    const lineAmount = i.quantity * i.unitCost
-    const rate = typeof i.gstRate === 'number' ? i.gstRate : 18
-    return sum + Math.round(lineAmount * rate / 100)
-  }, 0)
-  const discountFactor = subtotal > 0 ? (taxable / subtotal) : 1
-  const gst = Math.max(0, Math.round(grossGst * discountFactor))
-  const cgst = Math.round(gst / 2)
-  const sgst = gst - cgst
-  const total = taxable + gst
+  const bill = calculateBill(items.map(item => ({ ...item, price: item.unitCost })), discount, 'flat')
+  const { subtotal, gst, cgst, sgst, total } = bill
+  const discountAmt = bill.discount
 
   if (total < existing.amountPaid) {
     return { success: false, error: 'Updated total cannot be less than amount already paid' }
   }
 
-  const po = await prisma.$transaction(async (tx) => {
+  const po = await inventoryTransaction(prisma, async (tx) => {
+    const current = await lockedPurchase(tx, id)
+    if (current.status !== 'DRAFT' || current.amountPaid > total) throw new Error('Purchase order changed; only unpaid-compatible drafts can be edited')
+    await validatePurchaseItems(tx, supplierId, items)
     await tx.purchaseOrderItem.deleteMany({ where: { poId: id } })
 
     return tx.purchaseOrder.update({
@@ -402,7 +412,7 @@ export async function updatePurchaseOrder(id: number, data: unknown) {
         cgst,
         sgst,
         total,
-        balanceDue: Math.max(0, total - existing.amountPaid),
+        balanceDue: total - current.amountPaid,
         isRCM,
         itcEligible,
         itcCategory,
@@ -426,17 +436,23 @@ export async function updatePurchaseOrder(id: number, data: unknown) {
 
   revalidatePath('/purchases')
   return { success: true, data: po }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function approvePurchaseOrder(id: number) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const po = await prisma.purchaseOrder.findUnique({ where: { id } })
   if (!po) return { success: false, error: 'Purchase order not found' }
   if (po.status !== 'DRAFT') return { success: false, error: 'Only DRAFT orders can be approved' }
 
-  await prisma.purchaseOrder.update({ where: { id }, data: { status: 'APPROVED' } })
+  await inventoryTransaction(prisma, async tx => {
+    const current = await lockedPurchase(tx, id)
+    if (current.status !== 'DRAFT') throw new Error('Only draft orders can be approved')
+    await tx.purchaseOrder.update({ where: { id }, data: { status: 'APPROVED' } })
+  })
 
-  const notifyResult = await notifySupplierForPurchaseOrder(id, 'approved')
+  const notifyResult = await notifySupplierForPurchaseOrder(id, 'approved').catch(() => ({ success: false as const, error: 'Notification failed after approval. You can resend it without approving again.', message: undefined }))
   revalidatePath('/purchases')
 
   if (!notifyResult.success) {
@@ -450,9 +466,11 @@ export async function approvePurchaseOrder(id: number) {
     success: true,
     message: notifyResult.message || 'PO approved and supplier notified',
   }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function sendPurchaseOrderToSupplier(id: number) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const po = await prisma.purchaseOrder.findUnique({ where: { id } })
@@ -464,9 +482,11 @@ export async function sendPurchaseOrderToSupplier(id: number) {
 
   if (!notifyResult.success) return { success: false, error: notifyResult.error }
   return { success: true, message: notifyResult.message }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function receivePurchaseOrder(id: number) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const po = await prisma.purchaseOrder.findUnique({
@@ -484,17 +504,22 @@ export async function receivePurchaseOrder(id: number) {
   }
 
   // Use transaction to update stock for each item
-  await prisma.$transaction(async (tx) => {
-    for (const item of pendingItems) {
+  try {
+  await inventoryTransaction(prisma, async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "PurchaseOrder" WHERE id = ${id} FOR UPDATE`
+    const current = await tx.purchaseOrder.findUnique({ where: { id }, include: { items: true } })
+    if (!current || !['APPROVED', 'PARTIALLY_RECEIVED'].includes(current.status)) throw new Error('Purchase order was already received or its status changed')
+    await lockProducts(tx, current.items.map(item => item.productId))
+    for (const item of current.items) {
       const pendingQty = Math.max(0, item.quantity - item.receivedQty)
       if (pendingQty === 0) continue
 
       const now = new Date()
 
+      await moveTotalStock(tx, item.productId, pendingQty, 'IN', { referenceType: 'PurchaseOrder', referenceId: id, notes: `Received ${current.displayId}`, createdBy: 'Purchases', batchCostPrice: item.unitCost })
       await tx.product.update({
         where: { id: item.productId },
         data: {
-          stock: { increment: pendingQty },
           costPrice: item.unitCost,
           lastRestocked: now,
         },
@@ -520,10 +545,13 @@ export async function receivePurchaseOrder(id: number) {
       data: { status: 'RECEIVED', receivedAt: new Date() },
     })
   })
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 
   revalidatePath('/purchases')
   revalidatePath('/inventory')
+  revalidatePath('/godowns')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function recordPurchaseOrderPayment(
@@ -534,6 +562,7 @@ export async function recordPurchaseOrderPayment(
   reference?: string,
   paidAt?: string
 ) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -545,54 +574,27 @@ export async function recordPurchaseOrderPayment(
     return { success: false, error: 'Invalid payment date' }
   }
 
-  const po = await prisma.purchaseOrder.findUnique({ where: { id } })
-  if (!po) return { success: false, error: 'Purchase order not found' }
-  if (po.status === 'CANCELLED') return { success: false, error: 'Cannot record payment for a cancelled PO' }
-  if (po.balanceDue <= 0) return { success: false, error: 'This PO is already fully paid' }
-  if (amount > po.balanceDue) return { success: false, error: 'Payment cannot exceed pending balance' }
-
-  const paymentLine = `[PAYMENT ${paymentDate.toISOString().slice(0, 10)}] Rs. ${amount.toLocaleString('en-IN')} via ${method}${reference?.trim() ? ` (${reference.trim()})` : ''}${note?.trim() ? ` - ${note.trim()}` : ''}`
-
-  const updated = await prisma.$transaction(async (tx) => {
-    await tx.purchasePayment.create({
-      data: {
-        poId: id,
-        amount,
-        method,
-        reference,
-        notes: note,
-        paidAt: paymentDate,
-      },
-    })
-
-    return tx.purchaseOrder.update({
-      where: { id },
-      data: {
-        amountPaid: { increment: amount },
-        balanceDue: { decrement: amount },
-        notes: po.notes ? `${po.notes}\n${paymentLine}` : paymentLine,
-      },
-    })
-  })
+  wholeMoney(amount, 'Payment')
+  const updated = await inventoryTransaction(prisma, tx => payPurchase(tx, { id, amount, method, reference, note, paidAt: paymentDate }))
 
   revalidatePath('/purchases')
   return { success: true, data: updated }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function cancelPurchaseOrder(id: number) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  const po = await prisma.purchaseOrder.findUnique({ where: { id } })
-  if (!po) return { success: false, error: 'Not found' }
-  if (po.status === 'RECEIVED') return { success: false, error: 'Cannot cancel a received order' }
-
-  await prisma.purchaseOrder.update({ where: { id }, data: { status: 'CANCELLED' } })
+  await inventoryTransaction(prisma, tx => cancelPurchase(tx, id))
   revalidatePath('/purchases')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── PURCHASE RETURNS ─────────────────────────────────
 
 export async function getPurchaseReturns() {
+  await requireAuth()
   const returns = await prisma.purchaseReturn.findMany({
     orderBy: { date: 'desc' },
     include: {
@@ -605,6 +607,7 @@ export async function getPurchaseReturns() {
 }
 
 export async function createPurchaseReturn(data: unknown) {
+  try {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createPurchaseReturnSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -612,18 +615,16 @@ export async function createPurchaseReturn(data: unknown) {
   const { supplierId, poId, reason, notes, items } = parsed.data
   const totalAmount = items.reduce((sum, i) => sum + i.quantity * i.unitCost, 0)
 
-  const count = await prisma.purchaseReturn.count()
-  const displayId = `PRN-${String(count + 1).padStart(4, '0')}`
+  wholeMoney(totalAmount, 'Return total')
 
   // Deduct stock in transaction
-  const ret = await prisma.$transaction(async (tx) => {
-    for (const item of items) {
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { stock: { decrement: item.quantity } },
-      })
-    }
-    return tx.purchaseReturn.create({
+  try {
+  const ret = await inventoryTransaction(prisma, async (tx) => {
+    const displayId = await nextDocumentId(tx, 'purchaseReturn', 'PRN-')
+    if (poId) await validateLinkedReturn(tx, supplierId, poId, items)
+    await validatePurchaseItems(tx, supplierId, items)
+    await lockProducts(tx, items.map(item => item.productId))
+    const returned = await tx.purchaseReturn.create({
       data: {
         displayId,
         supplierId,
@@ -631,6 +632,7 @@ export async function createPurchaseReturn(data: unknown) {
         reason,
         notes,
         totalAmount,
+        status: 'Completed',
         items: {
           create: items.map(i => ({
             productId: i.productId,
@@ -642,14 +644,24 @@ export async function createPurchaseReturn(data: unknown) {
         },
       },
     })
+    for (const item of items) {
+      const receiptLots = poId ? await tx.batchMovement.findMany({ where: { quantity: { gt: 0 }, stockLedger: { referenceType: 'PurchaseOrder', referenceId: poId, productId: item.productId } }, select: { batchId: true } }) : []
+      const lotIds = receiptLots.flatMap(row => row.batchId ? [row.batchId] : [])
+      await moveTotalStock(tx, item.productId, -item.quantity, 'OUT', { referenceType: 'PurchaseReturn', referenceId: returned.id, notes: `${returned.displayId}: ${reason}`, createdBy: 'Purchases', ...(lotIds.length ? { onlyBatchIds: lotIds } : {}) })
+    }
+    return returned
   })
 
   revalidatePath('/purchases')
   revalidatePath('/inventory')
+  revalidatePath('/godowns')
   return { success: true, data: ret }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function getPurchaseStats() {
+  await requireAuth()
   const [totalPOs, totalSpend, pendingPOs, totalSuppliers, overduePOs, outstandingPayables] = await Promise.all([
     prisma.purchaseOrder.count(),
     prisma.purchaseOrder.aggregate({
@@ -660,7 +672,7 @@ export async function getPurchaseStats() {
     prisma.supplier.count(),
     prisma.purchaseOrder.count({
       where: {
-        expectedDate: { lt: new Date() },
+        expectedDate: { lt: new Date(`${indiaDay()}T00:00:00Z`) },
         status: { in: ['DRAFT', 'APPROVED', 'PARTIALLY_RECEIVED'] },
       },
     }),

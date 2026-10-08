@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createWalkinSchema } from '@/lib/validations/walkin'
 import type { WalkinStatus } from '@prisma/client'
+import { requireAuth } from '@/lib/auth-helpers'
+import { assertWalkinRequirement, RequirementsChangedError } from '@/lib/walkins/requirements'
 
 const statusMap: Record<string, WalkinStatus> = {
   'Browsing': 'BROWSING', 'Interested': 'INTERESTED',
@@ -41,33 +43,37 @@ export async function getWalkins() {
 }
 
 export async function createWalkin(data: unknown) {
+  try { await requireAuth() } catch { return { success: false, error: 'Please sign in to register a walk-in' } }
   const parsed = createWalkinSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
   const { name, phone, email, requirement, assignedToId, budget, notes } = parsed.data
 
-  let contact = await prisma.contact.findFirst({ where: { phone } })
-  if (!contact) {
-    contact = await prisma.contact.create({
-      data: { name, phone, email: email || null, source: 'Walk-in' },
+  try {
+    const walkin = await prisma.$transaction(async tx => {
+      await assertWalkinRequirement(tx, requirement)
+      const contact = await tx.contact.upsert({
+        where: { phone }, update: {},
+        create: { name, phone, email: email || null, source: 'Walk-in' },
+      })
+      const now = new Date()
+      return tx.walkin.create({
+        data: {
+          contactId: contact.id, requirement, assignedToId, date: now,
+          time: now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+          budget, notes,
+        },
+      })
     })
+    revalidatePath('/walkins')
+    return { success: true, data: walkin }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof RequirementsChangedError ? error.message : 'Could not register the walk-in. Please try again.',
+      requirementsChanged: error instanceof RequirementsChangedError,
+    }
   }
-
-  const now = new Date()
-  const walkin = await prisma.walkin.create({
-    data: {
-      contactId: contact.id,
-      requirement,
-      assignedToId,
-      date: now,
-      time: now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }),
-      budget,
-      notes,
-    },
-  })
-
-  revalidatePath('/walkins')
-  return { success: true, data: walkin }
 }
 
 export async function updateWalkinStatus(id: number, status: string) {

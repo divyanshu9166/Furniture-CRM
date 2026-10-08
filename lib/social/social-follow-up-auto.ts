@@ -1,3 +1,5 @@
+import { inventoryTransaction } from '@/lib/inventory/stock'
+import { lockFollowUpContact } from '@/lib/commerce/follow-ups'
 import { prisma } from '@/lib/db'
 import { parseFollowUpIntent } from '@/lib/follow-up-intent'
 
@@ -24,18 +26,20 @@ export async function maybeCreateSocialFollowUp(args: {
         const intent = parseFollowUpIntent(args.messageText)
         if (!intent.matched || !intent.date) return { created: false, reason: 'no intent' }
 
-        const existing = await prisma.followUpEntry.findFirst({
+        return await inventoryTransaction(prisma, async tx => {
+        await lockFollowUpContact(tx, null, args.socialContactId)
+        const existing = await tx.followUpEntry.findFirst({
             where: { socialContactId: args.socialContactId, status: { in: OPEN_STATUSES as unknown as any[] } },
         })
         if (existing) return { created: false, reason: 'already open' }
 
-        const entry = await prisma.followUpEntry.create({
+        const entry = await tx.followUpEntry.create({
             data: {
                 channel: args.platform,
                 socialContactId: args.socialContactId,
                 displayName: args.name || null,
                 reason: intent.reason || 'Customer asked to be contacted later',
-                followUpDate: intent.date,
+                followUpDate: intent.date!,
                 priority: 'Medium',
                 source: args.platform === 'instagram' ? 'Instagram' : 'Facebook',
                 status: 'PENDING',
@@ -43,6 +47,7 @@ export async function maybeCreateSocialFollowUp(args: {
         })
 
         return { created: true, id: entry.id }
+        })
     } catch (err) {
         console.error('[social-follow-up-auto] failed:', err)
         return { created: false, error: err instanceof Error ? err.message : String(err) }

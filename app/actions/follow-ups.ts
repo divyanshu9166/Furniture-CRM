@@ -1,5 +1,10 @@
 'use server'
 
+import { inventoryError, inventoryTransaction } from '@/lib/inventory/stock'
+import { activeStaff, billingContact } from '@/lib/commerce/documents'
+import { assertNoOpenFollowUp, lockedFollowUp, OPEN_FOLLOW_UPS } from '@/lib/commerce/follow-ups'
+import { indiaDay } from '@/lib/commerce/rules'
+import { shouldRearmReminder } from '@/lib/commerce/reminders'
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import {
@@ -19,7 +24,7 @@ import {
 // Statuses that count as "still open" — block a duplicate follow-up for the
 // same contact and keep the entry in the active list. REMINDED is included
 // because a reminded follow-up is still awaiting the customer's reply.
-const OPEN_STATUSES = ['PENDING', 'REMINDED', 'CONTACTED'] as const
+const OPEN_STATUSES = OPEN_FOLLOW_UPS
 const followUpIdSchema = z.number().int().positive()
 const reminderConfigSchema = z.object({
     enabled: z.boolean().optional(),
@@ -37,12 +42,6 @@ async function canManageFollowUps() {
 }
 
 const accessDenied = () => ({ success: false as const, error: 'Access denied' })
-
-async function hasActiveStaffAssignment(staffId: number | null | undefined) {
-    if (!staffId) return true
-    const staff = await prisma.staff.findUnique({ where: { id: staffId }, select: { status: true } })
-    return staff?.status === 'Active'
-}
 
 function serialize(f: any) {
     return {
@@ -95,8 +94,7 @@ export async function getFollowUpCounts() {
         select: { followUpDate: true },
     })
 
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    const today = new Date(`${indiaDay()}T00:00:00Z`)
     const todayMs = today.getTime()
     const dayMs = 86_400_000
 
@@ -105,7 +103,7 @@ export async function getFollowUpCounts() {
     let upcoming = 0
     for (const r of rows) {
         const d = new Date(r.followUpDate)
-        d.setHours(0, 0, 0, 0)
+        d.setUTCHours(0, 0, 0, 0)
         const diff = Math.round((d.getTime() - todayMs) / dayMs)
         if (diff < 0) overdue++
         else if (diff === 0) dueToday++
@@ -118,6 +116,7 @@ export async function getFollowUpCounts() {
 }
 
 export async function createFollowUp(data: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = createFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -125,111 +124,63 @@ export async function createFollowUp(data: unknown) {
     const { name, phone, email, source, interest, budget, reason, followUpDate, priority, assignedToId, notes } =
         parsed.data
 
-    if (!await hasActiveStaffAssignment(assignedToId)) {
-        return { success: false, error: 'Choose an active salesperson.' }
-    }
-
-    // Find or create the contact by phone (same dedup rule as leads).
-    let contact = await prisma.contact.findFirst({ where: { phone } })
-    if (!contact) {
-        contact = await prisma.contact.create({
-            data: { name, phone, email: email || null, source: source || null },
-        })
-    }
-
-    // Guard: never keep two open follow-ups for the same contact.
-    const existingOpen = await prisma.followUpEntry.findFirst({
-        where: { contactId: contact.id, status: { in: OPEN_STATUSES as unknown as any[] } },
-    })
-    if (existingOpen) {
-        return { success: false, error: 'An open follow-up already exists for this contact.' }
-    }
-
-    const entry = await prisma.followUpEntry.create({
-        data: {
-            contactId: contact.id,
-            interest: interest || null,
-            budget: budget || null,
-            reason: reason || null,
-            followUpDate: new Date(followUpDate),
-            priority,
-            source: source || null,
-            status: 'PENDING',
-            assignedToId: assignedToId ?? null,
-            notes: notes || null,
-        },
+    const entry = await inventoryTransaction(prisma, async tx => {
+        await activeStaff(tx, assignedToId)
+        const contact = await billingContact(tx, { customer: name, phone }, false)
+        await assertNoOpenFollowUp(tx, contact.id)
+        if (email && !contact.email) await tx.contact.update({ where: { id: contact.id }, data: { email } })
+        return tx.followUpEntry.create({ data: {
+            contactId: contact.id, interest: interest || null, budget: budget || null, reason: reason || null,
+            followUpDate: new Date(followUpDate), priority, source: source || null, status: 'PENDING',
+            assignedToId: assignedToId ?? null, notes: notes || null,
+        } })
     })
 
     revalidatePath('/follow-ups')
     return { success: true, data: entry }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function convertLeadToFollowUp(data: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = convertLeadToFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
     const { leadId, followUpDate, priority, reason } = parsed.data
 
-    const lead = await prisma.lead.findUnique({
-        where: { id: leadId },
-        include: { contact: true },
+    const entry = await inventoryTransaction(prisma, async tx => {
+        await tx.$queryRaw`SELECT id FROM "Lead" WHERE id = ${leadId} FOR UPDATE`
+        const lead = await tx.lead.findUnique({ where: { id: leadId } })
+        if (!lead) throw new Error('Lead not found')
+        if (['CONVERTED', 'LOST'].includes(lead.status)) throw new Error('Resolve/reopen the lead before scheduling a follow-up')
+        await assertNoOpenFollowUp(tx, lead.contactId)
+        await activeStaff(tx, lead.assignedToId)
+        const followUp = await tx.followUpEntry.create({ data: {
+            contactId: lead.contactId, leadId, interest: lead.interest, budget: lead.budget, reason: reason || null,
+            followUpDate: new Date(followUpDate), priority, source: lead.source, status: 'PENDING', assignedToId: lead.assignedToId,
+        } })
+        if (lead.status === 'NEW') await tx.lead.update({ where: { id: leadId }, data: { status: 'CONTACTED' } })
+        return followUp
     })
-    if (!lead) return { success: false, error: 'Lead not found' }
-
-    // Guard: don't create a second open follow-up for the same contact/lead.
-    const existingOpen = await prisma.followUpEntry.findFirst({
-        where: {
-            status: { in: OPEN_STATUSES as unknown as any[] },
-            OR: [{ leadId: lead.id }, { contactId: lead.contactId }],
-        },
-    })
-    if (existingOpen) {
-        return { success: false, error: 'This lead already has an open follow-up.' }
-    }
-
-    const entry = await prisma.followUpEntry.create({
-        data: {
-            contactId: lead.contactId,
-            leadId: lead.id,
-            interest: lead.interest,
-            budget: lead.budget,
-            reason: reason || null,
-            followUpDate: new Date(followUpDate),
-            priority,
-            source: lead.source,
-            status: 'PENDING',
-            assignedToId: lead.assignedToId ?? null,
-        },
-    })
-
-    // Reflect engagement: a still-NEW lead becomes Contacted (history preserved).
-    if (lead.status === 'NEW') {
-        await prisma.lead.update({ where: { id: lead.id }, data: { status: 'CONTACTED' } })
-    }
 
     revalidatePath('/follow-ups')
     revalidatePath('/leads')
     return { success: true, data: entry }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateFollowUp(data: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = updateFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
     const { id, followUpDate, priority, reason, interest, budget, assignedToId, notes } = parsed.data
 
-    if (!await hasActiveStaffAssignment(assignedToId)) {
-        return { success: false, error: 'Choose an active salesperson.' }
-    }
-
-    const current = await prisma.followUpEntry.findUnique({
-        where: { id },
-        select: { status: true },
-    })
-    if (!current) return { success: false, error: 'Follow-up not found' }
-
+    const entry = await inventoryTransaction(prisma, async tx => {
+    await activeStaff(tx, assignedToId)
+    const current = await lockedFollowUp(tx, id)
     const patch: Record<string, unknown> = {}
     if (followUpDate !== undefined) patch.followUpDate = new Date(followUpDate)
     if (priority !== undefined) patch.priority = priority
@@ -241,45 +192,49 @@ export async function updateFollowUp(data: unknown) {
 
     // Rescheduling a REMINDED follow-up re-arms it so the reminder fires
     // once more on the new date.
-    if (followUpDate !== undefined) {
-        if (current.status === 'REMINDED') {
-            patch.status = 'PENDING'
-            patch.lastContactedAt = null
-        }
+    if (shouldRearmReminder(current, followUpDate)) {
+        patch.status = 'PENDING'
+        patch.lastContactedAt = null
     }
 
-    const entry = await prisma.followUpEntry.update({ where: { id }, data: patch })
+    return tx.followUpEntry.update({ where: { id }, data: patch })
+    })
 
     revalidatePath('/follow-ups')
     return { success: true, data: entry }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function updateFollowUpStatus(data: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = updateFollowUpStatusSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
     const { id, status } = parsed.data
-    const patch: Record<string, unknown> = { status }
-    // Any move out of PENDING records an engagement timestamp.
-    if (status !== 'PENDING') patch.lastContactedAt = new Date()
-    else patch.lastContactedAt = null
-
-    const result = await prisma.followUpEntry.updateMany({ where: { id }, data: patch })
-    if (!result.count) return { success: false, error: 'Follow-up not found' }
+    await inventoryTransaction(prisma, async tx => {
+        const current = await lockedFollowUp(tx, id)
+        if (OPEN_STATUSES.includes(status as any)) await assertNoOpenFollowUp(tx, current.contactId, current.socialContactId, id)
+        await tx.followUpEntry.update({ where: { id }, data: { status, lastContactedAt: status === 'PENDING' ? null : new Date() } })
+    })
 
     revalidatePath('/follow-ups')
     return { success: true }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function deleteFollowUp(id: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = followUpIdSchema.safeParse(id)
     if (!parsed.success) return { success: false, error: 'Invalid follow-up ID' }
-    const result = await prisma.followUpEntry.deleteMany({ where: { id: parsed.data } })
-    if (!result.count) return { success: false, error: 'Follow-up not found' }
+    await inventoryTransaction(prisma, async tx => {
+        await lockedFollowUp(tx, parsed.data)
+        await tx.followUpEntry.delete({ where: { id: parsed.data } })
+    })
     revalidatePath('/follow-ups')
     return { success: true }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── Scheduled WhatsApp reminder config + manual run ───────────────
@@ -304,6 +259,7 @@ export async function getFollowUpReminderTemplates() {
 }
 
 export async function updateReminderConfig(data: unknown) {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const parsed = reminderConfigSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -347,11 +303,14 @@ export async function updateReminderConfig(data: unknown) {
         success: true,
         data: { enabled: config.enabled, templateName: config.templateName || '', language: config.language },
     }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 export async function runFollowUpRemindersNow() {
+    try {
     if (!await canManageFollowUps()) return accessDenied()
     const summary = await runFollowUpReminders()
     revalidatePath('/follow-ups')
     return { success: true, data: summary }
+    } catch (error) { return { success: false, error: inventoryError(error) } }
 }

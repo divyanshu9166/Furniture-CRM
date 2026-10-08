@@ -591,6 +591,13 @@ enum WalkinStatus {
   LEFT
 }
 
+// Editable dropdown only. Walkin.requirement remains a historical text snapshot.
+model WalkinRequirementSettings {
+  id       Int      @id @default(1)
+  options  String[]
+  revision Int      @default(1)
+}
+
 model Walkin {
   id            Int          @id @default(autoincrement())
   contactId     Int
@@ -1364,6 +1371,7 @@ model StockLedger {
   notes         String?
   createdBy     String?
   createdAt     DateTime @default(now())
+  batchMovements BatchMovement[]
 
   @@index([productId])
   @@index([godownId])
@@ -1393,15 +1401,32 @@ model ProductBatch {
   batchNumber  String
   purchaseDate DateTime  @default(now())
   expiryDate   DateTime?
-  quantity     Int
-  remainingQty Int
+  quantity     Float
+  remainingQty Float
   costPrice    Int       @default(0)
   supplierId   Int?
   poId         Int?
   createdAt    DateTime  @default(now())
+  movements    BatchMovement[]
 
   @@unique([productId, batchNumber])
   @@index([productId])
+  @@index([productId, expiryDate, purchaseDate])
+}
+
+// Signed allocations accompany physical stock ledger entries. Existing lot IDs
+// and quantities remain unchanged; legacy history is not fabricated/backfilled.
+model BatchMovement {
+  id            Int          @id @default(autoincrement())
+  batchId       Int?
+  batch         ProductBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  stockLedgerId Int
+  stockLedger   StockLedger  @relation(fields: [stockLedgerId], references: [id], onDelete: Restrict)
+  quantity      Float
+  createdAt     DateTime     @default(now())
+
+  @@index([stockLedgerId])
+  @@index([batchId])
 }
 
 // ─── MODULE 4: GST COMPLIANCE ────────────────────────
@@ -1623,7 +1648,7 @@ model MaterialConsumption {
   returnedQty       Float           @default(0)  // (issuedQty - actualQty - scrapQty)
   isOverConsumed    Boolean         @default(false)  // Flag if actualQty + scrapQty > issuedQty
   scrapReason       String?
-  unitCost          Int             @default(0)
+  unitCost          Float           @default(0)
   totalCost         Int             @default(0)
 
   @@index([productionOrderId])

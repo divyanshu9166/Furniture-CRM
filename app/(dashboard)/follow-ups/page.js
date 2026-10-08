@@ -5,12 +5,8 @@ import {
     Search, Plus, Phone, MessageSquare, Clock, CalendarClock, CheckCircle2,
     XCircle, RotateCcw, Trash2, Pencil, AlertTriangle, User, Tag, Settings2, RefreshCw, Send,
 } from 'lucide-react';
-import {
-    getFollowUps, createFollowUp, updateFollowUp, updateFollowUpStatus,
-    deleteFollowUp, getFollowUpCounts,
-    getReminderConfig, getFollowUpReminderTemplates, updateReminderConfig, runFollowUpRemindersNow,
-} from '@/app/actions/follow-ups';
-import { getStaff } from '@/app/actions/staff';
+import {getFollowUps as getFollowUpsAction, createFollowUp as createFollowUpAction, updateFollowUp as updateFollowUpAction, updateFollowUpStatus as updateFollowUpStatusAction, deleteFollowUp as deleteFollowUpAction, getFollowUpCounts as getFollowUpCountsAction, getReminderConfig as getReminderConfigAction, getFollowUpReminderTemplates as getFollowUpReminderTemplatesAction, updateReminderConfig as updateReminderConfigAction, runFollowUpRemindersNow as runFollowUpRemindersNowAction} from '@/app/actions/follow-ups';
+import {getStaff as getStaffAction} from '@/app/actions/staff';
 import { dueLabel, dueBucket, daysUntil } from '@/lib/follow-ups';
 import { LEAD_SOURCE_OPTIONS } from '@/lib/lead-sources';
 import { FOLLOW_UP_PRIORITIES } from '@/lib/validations/follow-up';
@@ -64,6 +60,19 @@ const waUrl = (phone, msg) => {
     const n = normalizePhone(phone);
     return n ? `https://wa.me/${n}?text=${encodeURIComponent(msg)}` : '';
 };
+
+import { safeAction } from '@/lib/safe-action';
+const getFollowUps = safeAction(getFollowUpsAction);
+const createFollowUp = safeAction(createFollowUpAction);
+const updateFollowUp = safeAction(updateFollowUpAction);
+const updateFollowUpStatus = safeAction(updateFollowUpStatusAction);
+const deleteFollowUp = safeAction(deleteFollowUpAction);
+const getFollowUpCounts = safeAction(getFollowUpCountsAction);
+const getReminderConfig = safeAction(getReminderConfigAction);
+const getFollowUpReminderTemplates = safeAction(getFollowUpReminderTemplatesAction);
+const updateReminderConfig = safeAction(updateReminderConfigAction);
+const runFollowUpRemindersNow = safeAction(runFollowUpRemindersNowAction);
+const getStaff = safeAction(getStaffAction);
 
 export default function FollowUpsPage() {
     const { notify } = useAlertToast();
@@ -182,7 +191,8 @@ export default function FollowUpsPage() {
     const refresh = async (t = tab) => {
         try {
             const [res, c] = await Promise.all([getFollowUps(t), getFollowUpCounts()]);
-            if (res.success) setItems(res.data);
+            if (res.success) { setItems(res.data); setLoadError(null); }
+            else setLoadError(res.error || 'Could not load follow-ups');
             if (c.success) setCounts(c.data);
         } catch (err) {
             notify(err?.message || 'Could not refresh follow-ups', { variant: 'danger' });
@@ -323,12 +333,12 @@ export default function FollowUpsPage() {
     return (
         <div className="space-y-6 animate-[fade-in_0.5s_ease-out] min-w-0">
             {/* Header */}
-            <div className="flex items-center justify-between flex-wrap gap-4">
+            <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="text-xl md:text-2xl font-bold text-foreground">Follow-ups</h1>
                     <p className="text-xs md:text-sm text-muted mt-1">Interested customers to reconnect with on a future date</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="ui-actions flex items-center gap-2">
                     <button onClick={openSettings} title="Reminder settings" className="tap-press-sm flex items-center gap-2 px-3 py-2.5 bg-surface border border-border hover:border-accent/30 text-foreground rounded-xl text-sm font-medium transition-all">
                         <Settings2 className="w-4 h-4" /> <span className="hidden sm:inline">Reminders</span>
                     </button>
@@ -339,7 +349,7 @@ export default function FollowUpsPage() {
             </div>
 
             {/* Stat cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
+            <div className="ui-stat-grid grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5">
                 <div className="glass-card p-4 flex items-center gap-3">
                     <div className="p-2.5 rounded-xl bg-danger-light"><AlertTriangle className="w-5 h-5 text-danger" /></div>
                     <div><p className="text-xs text-muted">Overdue</p><p className="text-lg font-bold text-foreground">{counts.overdue}</p></div>
@@ -420,7 +430,7 @@ export default function FollowUpsPage() {
                                         )}
 
                                         {/* Actions */}
-                                        <div className="flex items-center gap-1 mt-2.5 pt-2.5 border-t border-border flex-wrap">
+                                        <div className="ui-actions flex items-center gap-1 mt-2.5 pt-2.5 border-t border-border flex-wrap">
                                             {f.phone && (
                                                 <>
                                                     <a href={`tel:${f.phone}`} className="tap-press-sm inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20">
@@ -517,7 +527,7 @@ export default function FollowUpsPage() {
                         <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
                         <textarea name="notes" rows={2} placeholder="Any specific preferences..." className="w-full" />
                     </div>
-                    <div className="flex justify-end gap-3 pt-2">
+                    <div className="ui-actions flex justify-end gap-3 pt-2">
                         <button type="button" onClick={() => setShowAdd(false)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
                         <button type="submit" disabled={saving} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">{saving ? 'Saving...' : 'Add Follow-up'}</button>
                     </div>
@@ -565,7 +575,7 @@ export default function FollowUpsPage() {
                             <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
                             <textarea name="notes" rows={2} defaultValue={editing.notes || ''} className="w-full" />
                         </div>
-                        <div className="flex justify-end gap-3 pt-2">
+                        <div className="ui-actions flex justify-end gap-3 pt-2">
                             <button type="button" onClick={() => setEditing(null)} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
                             <button type="submit" disabled={saving} className="px-6 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
                         </div>
@@ -578,7 +588,7 @@ export default function FollowUpsPage() {
                 {toDelete && (
                     <div className="space-y-4">
                         <p className="text-sm text-muted">Remove the follow-up for <strong className="text-foreground">{toDelete.name}</strong>? This cannot be undone.</p>
-                        <div className="flex justify-end gap-3">
+                        <div className="ui-actions flex justify-end gap-3">
                             <button onClick={() => setToDelete(null)} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
                             <button onClick={confirmDelete} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm">Remove</button>
                         </div>
@@ -642,7 +652,7 @@ export default function FollowUpsPage() {
                             className="tap-press-sm inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-surface border border-border text-foreground hover:border-accent/30 disabled:opacity-50">
                             {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Run now
                         </button>
-                        <div className="flex items-center gap-3">
+                        <div className="ui-actions flex items-center gap-3">
                             <button onClick={() => setShowSettings(false)} className="px-4 py-2 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Close</button>
                             <button onClick={saveCfg} disabled={savingCfg}
                                 className="px-5 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-sm font-semibold disabled:opacity-50">{savingCfg ? 'Saving...' : 'Save'}</button>

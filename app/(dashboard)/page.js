@@ -131,7 +131,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Page Header */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="ui-page-header flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Dashboard</h1>
           <p className="text-xs md:text-sm text-muted mt-1">Welcome back! Here&apos;s your store overview for today.</p>
@@ -478,7 +478,7 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Leads & Upcoming Appointments */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
+      <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-5">
         {/* Recent Leads */}
         <div className="glass-card p-5">
           <div className="flex items-center justify-between mb-4">

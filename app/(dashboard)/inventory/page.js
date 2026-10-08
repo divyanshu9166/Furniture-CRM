@@ -8,17 +8,17 @@ import {
   CheckCircle2, XCircle, Clock, Layers, Boxes, Timer, MapPin, FileText, Trash2,
   Upload, Download, X, CheckCircle, Pencil, Image as ImageIcon, Save
 } from 'lucide-react';
-import { getProducts, getCategories, getWarehouses, createProduct, updateStock, bulkImportProducts } from '@/app/actions/products';
+import { getProducts, getCategories, getWarehouses, createProduct, updateStock, bulkImportProducts, reconcileInventoryStock } from '@/app/actions/products';
 import { moveProductToDraft } from '@/app/actions/drafts';
 import { getStockGroups, createStockGroup, updateStockGroup, deleteStockGroup } from '@/app/actions/stock-groups';
-import { getBatches, createBatch, getAgingAnalysis } from '@/app/actions/batches';
+import { getBatches, createBatch, updateBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
 import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import * as XLSX from 'xlsx';
 
 const stockBadge = (stock, reorderLevel) => {
-  if (stock === 0) return { text: 'Out of Stock', cls: 'bg-danger-light text-danger' };
+  if (stock <= 0) return { text: 'Out of Stock', cls: 'bg-danger-light text-danger' };
   if (stock <= reorderLevel) return { text: 'Low Stock', cls: 'bg-warning-light text-warning' };
   return { text: 'In Stock', cls: 'bg-success-light text-success' };
 };
@@ -35,6 +35,15 @@ export default function InventoryPage() {
   const [categories, setCategories] = useState(['All']);
   const [warehouses, setWarehouses] = useState(['All']);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [panelError, setPanelError] = useState('');
+  const [stockSaving, setStockSaving] = useState(false);
+  const [stockError, setStockError] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [reconcileProduct, setReconcileProduct] = useState(null);
+  const [reconcileBasis, setReconcileBasis] = useState('');
+  const [reconciling, setReconciling] = useState(false);
+  const [reconcileError, setReconcileError] = useState('');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [warehouseFilter, setWarehouseFilter] = useState('All');
@@ -97,8 +106,7 @@ export default function InventoryPage() {
         notify(res?.error || 'Failed to move product to drafts', { variant: 'danger' });
         return;
       }
-      const refreshed = await getProducts();
-      if (refreshed.success) setProducts(refreshed.data);
+      await refreshProducts();
       notify('Product moved to drafts', { variant: 'success' });
     } catch (err) {
       notify(err?.message || 'Failed to move product to drafts', { variant: 'danger' });
@@ -112,6 +120,9 @@ export default function InventoryPage() {
     setProductToDelete(null);
   };
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [editingBatchId, setEditingBatchId] = useState(null);
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchError, setBatchError] = useState('');
   const [groupForm, setGroupForm] = useState({ id: null, name: '', parentId: '' });
   const [batchForm, setBatchForm] = useState({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
   const [deepLoading, setDeepLoading] = useState(false);
@@ -127,23 +138,34 @@ export default function InventoryPage() {
   // Stock Ledger state
   const [ledgerEntries, setLedgerEntries] = useState([]);
   const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerProduct, setLedgerProduct] = useState('');
+  const [ledgerGodown, setLedgerGodown] = useState('');
+  const [ledgerCursor, setLedgerCursor] = useState(null);
+
+  const openStock = (product) => {
+    setStockError('');
+    setShowStockModal(product);
+  };
 
   useEffect(() => {
-    Promise.all([getProducts(), getCategories(), getWarehouses(), getGodowns()]).then(([pRes, cRes, wRes, gdRes]) => {
+    Promise.all([getProducts(), getCategories(), getWarehouses(), getGodowns(), getGodownStock()]).then(([pRes, cRes, wRes, gdRes, gsRes]) => {
       if (pRes.success) setProducts(pRes.data);
       setCategories(['All', ...cRes.map(c => c.name)]);
       setWarehouses(['All', ...wRes.map(w => w.name)]);
       if (gdRes.success) setGodowns(gdRes.data);
-      setLoading(false);
-    });
+      if (gsRes.success) setGodownStocks(gsRes.data);
+    }).catch(() => setLoadError('Unable to load inventory. Please retry.')).finally(() => setLoading(false));
     getStockGroups().then((res) => {
       if (res.success) setStockGroups(res.data);
-    });
+    }).catch(() => setGroupLoadError('Unable to load stock groups'));
   }, []);
 
   const refreshProducts = async () => {
-    const res = await getProducts();
+    const [res, cats, whs] = await Promise.all([getProducts(), getCategories(), getWarehouses()]);
     if (res.success) setProducts(res.data);
+    setCategories(['All', ...cats.map(c => c.name)]);
+    setWarehouses(['All', ...whs.map(w => w.name)]);
+    await Promise.all([loadLocationData(), loadDeepInventory(), ...(ledgerFetched.current ? [loadLedger()] : [])]);
   };
 
   const openGroupModal = (group = null) => {
@@ -187,7 +209,7 @@ export default function InventoryPage() {
       }
 
       closeGroupModal();
-      await loadDeepInventory();
+      await refreshProducts();
       notify(isEditing ? 'Stock group updated' : 'Stock group created', { variant: 'success' });
     } catch (error) {
       setGroupError(error?.message || 'Unable to save stock group');
@@ -223,7 +245,7 @@ export default function InventoryPage() {
       price: product.price || 0,
       bulkPrice: product.bulkPrice ?? '',
       costPrice: product.costPrice || 0,
-      reorderLevel: product.reorderLevel || 5,
+      reorderLevel: product.reorderLevel ?? 5,
       material: product.material || '',
       color: product.color || '',
       description: product.description || '',
@@ -334,7 +356,7 @@ export default function InventoryPage() {
       'Sheesham Wood', 'Walnut Brown', '2', 'Main Godown'
     ];
     const note = [
-      '* Required', '* Required', '* Required', '* Required', '* Required', '* Required',
+      '* Required', 'Optional', 'Optional', '* Required', '* Required', 'Optional',
       'Optional', 'Optional', 'Optional', 'Optional'
     ];
     const ws = XLSX.utils.aoa_to_sheet([headers, note, example]);
@@ -371,7 +393,7 @@ export default function InventoryPage() {
       // Skip note row if next row also looks like headers/notes
       const rows = rawData.slice(1).filter(row => {
         const nameVal = String(row[colMap.name ?? 0] ?? '').trim();
-        return nameVal && nameVal !== '*' && nameVal.toLowerCase() !== 'name' && nameVal.toLowerCase() !== '* required';
+        return row.some(cell => String(cell ?? '').trim()) && nameVal !== '*' && nameVal.toLowerCase() !== 'name' && nameVal.toLowerCase() !== '* required';
       });
 
       if (colMap.name === undefined) {
@@ -407,16 +429,16 @@ export default function InventoryPage() {
         name: String(row[importColMap.name] ?? '').trim(),
         sku: importColMap.sku !== undefined ? String(row[importColMap.sku] ?? '').trim() : '',
         category: importColMap.category !== undefined ? String(row[importColMap.category] ?? '').trim() : 'General',
-        price: importColMap.price !== undefined ? Number(row[importColMap.price] ?? 0) : 0,
-        instock: importColMap.instock !== undefined ? Number(row[importColMap.instock] ?? 0) : 0,
+        price: importColMap.price !== undefined ? row[importColMap.price] : '',
+        instock: importColMap.instock !== undefined ? row[importColMap.instock] : '',
         description: importColMap.description !== undefined ? String(row[importColMap.description] ?? '').trim() : '',
         material: importColMap.material !== undefined ? String(row[importColMap.material] ?? '').trim() : '',
         color: importColMap.color !== undefined ? String(row[importColMap.color] ?? '').trim() : '',
-        reorderLevel: importColMap.reorderLevel !== undefined ? Number(row[importColMap.reorderLevel] ?? 5) : 5,
+        reorderLevel: importColMap.reorderLevel !== undefined ? row[importColMap.reorderLevel] : 5,
         warehouse: importColMap.warehouse !== undefined ? String(row[importColMap.warehouse] ?? '').trim() : '',
       }));
 
-      const payload = parsed.filter(r => r.name && Number.isFinite(r.price) && Number.isFinite(r.instock));
+      const payload = parsed;
 
       if (payload.length === 0) {
         setImportError('No valid rows found. Ensure Product Name, Price, and In Stock columns have valid data.');
@@ -430,7 +452,7 @@ export default function InventoryPage() {
         setImportRows([]);
         setImportHeaders([]);
         await refreshProducts();
-        notify(`Successfully imported ${res.data.created} product(s)!`, { variant: 'success' });
+        notify(`Imported ${res.data.created}; skipped ${res.data.skipped}.`, { variant: res.data.skipped ? 'warning' : 'success' });
       } else {
         setImportError(res.error || 'Import failed');
       }
@@ -458,8 +480,10 @@ export default function InventoryPage() {
       }
 
       if (batchesResult.status === 'fulfilled' && batchesResult.value.success) setBatches(batchesResult.value.data);
+      else setPanelError('Batches could not be loaded. Please retry.');
 
       if (agingResult.status === 'fulfilled' && agingResult.value.success) setAgingData(agingResult.value.data);
+      else setPanelError('Aging could not be loaded. Please retry.');
 
     } catch (error) {
       console.error('Failed to load deep inventory:', error);
@@ -471,18 +495,27 @@ export default function InventoryPage() {
 
   const loadLocationData = useCallback(async () => {
     setLocationLoading(true);
+    try {
     const [gsRes, gdRes] = await Promise.all([getGodownStock(), getGodowns()]);
+    if (!gsRes.success || !gdRes.success) throw new Error('Location query failed');
     if (gsRes.success) setGodownStocks(gsRes.data);
     if (gdRes.success) setGodowns(gdRes.data);
-    setLocationLoading(false);
+    } catch { setPanelError('Locations could not be loaded. Please retry.'); }
+    finally { setLocationLoading(false); }
   }, []);
 
-  const loadLedger = useCallback(async () => {
+  const loadLedger = useCallback(async (nextCursor) => {
     setLedgerLoading(true);
-    const res = await getStockLedger({ limit: 200 });
-    if (res.success) setLedgerEntries(res.data);
-    setLedgerLoading(false);
-  }, []);
+    try {
+    const cursor = typeof nextCursor === 'number' ? nextCursor : undefined;
+    const res = await getStockLedger({ limit: 200, productId: ledgerProduct ? Number(ledgerProduct) : undefined, godownId: ledgerGodown ? Number(ledgerGodown) : undefined, cursor });
+    if (res.success) {
+      setLedgerEntries(previous => cursor ? [...previous, ...res.data] : res.data);
+      setLedgerCursor(res.nextCursor);
+    }
+    } catch { setPanelError('Stock ledger could not be loaded. Please retry.'); }
+    finally { setLedgerLoading(false); }
+  }, [ledgerProduct, ledgerGodown]);
 
   useEffect(() => {
     if (['stockGroups', 'batches', 'aging'].includes(tab) && !deepFetched.current) {
@@ -493,7 +526,7 @@ export default function InventoryPage() {
       locationFetched.current = true;
       loadLocationData();
     }
-    if (tab === 'ledger' && !ledgerFetched.current) {
+    if (tab === 'ledger') {
       ledgerFetched.current = true;
       loadLedger();
     }
@@ -506,10 +539,11 @@ export default function InventoryPage() {
         : productType === 'rawMaterial' ? p.isRawMaterial : p.isConsumable) &&
       (category === 'All' || p.category === category) &&
       (warehouseFilter === 'All' || p.warehouse === warehouseFilter) &&
+      (!groupFilter || (groupFilter === 'none' ? !p.stockGroupId : p.stockGroupId === Number(groupFilter))) &&
       (p.name.toLowerCase().includes(search.toLowerCase()) || p.category.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase()))
     );
     return base;
-  }, [category, warehouseFilter, search, products, productType]);
+  }, [category, warehouseFilter, search, products, productType, groupFilter]);
 
   // Derived slices for stats
   const finishedGoods = useMemo(() => products.filter(p => p.isSellable !== false), [products]);
@@ -545,10 +579,49 @@ export default function InventoryPage() {
   }, [godownStocks, selectedLocationGodown, locationSearch]);
 
   const totalStock = activeProducts.reduce((sum, p) => sum + p.stock, 0);
+  const overallocatedBatchProducts = useMemo(() => {
+    const totals = new Map();
+    for (const batch of batches) totals.set(batch.productId, (totals.get(batch.productId) || 0) + batch.remainingQty);
+    return products.filter(product => (totals.get(product.id) || 0) > product.stock + 0.000001);
+  }, [batches, products]);
   const lowStockItems = activeProducts.filter(p => p.stock > 0 && p.stock <= p.reorderLevel);
-  const outOfStockItems = activeProducts.filter(p => p.stock === 0);
+  const outOfStockItems = activeProducts.filter(p => p.stock <= 0);
   const totalValue = activeProducts.reduce((sum, p) => sum + ((isManualInventoryMode ? p.costPrice : p.price) * p.stock), 0);
-  const needsReorder = [...lowStockItems, ...outOfStockItems].sort((a, b) => a.stock - b.stock);
+  const alertLowStock = products.filter(p => p.stock > 0 && p.stock <= p.reorderLevel);
+  const alertOutOfStock = products.filter(p => p.stock <= 0);
+  const needsReorder = [...alertLowStock, ...alertOutOfStock].sort((a, b) => a.stock - b.stock);
+  const stockIssues = products.filter(p => {
+    const rows = godownStocks.filter(row => row.productId === p.id);
+    return p.stock < 0 || rows.some(row => row.quantity < 0) || (rows.length && Math.abs(rows.reduce((sum, row) => sum + row.quantity, 0) - p.stock) > 0.000001);
+  });
+
+  const saveBatch = async () => {
+    if (batchSaving) return;
+    setBatchSaving(true);
+    setBatchError('');
+    try {
+      const payload = { productId: Number(batchForm.productId), batchNumber: batchForm.batchNumber,
+        purchaseDate: batchForm.purchaseDate || undefined, expiryDate: batchForm.expiryDate || undefined,
+        quantity: Number(batchForm.quantity), remainingQty: Number(batchForm.remainingQty), costPrice: Number(batchForm.costPrice) };
+      const res = editingBatchId ? await updateBatch(editingBatchId, payload) : await createBatch(payload);
+      if (!res.success) throw new Error(res.error || 'Unable to save batch');
+      setShowBatchModal(false);
+      setEditingBatchId(null);
+      setBatchForm({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
+      await loadDeepInventory();
+      notify('Batch saved', { variant: 'success' });
+    } catch (error) { setBatchError(error.message || 'Unable to save batch'); }
+    finally { setBatchSaving(false); }
+  };
+
+  const openBatch = (batch = null) => {
+    setEditingBatchId(batch?.id ?? null);
+    setBatchError('');
+    setBatchForm(batch ? { ...batch, productId: String(batch.productId),
+      purchaseDate: new Date(batch.purchaseDate).toISOString().slice(0, 10), expiryDate: batch.expiryDate ? new Date(batch.expiryDate).toISOString().slice(0, 10) : '' }
+      : { productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 });
+    setShowBatchModal(true);
+  };
 
   if (loading) {
     return (
@@ -561,16 +634,30 @@ export default function InventoryPage() {
   }
 
   return (
-    <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
+    <div className="min-w-0 max-w-full space-y-6 animate-[fade-in_0.5s_ease-out]">
+      {(loadError || panelError) && <div role="alert" className="glass-card p-3 text-danger flex flex-wrap gap-3 items-center justify-between">
+        <span>{loadError || panelError}</span><button onClick={async () => {
+          setLoadError(''); setPanelError('');
+          try { await refreshProducts(); } catch { setLoadError('Unable to load inventory. Please retry.'); }
+        }} className="text-sm underline">Retry</button>
+      </div>}
+      {stockIssues.length > 0 && <div role="alert" className="glass-card p-3 border-l-4 border-warning text-sm">
+        <p className="font-medium">Stock totals need review</p>
+        <p className="text-xs text-muted mt-1">{stockIssues.map(p => p.sku).join(', ')}: product and location balances differ. Existing data is preserved; movements are blocked until these balances are reconciled.</p>
+        <div className="flex flex-wrap gap-2 mt-2">{stockIssues.map(p => <button key={p.id} onClick={() => {
+          setReconcileProduct({ ...p, locationTotal: godownStocks.filter(row => row.productId === p.id).reduce((sum, row) => sum + row.quantity, 0) });
+          setReconcileBasis(''); setReconcileError('');
+        }} className="px-2 py-1 rounded border border-border text-xs text-accent">Review {p.sku}</button>)}</div>
+      </div>}
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground">Inventory & Warehouse</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
-            {finishedGoods.length} finished goods · {rawMaterials.length} raw materials · {consumables.length} consumable items · {godowns.length || 1} location{godowns.length !== 1 ? 's' : ''}
+            {finishedGoods.length} finished goods · {rawMaterials.length} raw materials · {consumables.length} consumable items · {godowns.length} location{godowns.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="ui-actions flex items-center gap-2 w-full md:w-auto">
           {tab === 'products' && productType === 'finished' && (
             <button
               onClick={() => { setImportResult(null); setImportRows([]); setImportError(''); setShowImportModal(true); }}
@@ -579,21 +666,21 @@ export default function InventoryPage() {
               <Upload className="w-4 h-4" /> Bulk Import
             </button>
           )}
-          {!(tab === 'products' && productType === 'rawMaterial') && (
+          {tab === 'products' && (
             <button
               onClick={() => setShowAddModal(true)}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 md:py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all tap-press-sm"
             >
               <Plus className="w-4 h-4" />
-              {tab === 'products' && productType === 'consumable' ? 'Add Consumable Item' : 'Add Product'}
+              {isManualInventoryMode ? `Add ${typeCopy.title}` : 'Add Product'}
             </button>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="overflow-x-auto overscroll-x-contain touch-pan-x hide-scrollbar -mx-3.5 md:mx-0">
-        <div className="flex bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit mx-3.5 md:mx-0">
+      <div className="ui-tabs overflow-x-auto overscroll-x-contain hide-scrollbar">
+        <div className="flex bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit">
           <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Package className="w-3.5 h-3.5" /> Products
           </button>
@@ -625,7 +712,7 @@ export default function InventoryPage() {
       {tab === 'products' && (
         <>
           {/* Product Type Sub-Tabs */}
-          <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x hide-scrollbar pb-1">
+          <div className="ui-tabs w-full min-w-0 overflow-x-auto overscroll-x-contain hide-scrollbar pb-1">
             <div className="flex w-max min-w-full md:w-fit md:min-w-0 bg-surface border border-border rounded-xl p-1 gap-0.5">
               <button
                 onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); }}
@@ -667,7 +754,7 @@ export default function InventoryPage() {
           </div>
 
           {/* Stats */}
-          <div className="flex gap-3 overflow-x-auto hide-scrollbar pb-1">
+          <div className="ui-stat-strip flex gap-3 overflow-x-auto hide-scrollbar pb-1">
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
               <div className="p-2.5 rounded-xl bg-accent-light">
                 {isManualInventoryMode ? <Boxes className="w-5 h-5 text-accent" /> : <Package className="w-5 h-5 text-accent" />}
@@ -681,7 +768,7 @@ export default function InventoryPage() {
               <div className="p-2.5 rounded-xl bg-success-light"><TrendingUp className="w-5 h-5 text-success" /></div>
               <div>
                 <p className="text-xs text-muted">{productType === 'rawMaterial' ? 'Material Value' : productType === 'consumable' ? 'Consumable Value' : 'Inventory Value'}</p>
-                <p className="text-lg font-bold text-foreground">₹{(totalValue / 100000).toFixed(1)}L</p>
+                <p className="text-lg font-bold text-foreground">₹{totalValue >= 100000 ? `${(totalValue / 100000).toFixed(1)}L` : totalValue.toLocaleString('en-IN')}</p>
               </div>
             </div>
             <div className="glass-card p-4 flex items-center gap-3 min-w-[160px] flex-shrink-0">
@@ -699,14 +786,14 @@ export default function InventoryPage() {
           </div>
 
           {/* Filters */}
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
+          <div className="ui-filters flex flex-col md:flex-row md:items-center gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input type="text" placeholder={`Search ${typeCopy.plural.toLowerCase()} by name or SKU...`} value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
             </div>
             <div className="flex gap-1 overflow-x-auto hide-scrollbar">
               {relevantCategories.map(cat => (
-                <button key={cat} onClick={() => setCategory(cat)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${category === cat ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>{cat}</button>
+                <button key={cat} onClick={() => setCategory(cat)} className={`flex-shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${category === cat ? 'bg-accent text-white' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>{cat}</button>
               ))}
             </div>
             <div className="flex bg-surface rounded-lg border border-border p-0.5 ml-auto">
@@ -714,16 +801,26 @@ export default function InventoryPage() {
               <button onClick={() => setView('list')} className={`p-2 rounded-md transition-all ${view === 'list' ? 'bg-accent/20 text-accent' : 'text-muted'}`}><List className="w-4 h-4" /></button>
             </div>
           </div>
+          <div className="flex flex-wrap gap-2">
+            <select aria-label="Filter by stock group" value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="min-w-0 max-w-full px-3 py-2 bg-surface rounded-lg border border-border text-xs">
+              <option value="">All stock groups</option><option value="none">Ungrouped</option>
+              {stockGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+            <select aria-label="Filter by warehouse" value={warehouseFilter} onChange={e => setWarehouseFilter(e.target.value)} className="min-w-0 max-w-full px-3 py-2 bg-surface rounded-lg border border-border text-xs">
+              {warehouses.map(w => <option key={w} value={w}>{w === 'All' ? 'All warehouse labels' : w}</option>)}
+            </select>
+            <button onClick={() => refreshProducts().catch(() => setPanelError('Unable to refresh inventory'))} className="px-3 py-2 text-xs text-accent" aria-label="Refresh inventory">Refresh</button>
+          </div>
 
           {view === 'grid' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {filtered.map(product => {
                 const badge = stockBadge(product.stock, product.reorderLevel);
                 const isBestSeller = product.isSellable !== false && product.sold >= 30;
                 // Get godown distribution for this product
                 const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                 return (
-                  <div key={product.id} className="glass-card overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer" onClick={() => setShowStockModal(product)}>
+                  <div key={product.id} className="glass-card overflow-hidden group hover:scale-[1.02] transition-transform cursor-pointer" onClick={() => openStock(product)}>
                     <div className="h-32 bg-surface flex items-center justify-center relative overflow-hidden">
                       {product.image && !product.image.includes('/') ? (
                         <span className="text-5xl">{product.image}</span>
@@ -839,7 +936,7 @@ export default function InventoryPage() {
                   return (
                     <div
                       key={product.id}
-                      onClick={() => setShowStockModal(product)}
+                      onClick={() => openStock(product)}
                       className="m-card tap-press animate-list-in flex items-center gap-3"
                       style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
                     >
@@ -890,7 +987,7 @@ export default function InventoryPage() {
 
               {/* Desktop: table */}
               <div className="hidden md:block glass-card overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="ui-table-scroll overflow-x-auto">
                   <table className="crm-table">
                     <thead>
                       <tr>
@@ -911,7 +1008,7 @@ export default function InventoryPage() {
                         const badge = stockBadge(product.stock, product.reorderLevel);
                         const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                         return (
-                          <tr key={product.id} className="cursor-pointer" onClick={() => setShowStockModal(product)}>
+                          <tr key={product.id} className="cursor-pointer" onClick={() => openStock(product)}>
                             <td>
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -952,8 +1049,8 @@ export default function InventoryPage() {
                             )}
                             <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
                             <td>
-                              <div className="flex items-center gap-2">
-                                <button onClick={(e) => { e.stopPropagation(); setShowStockModal(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
+                              <div className="ui-actions flex items-center gap-2">
+                                <button onClick={(e) => { e.stopPropagation(); openStock(product); }} className="px-2 py-1 rounded-lg bg-surface-hover text-xs text-muted hover:text-accent transition-colors">
                                   Update Stock
                                 </button>
                                 {product.isConsumable && (
@@ -986,7 +1083,7 @@ export default function InventoryPage() {
       {/* ─── LOCATION VIEW TAB ─── */}
       {tab === 'location' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="ui-filters flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input value={locationSearch} onChange={e => setLocationSearch(e.target.value)} placeholder="Search products..." className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/50" />
@@ -1011,7 +1108,7 @@ export default function InventoryPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-lg font-bold text-foreground">{item.totalQty}</p>
-                      <p className="text-[10px] text-muted">Total Units</p>
+                      <p className="text-[10px] text-muted">Total {item.product?.unitOfMeasure || 'PCS'}</p>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
@@ -1054,6 +1151,14 @@ export default function InventoryPage() {
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted">Complete audit trail of all stock movements</p>
             <button onClick={loadLedger} className="p-2 bg-surface border border-border rounded-lg text-muted hover:text-foreground"><RefreshCw className="w-4 h-4" /></button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <select aria-label="Ledger product" value={ledgerProduct} onChange={e => setLedgerProduct(e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
+              <option value="">All items</option>{products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+            </select>
+            <select aria-label="Ledger location" value={ledgerGodown} onChange={e => setLedgerGodown(e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
+              <option value="">All locations</option>{godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
           </div>
           {ledgerLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
@@ -1098,7 +1203,7 @@ export default function InventoryPage() {
 
               {/* Desktop: table */}
               <div className="hidden md:block glass-card overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="ui-table-scroll overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="border-b border-border">
                       {['Date', 'Product', 'Godown', 'Type', 'Qty', 'Balance', 'Reference', 'Notes'].map(h => <th key={h} className="px-3 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
@@ -1130,7 +1235,7 @@ export default function InventoryPage() {
                             </td>
                             <td className="px-3 py-2.5 text-foreground font-medium text-xs">{e.balanceAfter}</td>
                             <td className="px-3 py-2.5 text-muted text-[10px]">{e.referenceType || '—'}</td>
-                            <td className="px-3 py-2.5 text-muted text-[10px] max-w-[200px] truncate">{e.notes || '—'}</td>
+                            <td className="px-3 py-2.5 text-muted text-[10px] max-w-[260px]"><p>{e.notes || '—'}</p>{e.batchMovements?.length > 0 && <p>Lots: {e.batchMovements.map(m => `${m.batch?.batchNumber || 'Untracked legacy'}: ${m.quantity}`).join(' · ')}</p>}</td>
                           </tr>
                         );
                       })}
@@ -1143,6 +1248,8 @@ export default function InventoryPage() {
           )}
         </div>
       )}
+
+      {tab === 'ledger' && ledgerCursor && !ledgerLoading && <button onClick={() => loadLedger(ledgerCursor)} className="px-4 py-2 rounded-lg border border-border text-accent text-sm">Load older movements</button>}
 
       {/* ─── STOCK ALERTS TAB ─── */}
       {tab === 'alerts' && (
@@ -1157,7 +1264,7 @@ export default function InventoryPage() {
             <>
               <div className="glass-card p-4 border-l-4 border-l-warning">
                 <p className="text-sm text-foreground font-medium">{needsReorder.length} products need attention</p>
-                <p className="text-xs text-muted mt-1">{outOfStockItems.length} out of stock, {lowStockItems.length} below reorder level</p>
+                <p className="text-xs text-muted mt-1">Across all inventory: {alertOutOfStock.length} out of stock, {alertLowStock.length} below reorder level</p>
               </div>
 
               {/* Mobile: reorder alert cards */}
@@ -1168,7 +1275,7 @@ export default function InventoryPage() {
                   return (
                     <div
                       key={product.id}
-                      onClick={() => setShowStockModal(product)}
+                      onClick={() => openStock(product)}
                       className="m-card tap-press animate-list-in flex items-center gap-3"
                       style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
                     >
@@ -1193,7 +1300,7 @@ export default function InventoryPage() {
                           <span className="text-xs text-muted">· reorder @ {product.reorderLevel}</span>
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-1.5">
-                          <span className="text-xs text-danger font-medium">{shortfall > 0 ? `Need ${shortfall} more` : 'Restocked'}</span>
+                          <span className="text-xs text-danger font-medium">{shortfall > 0 ? `Need ${shortfall} more` : 'At reorder threshold'}</span>
                           <span className="text-xs font-medium text-accent flex-shrink-0">Tap to restock</span>
                         </div>
                       </div>
@@ -1204,7 +1311,7 @@ export default function InventoryPage() {
 
               {/* Desktop: table */}
               <div className="hidden md:block glass-card overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="ui-table-scroll overflow-x-auto">
                   <table className="crm-table">
                     <thead>
                       <tr>
@@ -1257,7 +1364,7 @@ export default function InventoryPage() {
                             </td>
                             <td className="whitespace-nowrap">
                               <button
-                                onClick={() => setShowStockModal(product)}
+                                onClick={() => openStock(product)}
                                 className="px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-xs font-medium hover:bg-accent/20 transition-colors border border-accent/20"
                               >
                                 Restock
@@ -1288,7 +1395,7 @@ export default function InventoryPage() {
             </div>
           )}
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {stockGroups.map(g => (
                 <div key={g.id} className="glass-card p-5">
                   <div className="flex items-start justify-between gap-3">
@@ -1296,7 +1403,7 @@ export default function InventoryPage() {
                       <h3 className="font-semibold text-foreground truncate">{g.name}</h3>
                       <p className="text-xs text-muted mt-1">Parent: {g.parent?.name || 'Root'}</p>
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="ui-actions flex items-center gap-1 flex-shrink-0">
                       <button type="button" onClick={() => openGroupModal(g)} className="p-2 rounded-lg text-muted hover:text-accent hover:bg-accent/10" aria-label={`Edit ${g.name}`} title="Edit group">
                         <Pencil className="w-4 h-4" />
                       </button>
@@ -1309,6 +1416,13 @@ export default function InventoryPage() {
                     <span>{g._count?.products || 0} products</span>
                     <span>{g._count?.children || 0} sub-groups</span>
                   </div>
+                  <details className="mt-3 text-xs">
+                    <summary className="text-accent cursor-pointer">View assigned items</summary>
+                    <div className="mt-2 space-y-1 max-h-48 overflow-auto">
+                      {products.filter(p => p.stockGroupId === g.id).map(p => <button key={p.id} onClick={e => openEditModal(p, e)} className="block w-full text-left p-2 rounded hover:bg-surface-hover">{p.name} · {p.sku}</button>)}
+                      {!products.some(p => p.stockGroupId === g.id) && <p className="text-muted">No items assigned. Use Edit Product to assign a group.</p>}
+                    </div>
+                  </details>
                 </div>
               ))}
               {stockGroups.length === 0 && <div className="col-span-full text-center py-12 text-muted">No stock groups created yet</div>}
@@ -1340,8 +1454,9 @@ export default function InventoryPage() {
       {/* ─── BATCHES TAB ─── */}
       {tab === 'batches' && (
         <div className="space-y-4">
+          {overallocatedBatchProducts.length > 0 && <p role="alert" className="text-xs text-warning bg-warning-light border border-warning/20 rounded-lg p-3">Combined batch balances exceed physical stock for {overallocatedBatchProducts.map(p => p.name).join(', ')}. Review and correct remaining quantities; physical stock has not been changed.</p>}
           <div className="flex justify-end">
-            <button onClick={() => setShowBatchModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Batch</button>
+            <button onClick={() => openBatch()} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Batch</button>
           </div>
           {deepLoading ? <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div> : (
             <>
@@ -1367,7 +1482,7 @@ export default function InventoryPage() {
                         {new Date(b.purchaseDate).toLocaleDateString('en-IN')}
                         {b.expiryDate ? ` → ${new Date(b.expiryDate).toLocaleDateString('en-IN')}` : ''}
                       </span>
-                      <span className="text-xs font-medium text-accent flex-shrink-0">₹{b.costPrice?.toLocaleString('en-IN')}</span>
+                      <button onClick={() => openBatch(b)} className="text-xs font-medium text-accent flex-shrink-0">Edit · ₹{b.costPrice?.toLocaleString('en-IN')}</button>
                     </div>
                   </div>
                 ))}
@@ -1375,7 +1490,7 @@ export default function InventoryPage() {
 
               {/* Desktop: table */}
               <div className="hidden md:block glass-card overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="ui-table-scroll overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="border-b border-border">
                       {['Product', 'SKU', 'Batch #', 'Purchase Date', 'Expiry', 'Original Qty', 'Remaining', 'Cost Price'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
@@ -1385,7 +1500,7 @@ export default function InventoryPage() {
                         <tr key={b.id} className="border-b border-border/50 hover:bg-surface-hover transition-colors">
                           <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{b.product?.name}</td>
                           <td className="px-4 py-3 text-muted font-mono text-xs whitespace-nowrap">{b.product?.sku}</td>
-                          <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.batchNumber}</td>
+                          <td className="px-4 py-3 text-foreground whitespace-nowrap"><button onClick={() => openBatch(b)} className="text-accent underline">{b.batchNumber} · Edit</button></td>
                           <td className="px-4 py-3 text-muted whitespace-nowrap">{new Date(b.purchaseDate).toLocaleDateString('en-IN')}</td>
                           <td className="px-4 py-3 text-muted whitespace-nowrap">{b.expiryDate ? new Date(b.expiryDate).toLocaleDateString('en-IN') : '—'}</td>
                           <td className="px-4 py-3 text-foreground whitespace-nowrap">{b.quantity}</td>
@@ -1400,16 +1515,17 @@ export default function InventoryPage() {
               </div>
             </>
           )}
-          <Modal isOpen={showBatchModal} onClose={() => setShowBatchModal(false)} title="Add Batch">
+          <Modal isOpen={showBatchModal} onClose={() => { if (!batchSaving) setShowBatchModal(false); }} title={editingBatchId ? 'Edit Batch' : 'Add Batch'}>
             <div className="space-y-4">
+              <p className="text-xs text-muted">Receipts create lots automatically. Issues use FEFO for expiring lots, then FIFO for undated lots; expired lots are blocked. Edit receipt lots to add expiry/supplier details. Add Batch annotates untracked legacy stock only and does not receive stock again. Lots are tracked per product across locations.</p>
               <div>
                 <label className="text-sm text-muted mb-1 block">Product *</label>
-                <select value={batchForm.productId} onChange={e => setBatchForm(p => ({ ...p, productId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+                <select disabled={Boolean(editingBatchId)} value={batchForm.productId} onChange={e => setBatchForm(p => ({ ...p, productId: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
                   <option value="">Select Product</option>
                   {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="ui-form-grid grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-muted mb-1 block">Batch Number *</label>
                   <input value={batchForm.batchNumber} onChange={e => setBatchForm(p => ({ ...p, batchNumber: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
@@ -1419,7 +1535,7 @@ export default function InventoryPage() {
                   <input type="number" min="0" value={batchForm.costPrice} onChange={e => setBatchForm(p => ({ ...p, costPrice: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="ui-form-grid grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-muted mb-1 block">Purchase Date</label>
                   <input type="date" value={batchForm.purchaseDate} onChange={e => setBatchForm(p => ({ ...p, purchaseDate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
@@ -1429,25 +1545,18 @@ export default function InventoryPage() {
                   <input type="date" value={batchForm.expiryDate} onChange={e => setBatchForm(p => ({ ...p, expiryDate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="ui-form-grid grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm text-muted mb-1 block">Quantity *</label>
-                  <input type="number" min="1" value={batchForm.quantity} onChange={e => setBatchForm(p => ({ ...p, quantity: e.target.value, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                  <input type="number" min="0.001" step="any" disabled={Boolean(batchForm._count?.movements)} value={batchForm.quantity} onChange={e => setBatchForm(p => ({ ...p, quantity: e.target.value, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
                 </div>
                 <div>
                   <label className="text-sm text-muted mb-1 block">Remaining Qty</label>
-                  <input type="number" min="0" value={batchForm.remainingQty} onChange={e => setBatchForm(p => ({ ...p, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                  <input type="number" min="0" step="any" disabled={Boolean(batchForm._count?.movements)} value={batchForm.remainingQty} onChange={e => setBatchForm(p => ({ ...p, remainingQty: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
                 </div>
               </div>
-              <button onClick={async () => {
-                const res = await createBatch({
-                  productId: Number(batchForm.productId), batchNumber: batchForm.batchNumber,
-                  purchaseDate: batchForm.purchaseDate || undefined, expiryDate: batchForm.expiryDate || undefined,
-                  quantity: Number(batchForm.quantity), remainingQty: Number(batchForm.remainingQty), costPrice: Number(batchForm.costPrice)
-                });
-                if (res.success) { setShowBatchModal(false); setBatchForm({ productId: '', batchNumber: '', purchaseDate: '', expiryDate: '', quantity: 1, remainingQty: 1, costPrice: 0 }); loadDeepInventory(); }
-                else alert(res.error);
-              }} disabled={!batchForm.productId || !batchForm.batchNumber} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">Create Batch</button>
+              {batchError && <p role="alert" className="text-sm text-danger">{batchError}</p>}
+              <button onClick={saveBatch} disabled={batchSaving || !batchForm.productId || !batchForm.batchNumber.trim()} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">{batchSaving ? 'Saving...' : editingBatchId ? 'Save Batch' : 'Create Batch'}</button>
             </div>
           </Modal>
         </div>
@@ -1462,9 +1571,10 @@ export default function InventoryPage() {
                 <>
                   {/* Batch-based aging (when batch records exist) */}
                   <div className="glass-card p-3 border-l-4 border-accent">
-                    <p className="text-xs text-muted">Showing batch-level aging. Each row represents a product batch received from a supplier.</p>
+                    <p className="text-xs text-muted">Aging includes receipt lots and estimated untracked legacy stock. New issues automatically reduce batch balances. Legacy estimates are not exact receipt dates.</p>
+                    {overallocatedBatchProducts.length > 0 && <p className="text-xs text-warning mt-1">Some combined batch balances exceed physical stock. Correct them in Batches; this report is capped to available stock.</p>}
                   </div>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-5 gap-4">
                     {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
                       const items = agingData.filter(a => a.bracket === bracket);
                       const value = items.reduce((s, a) => s + a.value, 0);
@@ -1502,7 +1612,7 @@ export default function InventoryPage() {
                     ))}
                   </div>
                   <div className="hidden md:block glass-card overflow-hidden">
-                    <div className="overflow-x-auto">
+                    <div className="ui-table-scroll overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead><tr className="border-b border-border">
                           {['Product', 'SKU', 'Category', 'Batch #', 'Age (Days)', 'Bracket', 'Remaining', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
@@ -1536,7 +1646,7 @@ export default function InventoryPage() {
                   {/* Product-based aging fallback (when no batch records) */}
                   <div className="glass-card p-3 border-l-4 border-amber-500">
                     <p className="text-xs text-foreground font-medium">Showing product-level aging based on last restock date.</p>
-                    <p className="text-xs text-muted mt-0.5">For batch-level aging (FIFO/FEFO), add batches in the Batches tab when you receive stock.</p>
+                    <p className="text-xs text-muted mt-0.5">New receipts create lots automatically. Review legacy stock and expiry dates in the Batches tab.</p>
                   </div>
                   {(() => {
                     const now = new Date();
@@ -1559,7 +1669,7 @@ export default function InventoryPage() {
 
                     return (
                       <>
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-5 gap-4">
                           {['0-30 days', '31-60 days', '61-90 days', '91-180 days', '180+ days'].map(bracket => {
                             const items = productAging.filter(p => p.bracket === bracket);
                             const value = items.reduce((s, p) => s + p.value, 0);
@@ -1594,7 +1704,7 @@ export default function InventoryPage() {
                           ))}
                         </div>
                         <div className="hidden md:block glass-card overflow-hidden">
-                          <div className="overflow-x-auto">
+                          <div className="ui-table-scroll overflow-x-auto">
                             <table className="w-full text-sm">
                               <thead><tr className="border-b border-border">
                                 {['Product', 'SKU', 'Category', 'Last Restocked', 'Age (Days)', 'Bracket', 'Stock', 'Value'].map(h => <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted uppercase whitespace-nowrap">{h}</th>)}
@@ -1631,16 +1741,45 @@ export default function InventoryPage() {
         </div>
       )}
 
+      <Modal isOpen={Boolean(reconcileProduct)} onClose={() => { if (!reconciling) setReconcileProduct(null); }} title="Review stock balances">
+        {reconcileProduct && <div className="space-y-4 text-sm">
+          <p className="font-semibold">{reconcileProduct.name} · {reconcileProduct.sku}</p>
+          <p>Product total: {reconcileProduct.stock} · Location total: {reconcileProduct.locationTotal}</p>
+          <div className="space-y-1 text-xs text-muted">{godownStocks.filter(row => row.productId === reconcileProduct.id).map(row => <p key={row.id}>{row.godown?.name}: {row.quantity}</p>)}</div>
+          <p className="text-muted">Check the physical stock before choosing a balance. This correction is recorded in the ledger; existing history stays intact.</p>
+          <select aria-label="Correct stock balance" value={reconcileBasis} onChange={e => setReconcileBasis(e.target.value)} className="w-full bg-surface border border-border rounded-lg p-2">
+            <option value="">Choose the verified balance</option>
+            <option value="LOCATIONS">Location total is correct — use {reconcileProduct.locationTotal}</option>
+            <option value="PRODUCT">Product total is correct — adjust locations to {reconcileProduct.stock}</option>
+          </select>
+          {reconcileBasis === 'PRODUCT' && <p className="text-xs text-muted">A positive difference goes to the default location. A negative difference is removed from locations in location ID order.</p>}
+          {reconcileError && <p role="alert" className="text-danger">{reconcileError}</p>}
+          <button disabled={reconciling || !reconcileBasis} onClick={async () => {
+            if (reconciling) return;
+            setReconciling(true); setReconcileError('');
+            try {
+              const res = await reconcileInventoryStock(reconcileProduct.id, reconcileBasis, reconcileProduct.stock, reconcileProduct.locationTotal);
+              if (!res.success) throw new Error(res.error || 'Unable to reconcile stock');
+              setReconcileProduct(null); await refreshProducts();
+              notify('Stock balances reconciled', { variant: 'success' });
+            } catch (error) { setReconcileError(error.message || 'Unable to reconcile stock'); }
+            finally { setReconciling(false); }
+          }} className="w-full py-2.5 bg-accent text-white rounded-lg disabled:opacity-50">{reconciling ? 'Saving...' : 'Confirm verified balance'}</button>
+        </div>}
+      </Modal>
+
       {/* Add Product / Raw Material / Consumable Modal */}
       <Modal
         isOpen={showAddModal}
-        onClose={() => { setShowAddModal(false); setProductImages([]); }}
+        onClose={() => { if (!addingProduct) { setShowAddModal(false); setProductImages([]); } }}
         title={tab === 'products' && isStockOnlyType(productType) ? `Add ${getTypeCopy(productType).title}` : 'Add New Product'}
       >
         <form className="space-y-4" onSubmit={async (e) => {
           e.preventDefault();
+          if (addingProduct) return;
           setAddingProduct(true);
           const f = e.target;
+          try {
           const isRawMode = tab === 'products' && productType === 'rawMaterial';
           const isConsumableMode = tab === 'products' && productType === 'consumable';
           const isManualMode = isRawMode || isConsumableMode;
@@ -1653,13 +1792,13 @@ export default function InventoryPage() {
             try {
               const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
               const uploadData = await uploadRes.json();
-              if (uploadData.success && uploadData.urls.length > 0) {
+              if (uploadRes.ok && uploadData.success && uploadData.urls?.length > 0) {
                 imageUrl = uploadData.urls.join(',');
               } else if (uploadData.error) {
-                notify(uploadData.error, { variant: 'danger' });
+                throw new Error(uploadData.error);
               }
             } catch (err) {
-              notify('Image upload failed — product will be saved without image.', { variant: 'warning' });
+              throw new Error(err.message || 'Image upload failed. Please retry before saving.');
             }
           }
           const selectedGodownId = f.godownId?.value ? Number(f.godownId.value) : undefined;
@@ -1681,9 +1820,14 @@ export default function InventoryPage() {
             image: imageUrl || '',
             godownId: selectedGodownId,
           });
-          if (res.success) { setShowAddModal(false); setProductImages([]); refreshProducts(); if (godownStocks.length > 0) loadLocationData(); }
-          else if (res.error) alert(res.error);
-          setAddingProduct(false);
+          if (!res.success) throw new Error(res.error || 'Unable to create item');
+          setShowAddModal(false);
+          productImages.forEach(img => URL.revokeObjectURL(img.preview));
+          setProductImages([]);
+          await refreshProducts();
+          notify('Item created', { variant: 'success' });
+          } catch (error) { notify(error.message || 'Unable to create item', { variant: 'danger' }); }
+          finally { setAddingProduct(false); }
         }}>
 
           {/* Mode indicator for manually tracked inventory */}
@@ -1772,7 +1916,7 @@ export default function InventoryPage() {
 
           {/* Cost price + UOM for manually tracked inventory */}
           {tab === 'products' && isStockOnlyType(productType) && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="ui-form-grid grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Cost Price (₹/unit)</label>
                 <input type="number" name="costPrice" min="0" placeholder="0" className="w-full" />
@@ -1782,21 +1926,6 @@ export default function InventoryPage() {
                 <select name="unitOfMeasure" className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
                   {['PCS', 'KG', 'L', 'M', 'M2', 'M3', 'FT', 'INCH', 'SET', 'BOX', 'ROLL', 'SHEET'].map(u => (
                     <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-medium text-muted mb-1.5">Stock Group</label>
-                <select
-                  value={editForm.stockGroupId || ''}
-                  onChange={e => setEditForm(f => ({ ...f, stockGroupId: e.target.value }))}
-                  className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
-                >
-                  <option value="">No stock group</option>
-                  {stockGroups.map(group => (
-                    <option key={group.id} value={group.id}>
-                      {group.parent?.name ? `${group.parent.name} / ` : ''}{group.name}
-                    </option>
                   ))}
                 </select>
               </div>
@@ -1817,7 +1946,7 @@ export default function InventoryPage() {
           </div>
 
           {tab !== 'products' || productType !== 'rawMaterial' ? (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="ui-form-grid grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Material</label>
                 <input type="text" name="material" placeholder="e.g., Sheesham Wood" className="w-full" />
@@ -1832,7 +1961,7 @@ export default function InventoryPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Stock Quantity</label>
-              <input type="number" name="stock" placeholder="0" className="w-full" />
+                <input type="number" name="stock" min="0" step="any" placeholder="0" className="w-full" />
             </div>
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Reorder Level</label>
@@ -1869,7 +1998,7 @@ export default function InventoryPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Description</label>
             <textarea rows={2} name="description" placeholder="Optional description..." className="w-full" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => { setShowAddModal(false); setProductImages([]); }} className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button
               type="submit"
@@ -1895,7 +2024,7 @@ export default function InventoryPage() {
         {productToDelete && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Are you sure you want to move <strong className="text-foreground">{productToDelete.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <div className="flex gap-3 justify-end">
+            <div className="ui-actions flex gap-3 justify-end">
               <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveToDraft} disabled={deleting} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">
                 {deleting ? 'Moving...' : 'Move to Draft'}
@@ -1906,7 +2035,7 @@ export default function InventoryPage() {
       </Modal>
 
       {/* Stock Update Modal */}
-      <Modal isOpen={!!showStockModal} onClose={() => setShowStockModal(null)} title="Update Stock" size="md">
+      <Modal isOpen={!!showStockModal} onClose={() => { if (!stockSaving) setShowStockModal(null); }} title="Update Stock" size="md">
         {showStockModal && (
           <div className="space-y-4">
             <div className="flex items-center gap-4">
@@ -1935,8 +2064,8 @@ export default function InventoryPage() {
                 <p className="text-[10px] text-muted">Reorder Level</p>
               </div>
               <div className="bg-surface rounded-xl p-3 text-center">
-                <p className="text-xl font-bold text-foreground">{showStockModal.sold}</p>
-                <p className="text-[10px] text-muted">Total Sold</p>
+                <p className="text-xl font-bold text-foreground">{showStockModal.isConsumable ? showStockModal.unitOfMeasure : showStockModal.sold}</p>
+                <p className="text-[10px] text-muted">{showStockModal.isConsumable ? 'Manual daily usage' : 'Total Sold'}</p>
               </div>
             </div>
 
@@ -1983,53 +2112,60 @@ export default function InventoryPage() {
             )}
 
             <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Stock Adjustment</label>
+              <label className="block text-xs font-medium text-muted mb-1.5">Stock Adjustment ({showStockModal.unitOfMeasure || 'PCS'}, base units)</label>
               <div className="flex gap-2">
                 <select id="stockAdjType" className="px-3 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
                   <option>Add Stock</option>
                   <option>Remove Stock</option>
                   <option>Set Stock</option>
                 </select>
-                <input id="stockQty" type="number" placeholder="Quantity" min="0" className="flex-1 px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50" />
+                <input id="stockQty" type="number" placeholder="Quantity" min="0" step="any" className="min-w-0 flex-1 px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50" />
               </div>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Reason</label>
-              <select className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
+              <select id="stockReason" className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground">
+                {showStockModal.isConsumable && <option>Daily consumption</option>}
                 <option>New shipment received</option>
                 <option>Returned by customer</option>
                 <option>Damaged / Write-off</option>
-                <option>Transferred between warehouses</option>
                 <option>Stock count correction</option>
               </select>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Notes</label>
-              <textarea rows={2} placeholder="Optional notes..." className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
+              <textarea id="stockNotes" rows={2} placeholder="Optional notes..." className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50 resize-none" />
             </div>
 
-            <button onClick={async () => {
+            {stockError && <p role="alert" className="text-sm text-danger">{stockError}</p>}
+            <button disabled={stockSaving || locationLoading} onClick={async () => {
+              if (stockSaving) return;
+              setStockError('');
+              const qtyText = document.querySelector('#stockQty')?.value;
               const adjType = document.querySelector('#stockAdjType')?.value;
-              const qty = Number(document.querySelector('#stockQty')?.value || 0);
+              const qty = Number(qtyText);
               const selectedGodownId = document.querySelector('#stockGodownId')?.value;
-              if (godowns.length > 0 && !selectedGodownId) { alert('Please select a godown / location'); return; }
-
-              // For godown-aware mode: the stock value is per-godown, not per-product
+              if (godowns.length > 0 && !selectedGodownId) { setStockError('Please select a godown / location'); return; }
+              if (!qtyText || !Number.isFinite(qty) || qty < 0 || (adjType !== 'Set Stock' && qty === 0)) { setStockError('Enter a valid quantity'); return; }
               const gdStock = selectedGodownId ? godownStocks.find(gs => gs.productId === showStockModal.id && gs.godownId === Number(selectedGodownId)) : null;
-              const currentGdQty = gdStock?.quantity || 0;
-              let newStock;
-              if (adjType === 'Add Stock') newStock = currentGdQty + qty;
-              else if (adjType === 'Remove Stock') newStock = Math.max(0, currentGdQty - qty);
-              else newStock = qty;
-
-              await updateStock({ id: showStockModal.id, stock: newStock, godownId: selectedGodownId ? Number(selectedGodownId) : undefined });
-              setShowStockModal(null);
-              refreshProducts();
-              if (godownStocks.length > 0) loadLocationData();
-            }} className="w-full py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
-              Update Stock
+              setStockSaving(true);
+              try {
+                const res = await updateStock({ id: showStockModal.id, stock: qty,
+                  mode: adjType === 'Add Stock' ? 'ADD' : adjType === 'Remove Stock' ? 'REMOVE' : 'SET',
+                  expectedStock: selectedGodownId ? gdStock?.quantity ?? 0 : showStockModal.stock,
+                  godownId: selectedGodownId ? Number(selectedGodownId) : undefined,
+                  reason: document.querySelector('#stockReason')?.value,
+                  notes: document.querySelector('#stockNotes')?.value });
+                if (!res.success) throw new Error(res.error || 'Unable to update stock');
+                setShowStockModal(null);
+                await refreshProducts();
+                notify('Stock updated', { variant: 'success' });
+              } catch (error) { setStockError(error.message || 'Unable to update stock'); }
+              finally { setStockSaving(false); }
+            }} className="w-full py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-all">
+              {stockSaving ? 'Saving...' : 'Update Stock'}
             </button>
           </div>
         )}
@@ -2057,7 +2193,7 @@ export default function InventoryPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl">
               <p className="text-xs font-bold text-red-500 mb-1.5">Required Columns</p>
-              {['Product Name', 'SKU Code', 'Category', 'Price', 'In Stock', 'Description'].map(c => (
+              {['Product Name', 'Price', 'In Stock'].map(c => (
                 <p key={c} className="text-xs text-muted flex items-center gap-1.5 mb-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />{c}
                 </p>
@@ -2065,7 +2201,7 @@ export default function InventoryPage() {
             </div>
             <div className="p-3 bg-surface border border-border rounded-xl">
               <p className="text-xs font-bold text-muted mb-1.5">Optional Columns</p>
-              {['Material', 'Color', 'Reorder Level', 'Warehouse'].map(c => (
+              {['SKU Code', 'Category', 'Description', 'Material', 'Color', 'Reorder Level', 'Warehouse'].map(c => (
                 <p key={c} className="text-xs text-muted flex items-center gap-1.5 mb-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-border flex-shrink-0" />{c}
                 </p>
@@ -2156,6 +2292,9 @@ export default function InventoryPage() {
                   <div><p className="text-2xl font-bold text-foreground">{importResult.total}</p><p className="text-xs text-muted">Total</p></div>
                 </div>
               </div>
+              {importResult.errors?.length > 0 && <div className="max-h-48 overflow-auto text-xs space-y-2" role="status">
+                {importResult.errors.map((item, index) => <p key={index} className="text-warning">Row {item.row}: {item.name || 'Unnamed item'} — {item.error}</p>)}
+              </div>}
               <button
                 onClick={() => { setShowImportModal(false); setImportResult(null); }}
                 className="w-full py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all"
@@ -2173,7 +2312,7 @@ export default function InventoryPage() {
           <div className="space-y-4">
 
             {/* Image Section */}
-            <div className="flex items-start gap-4">
+            <div className="ui-filters flex items-start gap-4">
               <div className="w-24 h-24 rounded-2xl bg-surface border-2 border-dashed border-border flex items-center justify-center overflow-hidden flex-shrink-0 relative group">
                 {editImagePreview ? (
                   <img src={editImagePreview} alt="Product" className="w-full h-full object-cover" />
@@ -2206,7 +2345,7 @@ export default function InventoryPage() {
             <hr className="border-border" />
 
             {/* Core Fields */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="ui-form-grid grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-muted mb-1.5">Product Name *</label>
                 <input
@@ -2254,7 +2393,7 @@ export default function InventoryPage() {
                 <label className="block text-xs font-medium text-muted mb-1.5">Reorder Level</label>
                 <input
                   type="number"
-                  value={editForm.reorderLevel || 5}
+                  value={editForm.reorderLevel ?? 5}
                   onChange={e => setEditForm(f => ({ ...f, reorderLevel: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
                   placeholder="5"
@@ -2268,15 +2407,23 @@ export default function InventoryPage() {
                   onChange={e => setEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"
                 >
-                  {['PCS', 'SET', 'KG', 'MTR', 'SQFT', 'L', 'BOX', 'ROLL', 'PAIR'].map(u => (
+                  {[...new Set([editForm.unitOfMeasure, 'PCS', 'SET', 'KG', 'M', 'M2', 'M3', 'MTR', 'SQFT', 'FT', 'INCH', 'L', 'BOX', 'ROLL', 'PAIR', 'SHEET'].filter(Boolean))].map(u => (
                     <option key={u} value={u}>{u}</option>
                   ))}
                 </select>
               </div>
             </div>
 
+            <div>
+              <label className="block text-xs font-medium text-muted mb-1.5">Stock Group</label>
+              <select value={editForm.stockGroupId || ''} onChange={e => setEditForm(f => ({ ...f, stockGroupId: e.target.value }))} className="w-full px-3 py-2.5 bg-surface border border-border rounded-xl text-sm">
+                <option value="">No stock group</option>
+                {stockGroups.map(g => <option key={g.id} value={g.id}>{g.parent?.name ? `${g.parent.name} / ` : ''}{g.name}</option>)}
+              </select>
+            </div>
+
             {/* Optional Fields */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="ui-form-grid grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Brand</label>
                 <input
@@ -2328,7 +2475,7 @@ export default function InventoryPage() {
             )}
 
             {/* Actions */}
-            <div className="flex gap-3 pt-2">
+            <div className="ui-actions flex gap-3 pt-2">
               <button
                 onClick={() => { setShowEditModal(false); setEditProduct(null); }}
                 className="flex-1 py-2.5 bg-surface border border-border text-muted rounded-xl text-sm font-semibold hover:text-foreground transition-all"

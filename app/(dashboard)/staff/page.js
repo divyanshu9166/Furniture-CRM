@@ -164,12 +164,12 @@ export default function StaffPage() {
             <div key={i} className="h-9 w-28 bg-surface rounded-xl" />
           ))}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           {Array.from({ length: 5 }).map((_, i) => (
             <div key={i} className="glass-card p-4 h-20 bg-surface rounded-xl" />
           ))}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="glass-card p-5 h-48 bg-surface rounded-xl" />
           ))}
@@ -181,7 +181,7 @@ export default function StaffPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Staff Dashboard</h1>
           <p className="text-sm text-muted mt-1">Performance, attendance, targets, field ops & stock</p>
@@ -209,7 +209,7 @@ export default function StaffPage() {
       {/* ===== OVERVIEW TAB ===== */}
       {tab === 'overview' && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="glass-card p-4 flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-accent-light"><Users className="w-5 h-5 text-accent" /></div>
               <div><p className="text-xs text-muted">Total Staff</p><p className="text-lg font-bold text-foreground">{staff.length}</p></div>
@@ -233,7 +233,7 @@ export default function StaffPage() {
           </div>
 
           {/* Filters */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="ui-filters flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input type="text" placeholder="Search staff..." value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-surface rounded-xl border border-border text-sm" />
@@ -246,7 +246,7 @@ export default function StaffPage() {
           </div>
 
           {/* Staff Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map(member => (
               <div key={member.id} className="glass-card p-5 cursor-pointer hover:border-accent/30 transition-all" onClick={() => { setSelectedStaff(member); setStaffDetailTab('overview'); }}>
                 <div className="flex items-center justify-between mb-4">
@@ -319,7 +319,7 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Sales Leaderboard — All Time</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr>
@@ -444,7 +444,7 @@ export default function StaffPage() {
       {/* ===== TARGET EDIT MODAL ===== */}
       <Modal isOpen={!!editingTarget} onClose={() => setEditingTarget(null)} title={`Set Target — ${editingTarget?.name}`}>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Monthly Target (₹)</label>
               <input type="number" min="0" value={targetForm.monthlyTarget} onChange={e => setTargetForm(f => ({ ...f, monthlyTarget: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 500000" />
@@ -458,7 +458,7 @@ export default function StaffPage() {
             <label className="block text-xs font-medium text-muted mb-1.5">Commission Rate (%)</label>
             <input type="number" min="0" max="100" step="0.5" value={targetForm.commissionRate} onChange={e => setTargetForm(f => ({ ...f, commissionRate: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 2.5" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted mb-1.5">Commission Earned (₹)</label>
               <input type="number" min="0" value={targetForm.commissionEarned} onChange={e => setTargetForm(f => ({ ...f, commissionEarned: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" placeholder="e.g. 12500" />
@@ -528,7 +528,7 @@ export default function StaffPage() {
               <h3 className="text-base font-semibold text-foreground">Today&apos;s Attendance Report</h3>
               <p className="text-xs text-muted mt-0.5">GPS-verified attendance with location tracking</p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr>
@@ -581,7 +581,7 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Weekly Overview — Last 7 Days</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr>
@@ -662,7 +662,7 @@ export default function StaffPage() {
           </div>
 
           {/* Tasks Summary */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               { label: 'Sales Made', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'sale')).length, icon: ShoppingBag, color: 'bg-emerald-500/10 text-emerald-700' },
               { label: 'Calls Made', count: staff.flatMap(s => s.activities.filter(a => a.date === todayKey && a.type === 'call')).length, icon: Phone, color: 'bg-blue-500/10 text-blue-700' },
@@ -772,7 +772,7 @@ export default function StaffPage() {
             <div className="p-4 border-b border-border">
               <h3 className="text-base font-semibold text-foreground">Stock Updates by Staff</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="crm-table min-w-[600px] sm:min-w-max whitespace-nowrap">
                 <thead>
                   <tr><th>Staff</th><th>Product</th><th>Warehouse</th><th>Action</th><th>Qty</th><th>Date & Time</th></tr>

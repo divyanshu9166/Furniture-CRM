@@ -95,7 +95,7 @@ export default function IndiaMartLeadsClient({ initialConfig, initialRows, initi
 
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out] min-w-0">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="ui-page-header flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl md:text-2xl font-bold text-foreground flex items-center gap-2">
             <Building2 className="w-6 h-6 text-accent" />
@@ -105,7 +105,7 @@ export default function IndiaMartLeadsClient({ initialConfig, initialRows, initi
             Pull API v2 sync with duplicate-safe import into CRM leads.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="ui-actions flex gap-2">
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -156,7 +156,7 @@ export default function IndiaMartLeadsClient({ initialConfig, initialRows, initi
             className="w-full md:max-w-xl"
           />
         </div>
-        <div className="overflow-x-auto">
+        <div className="ui-table-scroll overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr>

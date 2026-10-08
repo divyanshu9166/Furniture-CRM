@@ -253,7 +253,7 @@ export default function BroadcastDetailPage() {
   return (
     <div className="wa-light space-y-6">
       {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="ui-page-header flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-4">
           <Button
             variant="outline"
@@ -285,7 +285,7 @@ export default function BroadcastDetailPage() {
         {/* Delete - inline-confirm pattern matches the pipeline settings flow.
             Mid-send broadcasts cannot be deleted to avoid orphaned status. */}
         {confirmDelete ? (
-          <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
+          <div className="ui-actions flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
             <span className="text-red-300">Delete this broadcast?</span>
             <Button
               variant="outline"

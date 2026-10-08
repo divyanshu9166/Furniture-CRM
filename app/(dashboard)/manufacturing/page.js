@@ -11,24 +11,92 @@ import {
   Clock, DollarSign, Zap, Copy, Upload, Check,
 } from 'lucide-react'
 import {
-  getBOMs, createBOM, toggleBOMStatus, deleteBOM,
-  addBOMItem, updateBOMItem, removeBOMItem,
-  addBOMStep, updateBOMStep, removeBOMStep,
-  exportBOM,
-  getBomTemplates, createBomTemplate, deleteBomTemplate,
-  getWorkCenters, createWorkCenter, updateWorkCenterStatus, deleteWorkCenter,
-  getProductionOrders, getAssignableStaff, createProductionOrder, startProduction,
-  holdProduction, cancelProductionOrder, deleteProductionOrder,
-  completeProduction, recordQualityCheck,
-  getMRPAnalysis, getManufacturingStats, updateProductionStep,
-  getManufacturingCustomOrders, getScrapInventory, getCustomOrderInventory,
-  updateScrapDisposition,
+  getBOMs as getBOMsAction,
+  createBOM as createBOMAction,
+  toggleBOMStatus as toggleBOMStatusAction,
+  deleteBOM as deleteBOMAction,
+  addBOMItem as addBOMItemAction,
+  updateBOMItem as updateBOMItemAction,
+  removeBOMItem as removeBOMItemAction,
+  addBOMStep as addBOMStepAction,
+  updateBOMStep as updateBOMStepAction,
+  removeBOMStep as removeBOMStepAction,
+  exportBOM as exportBOMAction,
+  getBomTemplates as getBomTemplatesAction,
+  createBomTemplate as createBomTemplateAction,
+  deleteBomTemplate as deleteBomTemplateAction,
+  getWorkCenters as getWorkCentersAction,
+  createWorkCenter as createWorkCenterAction,
+  updateWorkCenterStatus as updateWorkCenterStatusAction,
+  deleteWorkCenter as deleteWorkCenterAction,
+  getProductionOrders as getProductionOrdersAction,
+  getAssignableStaff as getAssignableStaffAction,
+  createProductionOrder as createProductionOrderAction,
+  startProduction as startProductionAction,
+  holdProduction as holdProductionAction,
+  cancelProductionOrder as cancelProductionOrderAction,
+  deleteProductionOrder as deleteProductionOrderAction,
+  completeProduction as completeProductionAction,
+  recordQualityCheck as recordQualityCheckAction,
+  getMRPAnalysis as getMRPAnalysisAction,
+  getManufacturingStats as getManufacturingStatsAction,
+  updateProductionStep as updateProductionStepAction,
+  getManufacturingCustomOrders as getManufacturingCustomOrdersAction,
+  getScrapInventory as getScrapInventoryAction,
+  getCustomOrderInventory as getCustomOrderInventoryAction,
+  updateScrapDisposition as updateScrapDispositionAction,
 } from '@/app/actions/manufacturing'
 import { getManufacturingPermissions } from '@/app/actions/settings'
-import { getProducts, createProduct, deleteRawMaterial, updateProduct, updateStock, bulkImportRawMaterials } from '@/app/actions/products'
+import { getProducts as getProductsAction, createProduct as createProductAction, deleteRawMaterial as deleteRawMaterialAction, updateRawMaterialInventory as updateRawMaterialInventoryAction, bulkImportRawMaterials as bulkImportRawMaterialsAction } from '@/app/actions/products'
 import { useSession } from '@/components/AuthProvider'
 import Modal from '@/components/Modal'
 import * as XLSX from 'xlsx'
+const getProducts = safeAction(getProductsAction)
+const createProduct = safeAction(createProductAction)
+const deleteRawMaterial = safeAction(deleteRawMaterialAction)
+const updateRawMaterialInventory = safeAction(updateRawMaterialInventoryAction)
+const bulkImportRawMaterials = safeAction(bulkImportRawMaterialsAction)
+
+function safeAction(action) {
+  return async (...args) => {
+    try { return await action(...args) }
+    catch (error) { return { success: false, error: error?.message || 'Request failed. Check your connection and retry.' } }
+  }
+}
+const getBOMs = safeAction(getBOMsAction)
+const createBOM = safeAction(createBOMAction)
+const toggleBOMStatus = safeAction(toggleBOMStatusAction)
+const deleteBOM = safeAction(deleteBOMAction)
+const addBOMItem = safeAction(addBOMItemAction)
+const updateBOMItem = safeAction(updateBOMItemAction)
+const removeBOMItem = safeAction(removeBOMItemAction)
+const addBOMStep = safeAction(addBOMStepAction)
+const updateBOMStep = safeAction(updateBOMStepAction)
+const removeBOMStep = safeAction(removeBOMStepAction)
+const exportBOM = safeAction(exportBOMAction)
+const getBomTemplates = safeAction(getBomTemplatesAction)
+const createBomTemplate = safeAction(createBomTemplateAction)
+const deleteBomTemplate = safeAction(deleteBomTemplateAction)
+const getWorkCenters = safeAction(getWorkCentersAction)
+const createWorkCenter = safeAction(createWorkCenterAction)
+const updateWorkCenterStatus = safeAction(updateWorkCenterStatusAction)
+const deleteWorkCenter = safeAction(deleteWorkCenterAction)
+const getProductionOrders = safeAction(getProductionOrdersAction)
+const getAssignableStaff = safeAction(getAssignableStaffAction)
+const createProductionOrder = safeAction(createProductionOrderAction)
+const startProduction = safeAction(startProductionAction)
+const holdProduction = safeAction(holdProductionAction)
+const cancelProductionOrder = safeAction(cancelProductionOrderAction)
+const deleteProductionOrder = safeAction(deleteProductionOrderAction)
+const completeProduction = safeAction(completeProductionAction)
+const recordQualityCheck = safeAction(recordQualityCheckAction)
+const getMRPAnalysis = safeAction(getMRPAnalysisAction)
+const getManufacturingStats = safeAction(getManufacturingStatsAction)
+const updateProductionStep = safeAction(updateProductionStepAction)
+const getManufacturingCustomOrders = safeAction(getManufacturingCustomOrdersAction)
+const getScrapInventory = safeAction(getScrapInventoryAction)
+const getCustomOrderInventory = safeAction(getCustomOrderInventoryAction)
+const updateScrapDisposition = safeAction(updateScrapDispositionAction)
 
 // ─── Constants ────────────────────────────────────────
 const PRIORITY_COLORS = {
@@ -87,8 +155,9 @@ function mapImportColumns(headers) {
 import { downloadBOMCSV, downloadBOMPDF } from '@/lib/manufacturing/downloads'
 // ─── Main Page ────────────────────────────────────────
 export default function ManufacturingPage() {
-  const [tab, setTab] = useState('production')
+  const [requestedTab, setTab] = useState('production')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   // Data
   const [boms, setBoms] = useState([])
@@ -223,6 +292,8 @@ export default function ManufacturingPage() {
 
   const loadData = useCallback(async () => {
     setLoading(true)
+    setLoadError('')
+    try {
     const [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes] = await Promise.all([
       getBOMs(), getProductionOrders(), getProducts(),
       getWorkCenters(), getManufacturingStats(), getBomTemplates(), getAssignableStaff(),
@@ -230,6 +301,7 @@ export default function ManufacturingPage() {
     ])
     if (bomRes.success) setBoms(bomRes.data)
     if (ordRes.success) setOrders(ordRes.data)
+    if (ordRes.success) setSelectedOrder(previous => previous ? ordRes.data.find(order => order.id === previous.id) ?? previous : null)
     if (prodRes.success) setProducts(prodRes.data)
     if (wcRes.success) setWorkCenters(wcRes.data)
     if (statsRes.success) setStats(statsRes.data)
@@ -238,7 +310,10 @@ export default function ManufacturingPage() {
     if (customRes.success) setCustomOrders(customRes.data)
     if (scrapRes.success) setScrapInventory(scrapRes.data)
     if (customInvRes.success) setCustomInventory(customInvRes.data)
-    setLoading(false)
+    const failures = [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes].filter(result => !result.success)
+    if (failures.length) setLoadError(failures.map(result => result.error || 'Unable to load a manufacturing panel').join(' · '))
+    } catch (error) { setLoadError(error?.message || 'Unable to load manufacturing. Please retry.') }
+    finally { setLoading(false) }
   }, [])
 
   useEffect(() => {
@@ -306,7 +381,7 @@ export default function ManufacturingPage() {
     const steps = bomForm.steps.filter(s => s.operationName).map((s, idx) => ({
       stepNumber: idx + 1, operationName: s.operationName,
       workCenterId: s.workCenterId ? Number(s.workCenterId) : undefined,
-      durationMins: Number(s.durationMins) || 60,
+      durationMins: Number(s.durationMins),
       labourRatePerHour: Number(s.labourRatePerHour) || 0,
       machineCostPerUnit: Number(s.machineCostPerUnit) || 0,
       notes: s.notes || undefined,
@@ -388,7 +463,7 @@ export default function ManufacturingPage() {
       operationName: s.operationName,
       plannedMins: s.plannedMins || 0,
       labourRatePerHour: s.labourRatePerHour || 0,
-      actualMins: s.actualMins || s.plannedMins || 0,
+      actualMins: s.status === 'SKIPPED' ? 0 : s.status === 'DONE' ? s.actualMins : s.actualMins || s.plannedMins || 0,
     })) || []
     const suggestedLabourCost = stepActuals.reduce((sum, s) => sum + (Number(s.actualMins || 0) / 60) * Number(s.labourRatePerHour || 0), 0)
     setCompleteForm({
@@ -396,7 +471,7 @@ export default function ManufacturingPage() {
       actualQty: order.plannedQty,
       totalLabourCost: Math.round(suggestedLabourCost),
       overheadCost: 0,
-      machineCost: 0,
+      machineCost: Math.round((order.productionSteps || []).reduce((sum, step) => sum + (step.machineCostPerUnit || 0) * order.plannedQty, 0)),
       scrapQty: 0, scrapReason: '',
       qualityStatus: 'PASSED', qualityNotes: '', notes: '',
       consumptions: order.consumptions?.map(c => ({ rawMaterialId: c.rawMaterialId, plannedQty: c.plannedQty, issuedQty: c.plannedQty, actualQty: c.plannedQty, scrapQty: 0, scrapReason: '' })) || [],
@@ -464,6 +539,7 @@ export default function ManufacturingPage() {
 
   const handleQCSubmit = async () => {
     if (!qcTarget) return
+    if (qcTarget.status !== 'COMPLETED') { alert('Record QC in Complete Production. This correction form is for completed jobs only.'); return }
     setSubmitting(true)
     const res = await recordQualityCheck({ productionOrderId: qcTarget.id, ...qcForm, scrapQty: Number(qcForm.scrapQty) })
     if (res.success) { setShowQCModal(false); setQcTarget(null); loadData() }
@@ -477,7 +553,7 @@ export default function ManufacturingPage() {
       stepNumber: idx + 1,
       operationName: s.operationName,
       workCenterId: s.workCenterId ? Number(s.workCenterId) : undefined,
-      durationMins: Number(s.durationMins) || 60,
+      durationMins: Number(s.durationMins),
       labourRatePerHour: Number(s.labourRatePerHour) || 0,
       machineCostPerUnit: Number(s.machineCostPerUnit) || 0,
       notes: s.notes || undefined,
@@ -499,10 +575,12 @@ export default function ManufacturingPage() {
   }
 
   const compressImage = async (file) => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Unable to read the selected image'));
       reader.onload = (e) => {
         const img = new Image();
+        img.onerror = () => reject(new Error('The selected file is not a readable image'));
         img.onload = () => {
           const canvas = document.createElement('canvas');
           let width = img.width;
@@ -524,9 +602,11 @@ export default function ManufacturingPage() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          if (!ctx) { reject(new Error('Image processing is unavailable')); return; }
           ctx.drawImage(img, 0, 0, width, height);
 
           canvas.toBlob((blob) => {
+            if (!blob) { reject(new Error('Image compression failed')); return; }
             const compressedFile = new File([blob], file.name, {
               type: 'image/jpeg',
               lastModified: Date.now(),
@@ -716,6 +796,7 @@ export default function ManufacturingPage() {
     let sku = String(rmForm.sku || '').trim() || generateRMSku()
     // If it already exists, keep incrementing
     const existingSkus = new Set(products.map(p => p.sku))
+    if (rmForm.sku.trim() && existingSkus.has(sku)) { alert('This SKU already exists; choose a unique SKU.'); setSubmitting(false); return }
     let counter = products.filter(p => p.category === 'Raw Material').length + 1
     while (existingSkus.has(sku)) {
       counter++
@@ -767,28 +848,21 @@ export default function ManufacturingPage() {
     }
 
     setSubmitting(true)
-    const res = await updateProduct(id, {
+    const unitSize = Number(rmEditForm.unitSize) > 0 ? Number(rmEditForm.unitSize) : 1
+    const currentQty = Number(rmEditForm.currentStockQuantity ?? 0)
+    const enteredQty = Number(rmEditForm.stockQuantity)
+    const res = await updateRawMaterialInventory(id, {
       name: rmEditForm.name,
+      costPrice: Number(rmEditForm.costPrice ?? 0),
       brand: rmEditForm.brand || undefined,
       unitOfMeasure: rmEditForm.unitOfMeasure || 'PCS',
       unitSize: Number(rmEditForm.unitSize) || 1,
-      reorderLevel: Number(rmEditForm.reorderLevel) || 5,
+      reorderLevel: Number(rmEditForm.reorderLevel ?? 5),
       description: rmEditForm.description || undefined,
       image: imageUrl || undefined,
-    })
+    }, { id, stock: enteredQty * unitSize, mode: rmEditForm.stockAction === 'ADD' ? 'ADD' : 'SET', expectedStock: currentQty * unitSize, reason: 'Manufacturing raw material adjustment' })
     if (!res.success) {
       alert(res.error)
-      setSubmitting(false)
-      return
-    }
-
-    const unitSize = Number(rmEditForm.unitSize) > 0 ? Number(rmEditForm.unitSize) : 1
-    const currentQty = Number(rmEditForm.currentStockQuantity ?? 0)
-    const enteredQty = Math.max(0, Number(rmEditForm.stockQuantity) || 0)
-    const newQty = rmEditForm.stockAction === 'ADD' ? currentQty + enteredQty : enteredQty
-    const stockRes = await updateStock({ id, stock: newQty * unitSize })
-    if (!stockRes.success) {
-      alert(stockRes.error)
       setSubmitting(false)
       return
     }
@@ -832,12 +906,10 @@ export default function ManufacturingPage() {
   }
 
   // Filter raw materials (products with category "Raw Material")
-  const rawMaterials = useMemo(() => {
-    return products.filter(p =>
+  const rawMaterials = products.filter(p =>
       p.category === 'Raw Material' &&
       (!rmSearch || p.name.toLowerCase().includes(rmSearch.toLowerCase()) || p.sku.toLowerCase().includes(rmSearch.toLowerCase()))
     )
-  }, [products, rmSearch])
 
   // Tabs gated for STAFF. `tabPerm` maps a tab to the permission that unlocks it;
   // tabs without an entry are visible to everyone. Managers/admins see all.
@@ -860,11 +932,7 @@ export default function ManufacturingPage() {
   ]
   const TABS = ALL_TABS.filter(t => !TAB_PERMISSION[t.id] || can(TAB_PERMISSION[t.id]))
 
-  // If the active tab became hidden (e.g. staff without permission), fall back.
-  useEffect(() => {
-    if (!TABS.some(t => t.id === tab)) setTab('production')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perms])
+  const tab = TABS.some(item => item.id === requestedTab) ? requestedTab : 'production'
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -876,14 +944,15 @@ export default function ManufacturingPage() {
   const overdueOrders = orders.filter(o => o.dueDate && new Date(o.dueDate) < new Date() && !['COMPLETED', 'CANCELLED'].includes(o.status))
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0 max-w-full">
+      {loadError && <div role="alert" className="p-3 rounded-lg border border-red-500/20 bg-red-500/10 text-sm text-red-500">{loadError}<button onClick={loadData} className="ml-3 underline">Retry</button></div>}
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Manufacturing</h1>
           <p className="text-muted text-sm mt-0.5">BOM · Production Orders · Work Centers · MRP · Quality · Costing</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="ui-actions flex gap-2 flex-wrap">
           {tab === 'bom' && can('staffCreateBom') && (
             <>
               <button onClick={() => setShowTemplateModal(true)} className="px-4 py-2 bg-surface border border-border text-foreground rounded-lg text-sm font-medium hover:bg-surface-hover flex items-center gap-2">
@@ -911,7 +980,7 @@ export default function ManufacturingPage() {
       </div>
 
       {/* KPI Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         {[
           { label: 'Total Orders', value: orders.length, icon: Factory, color: 'text-purple-400' },
           { label: 'In Progress', value: orders.filter(o => o.status === 'IN_PROGRESS').length, icon: PlayCircle, color: 'text-blue-400' },
@@ -933,7 +1002,7 @@ export default function ManufacturingPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
+      <div className="ui-tabs flex gap-1 bg-surface border border-border rounded-lg p-1 flex-wrap">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium transition-all whitespace-nowrap ${tab === t.id ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
@@ -946,7 +1015,7 @@ export default function ManufacturingPage() {
       {tab === 'production' && (
         <div className="space-y-4">
           {/* Filters */}
-          <div className="flex flex-wrap gap-3 items-center">
+          <div className="ui-filters flex flex-wrap gap-3 items-center">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input value={orderSearch} onChange={e => setOrderSearch(e.target.value)} placeholder="Search orders..." className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
@@ -1016,13 +1085,13 @@ export default function ManufacturingPage() {
                           <button onClick={() => openCompleteModal(o)} className="p-2 rounded-lg tap-press-sm hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-4 h-4" /></button>
                         </>
                       )}
-                      {(o.status === 'IN_PROGRESS' || o.status === 'ON_HOLD') && (
-                        <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-4 h-4" /></button>
+                      {o.status === 'COMPLETED' && (
+                        <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-4 h-4" /></button>
                       )}
                       {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
                         <button onClick={() => { setCancelTarget(o); setShowCancelModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-4 h-4" /></button>
                       )}
-                      {['PLANNED', 'CANCELLED'].includes(o.status) && (
+                      {o.status === 'PLANNED' && (
                         <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-4 h-4" /></button>
                       )}
                     </div>
@@ -1033,7 +1102,7 @@ export default function ManufacturingPage() {
           </div>
 
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm min-w-[980px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
@@ -1099,13 +1168,13 @@ export default function ManufacturingPage() {
                                 <button onClick={() => openCompleteModal(o)} className="p-1.5 rounded hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-3.5 h-3.5" /></button>
                               </>
                             )}
-                            {(o.status === 'IN_PROGRESS' || o.status === 'ON_HOLD') && (
-                              <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="p-1.5 rounded hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-3.5 h-3.5" /></button>
+                            {o.status === 'COMPLETED' && (
+                              <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="p-1.5 rounded hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-3.5 h-3.5" /></button>
                             )}
                             {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
                               <button onClick={() => { setCancelTarget(o); setShowCancelModal(true) }} className="p-1.5 rounded hover:bg-red-500/10 text-muted hover:text-red-400" title="Cancel"><XCircle className="w-3.5 h-3.5" /></button>
                             )}
-                            {['PLANNED', 'CANCELLED'].includes(o.status) && (
+                            {o.status === 'PLANNED' && (
                               <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-1.5 rounded hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
                           </div>
@@ -1150,7 +1219,7 @@ export default function ManufacturingPage() {
 
       {/* ── TAB: Work Centers ── */}
       {tab === 'workcenters' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {workCenters.map(wc => (
             <div key={wc.id} className="glass-card p-5">
               <div className="flex items-start justify-between mb-3">
@@ -1169,13 +1238,13 @@ export default function ManufacturingPage() {
               </div>
               <div className="flex gap-2">
                 {wc.status !== 'Active' && (
-                  <button onClick={async () => { await updateWorkCenterStatus(wc.id, 'Active'); loadData() }} className="flex-1 py-1.5 text-xs bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg">Set Active</button>
+                  <button onClick={async () => { const r = await updateWorkCenterStatus(wc.id, 'Active'); if (r.success) loadData(); else alert(r.error) }} className="flex-1 py-1.5 text-xs bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg">Set Active</button>
                 )}
                 {wc.status !== 'Maintenance' && (
-                  <button onClick={async () => { await updateWorkCenterStatus(wc.id, 'Maintenance'); loadData() }} className="flex-1 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded-lg">Maintenance</button>
+                  <button onClick={async () => { const r = await updateWorkCenterStatus(wc.id, 'Maintenance'); if (r.success) loadData(); else alert(r.error) }} className="flex-1 py-1.5 text-xs bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded-lg">Maintenance</button>
                 )}
                 {wc.status !== 'Inactive' && (
-                  <button onClick={async () => { await updateWorkCenterStatus(wc.id, 'Inactive'); loadData() }} className="flex-1 py-1.5 text-xs bg-gray-500/10 text-gray-400 hover:bg-gray-500/20 rounded-lg">Inactive</button>
+                  <button onClick={async () => { const r = await updateWorkCenterStatus(wc.id, 'Inactive'); if (r.success) loadData(); else alert(r.error) }} className="flex-1 py-1.5 text-xs bg-gray-500/10 text-gray-400 hover:bg-gray-500/20 rounded-lg">Inactive</button>
                 )}
                 <button onClick={async () => { if (!confirm('Delete work center?')) return; const r = await deleteWorkCenter(wc.id); if (!r.success) alert(r.error); else loadData() }} className="p-1.5 text-red-400/50 hover:text-red-400 hover:bg-red-500/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
               </div>
@@ -1212,7 +1281,7 @@ export default function ManufacturingPage() {
               </div>
             </div>
 
-            {mrpResult && (
+              {mrpResult && (
               <div className="space-y-5 mt-4 border-t border-border pt-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h4 className="text-sm font-medium text-foreground">Results: {mrpResult.bomName} × {mrpResult.qty} units</h4>
@@ -1262,6 +1331,7 @@ export default function ManufacturingPage() {
                 {/* Material requirements table */}
                 <div>
                   <h5 className="text-xs font-medium text-muted uppercase tracking-wide mb-2 flex items-center gap-1.5"><Package className="w-3.5 h-3.5" /> Material Requirements</h5>
+                  <p className="text-xs text-muted mb-2">Available excludes expired lots and demand from other open jobs. This is a planning estimate, not a physical reservation; stock is verified again at completion.</p>
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border">
@@ -1337,7 +1407,7 @@ export default function ManufacturingPage() {
       {/* ── TAB: Quality & Scrap ── */}
       {tab === 'quality' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Quality Pass Rate', value: `${stats?.totals?.qualityRate ?? 0}%`, icon: ShieldCheck, color: 'text-emerald-400' },
               { label: 'Avg Yield Rate', value: `${stats?.totals?.avgYield ?? 0}%`, icon: TrendingUp, color: 'text-blue-400' },
@@ -1435,8 +1505,8 @@ export default function ManufacturingPage() {
                     </div>
                     <p className="text-sm font-medium text-foreground truncate mt-1">{o.finishedProduct?.name}</p>
                     <p className="text-[11px] text-muted truncate">{o.workCenter?.name || 'No work center'}</p>
-                    <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="mt-2 w-full py-2 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 tap-press-sm">
-                      <ShieldCheck className="w-3.5 h-3.5" /> Record QC
+                    <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="mt-2 w-full py-2 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 tap-press-sm">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Complete & Record QC
                     </button>
                   </div>
                 ))}
@@ -1462,8 +1532,8 @@ export default function ManufacturingPage() {
                         <td className="px-4 py-3 text-muted">{o.plannedQty}</td>
                         <td className="px-4 py-3 text-muted">{o.workCenter?.name || '—'}</td>
                         <td className="px-4 py-3">
-                          <button onClick={() => { setQcTarget(o); setQcForm({ qualityStatus: 'PASSED', qualityNotes: '', scrapQty: 0, scrapReason: '' }); setShowQCModal(true) }} className="px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5">
-                            <ShieldCheck className="w-3.5 h-3.5" /> Record QC
+                          <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="px-3 py-1.5 bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5" /> Complete & Record QC
                           </button>
                         </td>
                       </tr>
@@ -1480,7 +1550,7 @@ export default function ManufacturingPage() {
       {/* -- TAB: Scrap Inventory -- */}
       {tab === 'scrap' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Scrap Lots', value: scrapInventory.length, icon: FlameKindling, color: 'text-red-400' },
               { label: 'Reusable Qty', value: scrapInventory.filter(s => s.status === 'IN_STOCK').reduce((sum, s) => sum + (s.quantity || 0), 0).toLocaleString('en-IN'), icon: Package, color: 'text-emerald-400' },
@@ -1551,7 +1621,7 @@ export default function ManufacturingPage() {
             <div className="px-4 py-3 border-b border-border">
               <h3 className="text-sm font-medium text-foreground">Material Scrap & Offcuts</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
@@ -1613,7 +1683,7 @@ export default function ManufacturingPage() {
       {/* -- TAB: Custom Inventory -- */}
       {tab === 'customInventory' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Custom Lots', value: customInventory.length, icon: Package, color: 'text-cyan-400' },
               { label: 'Ready Qty', value: customInventory.filter(i => i.status === 'READY').reduce((sum, i) => sum + (i.quantity || 0), 0), icon: CheckCircle, color: 'text-emerald-400' },
@@ -1663,7 +1733,7 @@ export default function ManufacturingPage() {
             <div className="px-4 py-3 border-b border-border">
               <h3 className="text-sm font-medium text-foreground">Finished Goods for Custom Orders</h3>
             </div>
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
@@ -1706,9 +1776,9 @@ export default function ManufacturingPage() {
       )}
       {tab === 'analytics' && stats && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Total Produced', value: stats.totals.totalProduced.toLocaleString('en-IN'), sub: 'units', icon: Package, color: 'text-blue-400' },
+              { label: 'Usable Output', value: stats.totals.totalProduced.toLocaleString('en-IN'), sub: 'passed/partial units', icon: Package, color: 'text-blue-400' },
               { label: 'Total Cost', value: `₹${(stats.totals.totalCost / 100000).toFixed(1)}L`, sub: 'incl. overhead', icon: Activity, color: 'text-amber-400' },
               { label: 'Quality Pass Rate', value: `${stats.totals.qualityRate}%`, sub: 'of completed', icon: ShieldCheck, color: 'text-emerald-400' },
               { label: 'Extra Time Cost', value: `₹${(stats.totals.totalTimeVarianceCost || 0).toLocaleString('en-IN')}`, sub: `${stats.totals.totalTimeVarianceMins || 0} extra min`, icon: Clock, color: 'text-red-400' },
@@ -1724,7 +1794,7 @@ export default function ManufacturingPage() {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="glass-card p-5">
               <h3 className="text-sm font-medium text-foreground mb-4 flex items-center gap-2"><Star className="w-4 h-4 text-amber-400" /> Top Produced Products</h3>
               {stats.topProducts.length === 0 ? (
@@ -1787,7 +1857,7 @@ export default function ManufacturingPage() {
                 ))}
               </div>
               {/* Desktop: trend table */}
-              <div className="hidden md:block overflow-x-auto">
+              <div className="ui-table-scroll hidden md:block overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
@@ -1834,7 +1904,7 @@ export default function ManufacturingPage() {
       {tab === 'costing' && (
         <div className="space-y-4">
           {completedOrders.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="ui-stat-grid grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { label: 'Total Material Cost', value: completedOrders.reduce((s, o) => s + (o.totalMaterialCost || 0), 0) },
                 { label: 'Total Labour Cost', value: completedOrders.reduce((s, o) => s + (o.totalLabourCost || 0), 0) },
@@ -1928,7 +1998,7 @@ export default function ManufacturingPage() {
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Plus className="w-4 h-4 text-accent" /> Add New Raw Material
               </h3>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <button
                   onClick={downloadRawMaterialTemplate}
                   className="px-3 py-2 bg-surface border border-border rounded-lg text-xs text-muted hover:text-foreground flex items-center gap-1.5">
@@ -2030,7 +2100,7 @@ export default function ManufacturingPage() {
                 {rmImages.length > 0 && <p className="text-[10px] text-muted mt-1 truncate">{rmImages[0].name}</p>}
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="ui-actions flex items-center gap-3">
               <button
                 onClick={handleCreateRawMaterial}
                 disabled={submitting || !rmForm.name}
@@ -2050,7 +2120,7 @@ export default function ManufacturingPage() {
 
           {/* Raw Materials Search & Bulk Delete Button */}
           <div className="flex items-center gap-3 flex-wrap justify-between">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="ui-filters flex items-center gap-3 flex-1 min-w-0">
               <div className="relative flex-1 max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
                 <input
@@ -2124,7 +2194,7 @@ export default function ManufacturingPage() {
                       <input type="number" min="0.0001" step="0.0001" value={rmEditForm.unitSize} onChange={e => setRmEditForm(f => ({ ...f, unitSize: e.target.value }))}
                         className="px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground col-span-2" placeholder="Measure / Qty" />
                     </div>
-                    <div className="flex gap-2 pt-1">
+                    <div className="ui-actions flex gap-2 pt-1">
                       <button onClick={() => handleUpdateRawMaterial(rm.id)} disabled={submitting}
                         className="flex-1 px-2.5 py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center justify-center gap-1 tap-press-sm">
                         <Save className="w-3 h-3" /> Save
@@ -2176,7 +2246,7 @@ export default function ManufacturingPage() {
                     <span className="text-muted">({stockMeasureLabel} {rm.unitOfMeasure})</span>
                     <span className="text-foreground ml-auto">₹{rm.costPrice?.toLocaleString('en-IN') || 0}</span>
                   </div>
-                  <div className="flex gap-2 mt-2">
+                  <div className="ui-actions flex gap-2 mt-2">
                     <button
                       onClick={() => {
                         setEditingRmId(rm.id)
@@ -2211,7 +2281,7 @@ export default function ManufacturingPage() {
 
           {/* Raw Materials Table */}
           <div className="hidden md:block glass-card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm min-w-[1000px]">
                 <thead>
                   <tr className="border-b border-border bg-surface-hover">
@@ -2324,7 +2394,7 @@ export default function ManufacturingPage() {
                           </td>
                           <td className="px-4 py-3"></td>
                           <td className="px-4 py-3">
-                            <div className="flex gap-1.5">
+                            <div className="ui-actions flex gap-1.5">
                               <button onClick={() => handleUpdateRawMaterial(rm.id)} disabled={submitting}
                                 className="px-2.5 py-1 rounded-md bg-emerald-600 text-white text-xs font-medium disabled:opacity-50 flex items-center gap-1">
                                 <Save className="w-3 h-3" /> Save
@@ -2392,7 +2462,7 @@ export default function ManufacturingPage() {
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
-                                  <div className="flex gap-1.5">
+                                  <div className="ui-actions flex gap-1.5">
                                     <button
                                       onClick={() => {
                                         setEditingRmId(rm.id)
@@ -2435,7 +2505,7 @@ export default function ManufacturingPage() {
         </div>
       )}
 
-      <Modal isOpen={showRmImportModal} onClose={() => setShowRmImportModal(false)} title="Import Raw Materials" size="lg">
+      <Modal isOpen={showRmImportModal} onClose={() => !rmImportLoading && setShowRmImportModal(false)} title="Import Raw Materials" size="lg">
         <div className="space-y-4">
           <div className="p-3 rounded-lg border border-border bg-surface-hover text-xs text-muted space-y-1">
             <p>Supported files: .xlsx, .xls, .csv</p>
@@ -2473,7 +2543,7 @@ export default function ManufacturingPage() {
             </div>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="ui-actions flex justify-end gap-2 pt-2">
             <button
               onClick={() => setShowRmImportModal(false)}
               className="px-4 py-2 rounded-lg text-sm text-muted hover:text-foreground">
@@ -2497,7 +2567,7 @@ export default function ManufacturingPage() {
             </p>
             <p className="text-xs text-red-400/70 mt-2">This action cannot be undone. Materials used in BOMs or production orders cannot be deleted.</p>
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="ui-actions flex justify-end gap-2">
             <button
               onClick={() => setShowBulkDeleteModal(false)}
               disabled={bulkDeleting}
@@ -2562,10 +2632,10 @@ export default function ManufacturingPage() {
                       {['PLANNED', 'IN_PROGRESS', 'COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
                         <div className="flex gap-1">
                           {s.status === 'PENDING' && (
-                            <button onClick={async () => { await updateProductionStep(s.id, 'IN_PROGRESS'); loadData(); setSelectedOrder(prev => ({ ...prev, productionSteps: prev.productionSteps.map(x => x.id === s.id ? { ...x, status: 'IN_PROGRESS' } : x) })) }} className="px-2 py-0.5 text-[10px] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded">Start</button>
+                            <button onClick={async () => { const r = await updateProductionStep(s.id, 'IN_PROGRESS'); if (r.success) await loadData(); else alert(r.error) }} className="px-2 py-0.5 text-[10px] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded">Start</button>
                           )}
                           {s.status === 'IN_PROGRESS' && (
-                            <button onClick={async () => { await updateProductionStep(s.id, 'DONE'); loadData(); setSelectedOrder(prev => ({ ...prev, productionSteps: prev.productionSteps.map(x => x.id === s.id ? { ...x, status: 'DONE' } : x) })) }} className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded">Done</button>
+                            <button onClick={async () => { const r = await updateProductionStep(s.id, 'DONE'); if (r.success) await loadData(); else alert(r.error) }} className="px-2 py-0.5 text-[10px] bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded">Done</button>
                           )}
                         </div>
                       )}
@@ -2604,13 +2674,13 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Delete Production Order */}
-      <Modal isOpen={showDeleteProdModal} onClose={() => { setShowDeleteProdModal(false); setDeleteProdTarget(null) }} title="Delete Production Order">
+      <Modal isOpen={showDeleteProdModal} onClose={() => { if (submitting) return; setShowDeleteProdModal(false); setDeleteProdTarget(null) }} title="Delete Production Order">
         <div className="space-y-4">
           <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20">
             <p className="text-sm text-red-400 font-medium">⚠ This action cannot be undone</p>
             <p className="text-xs text-muted mt-1">Permanently delete order <span className="font-semibold text-foreground">{deleteProdTarget?.displayId}</span>?</p>
           </div>
-          <div className="flex gap-3">
+          <div className="ui-actions flex gap-3">
             <button onClick={() => { setShowDeleteProdModal(false); setDeleteProdTarget(null) }} className="flex-1 py-2 border border-border text-muted rounded-lg text-sm hover:text-foreground">Cancel</button>
             <button onClick={handleDeleteProd} disabled={submitting} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-600/90 disabled:opacity-50">
               {submitting ? 'Deleting...' : 'Delete Order'}
@@ -2620,7 +2690,7 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Create BOM Modal */}
-      <Modal isOpen={showBOMModal} onClose={() => setShowBOMModal(false)} title="Create Bill of Materials" size="lg">
+      <Modal isOpen={showBOMModal} onClose={() => !submitting && setShowBOMModal(false)} title="Create Bill of Materials" size="lg">
         <div className="space-y-4">
           {/* Template Loader */}
           {templates.length > 0 && (
@@ -2633,7 +2703,7 @@ export default function ManufacturingPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">BOM Name *</label>
               <input value={bomForm.name} onChange={e => setBomForm(p => ({ ...p, name: e.target.value }))} className={INP} placeholder="e.g. Sofa Set BOM" />
@@ -2715,7 +2785,7 @@ export default function ManufacturingPage() {
                 <div key={i} className="p-3 bg-surface-hover rounded-lg border border-border/60">
                   {/* Row 1: Material + delete */}
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="flex-1 relative">
+                    <div className="ui-filters flex-1 relative">
                       <label className="text-[10px] text-muted block mb-0.5">Material (Search by name or SKU)</label>
                       <div className="relative">
                         <input
@@ -2801,7 +2871,7 @@ export default function ManufacturingPage() {
                       className="mt-4 p-1.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded">×</button>
                   </div>
                   {/* Row 2: Qty + UoM + Wastage */}
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="ui-form-grid grid grid-cols-3 gap-2">
                     <div>
                       <label className="text-[10px] text-muted block mb-0.5">Quantity</label>
                       <input type="number" min="0.001" step="0.001" value={item.quantity}
@@ -2910,7 +2980,7 @@ export default function ManufacturingPage() {
             <div className="space-y-2">
               {bomForm.steps.map((step, i) => (
                 <div key={i} className="p-3 bg-surface-hover rounded-lg border border-border/50">
-                  <div className="grid grid-cols-12 gap-2 items-center mb-2">
+                  <div className="ui-form-grid grid grid-cols-12 gap-2 items-center mb-2">
                     <span className="col-span-1 text-xs text-muted text-center font-bold">{i + 1}</span>
                     <input value={step.operationName} onChange={e => { const v = [...bomForm.steps]; v[i].operationName = e.target.value; setBomForm(f => ({ ...f, steps: v })) }} placeholder="Operation name" className="col-span-5 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                     <select value={step.workCenterId} onChange={e => { const v = [...bomForm.steps]; v[i].workCenterId = e.target.value; setBomForm(f => ({ ...f, steps: v })) }} className="col-span-4 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground">
@@ -2920,7 +2990,7 @@ export default function ManufacturingPage() {
                     <button onClick={() => setBomForm(f => ({ ...f, steps: f.steps.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-base text-center">×</button>
                     <div className="col-span-1" />
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="ui-form-grid grid grid-cols-3 gap-2">
                     <div>
                       <label className="text-[10px] text-muted block mb-0.5">Duration (min)</label>
                       <input type="number" min="0" value={step.durationMins} onChange={e => { const v = [...bomForm.steps]; v[i].durationMins = e.target.value; setBomForm(f => ({ ...f, steps: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
@@ -2957,7 +3027,7 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Create Production Order Modal */}
-      <Modal isOpen={showProdModal} onClose={() => setShowProdModal(false)} title="Create Production Order" size="lg">
+      <Modal isOpen={showProdModal} onClose={() => !submitting && setShowProdModal(false)} title="Create Production Order" size="lg">
         <div className="space-y-4">
           <div>
             <label className="text-xs text-muted mb-1 block">Bill of Materials *</label>
@@ -2973,7 +3043,7 @@ export default function ManufacturingPage() {
               {customOrders.map(o => <option key={o.id} value={o.id}>{o.displayId} — {o.customerName} ({o.type})</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">Planned Quantity *</label>
               <input type="number" min="1" value={prodForm.plannedQty} onChange={e => setProdForm(p => ({ ...p, plannedQty: e.target.value }))} className={INP} />
@@ -3019,7 +3089,7 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Complete Production Modal */}
-      <Modal isOpen={showCompleteModal} onClose={() => setShowCompleteModal(false)} title="Complete Production Order" size="lg">
+      <Modal isOpen={showCompleteModal} onClose={() => !submitting && setShowCompleteModal(false)} title="Complete Production Order" size="lg">
         <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
 
           {/* Qty + Scrap Row */}
@@ -3036,7 +3106,7 @@ export default function ManufacturingPage() {
 
           {/* Good items info */}
           <div className="bg-blue-500/10 p-2.5 rounded-lg text-blue-700 text-xs border border-blue-500/20 flex items-center justify-between flex-wrap gap-2">
-            <span><strong>Good Items → Inventory:</strong> {Math.max(0, Number(completeForm.actualQty) - Number(completeForm.scrapQty))}</span>
+            <span><strong>Good Items → Inventory:</strong> {completeForm.qualityStatus === 'FAILED' ? 0 : Math.max(0, Number(completeForm.actualQty) - Number(completeForm.scrapQty))}</span>
             <span className="text-[10px] text-muted">Planned: {selectedOrder?.plannedQty || '—'}</span>
           </div>
 
@@ -3206,16 +3276,16 @@ export default function ManufacturingPage() {
             <textarea value={completeForm.notes} onChange={e => setCompleteForm(p => ({ ...p, notes: e.target.value }))} rows={2} className={INP} placeholder="Any additional notes..." />
           </div>
 
-          <button onClick={handleCompleteProd} disabled={submitting || !completeForm.actualQty} className="w-full py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-600/90 disabled:opacity-50">
+          <button onClick={handleCompleteProd} disabled={submitting || completeForm.actualQty === ''} className="w-full py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-600/90 disabled:opacity-50">
             {submitting ? 'Completing...' : 'Complete Production & Update Stock'}
           </button>
         </div>
       </Modal>
 
       {/* Work Center Modal */}
-      <Modal isOpen={showWCModal} onClose={() => setShowWCModal(false)} title="Add Work Center">
+      <Modal isOpen={showWCModal} onClose={() => !submitting && setShowWCModal(false)} title="Add Work Center">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">Name *</label>
               <input value={wcForm.name} onChange={e => setWcForm(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Carpentry Station 1" className={INP} />
@@ -3246,14 +3316,14 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Cancel Modal */}
-      <Modal isOpen={showCancelModal} onClose={() => { setShowCancelModal(false); setCancelReason('') }} title="Cancel Production Order">
+      <Modal isOpen={showCancelModal} onClose={() => { if (submitting) return; setShowCancelModal(false); setCancelReason('') }} title="Cancel Production Order">
         <div className="space-y-4">
           <p className="text-sm text-muted">Cancel order <span className="font-semibold text-foreground">{cancelTarget?.displayId}</span>?</p>
           <div>
             <label className="text-xs text-muted mb-1 block">Reason for cancellation *</label>
             <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={3} placeholder="Explain why this order is being cancelled..." className={INP} />
           </div>
-          <div className="flex gap-3">
+          <div className="ui-actions flex gap-3">
             <button onClick={() => { setShowCancelModal(false); setCancelReason('') }} className="flex-1 py-2 border border-border text-muted rounded-lg text-sm hover:text-foreground">Go Back</button>
             <button onClick={handleCancelProd} disabled={submitting || !cancelReason.trim()} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-600/90 disabled:opacity-50">
               {submitting ? 'Cancelling...' : 'Confirm Cancel'}
@@ -3263,10 +3333,10 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* Quality Check Modal */}
-      <Modal isOpen={showQCModal} onClose={() => { setShowQCModal(false); setQcTarget(null) }} title="Record Quality Check">
+      <Modal isOpen={showQCModal} onClose={() => { if (submitting) return; setShowQCModal(false); setQcTarget(null) }} title="Record Quality Check">
         <div className="space-y-4">
           <p className="text-sm text-muted">Order: <span className="font-semibold text-foreground">{qcTarget?.displayId} — {qcTarget?.finishedProduct?.name}</span></p>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs text-muted mb-1 block">Quality Status *</label>
               <select value={qcForm.qualityStatus} onChange={e => setQcForm(p => ({ ...p, qualityStatus: e.target.value }))} className={SEL}>
@@ -3295,7 +3365,7 @@ export default function ManufacturingPage() {
       </Modal>
 
       {/* BOM Templates Manager Modal */}
-      <Modal isOpen={showTemplateModal} onClose={() => setShowTemplateModal(false)} title="BOM Process Templates" size="lg">
+      <Modal isOpen={showTemplateModal} onClose={() => !submitting && setShowTemplateModal(false)} title="BOM Process Templates" size="lg">
         <div className="space-y-5">
           {/* Existing templates */}
           {templates.length > 0 && (
@@ -3320,7 +3390,7 @@ export default function ManufacturingPage() {
           <div className="border-t border-border pt-4">
             <h4 className="text-xs font-medium text-muted uppercase tracking-wide mb-3">Create New Template</h4>
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="ui-form-grid grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted mb-1 block">Template Name *</label>
                   <input value={templateForm.name} onChange={e => setTemplateForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Standard Sofa Process" className={INP} />
@@ -3339,7 +3409,7 @@ export default function ManufacturingPage() {
                 <div className="space-y-2">
                   {templateForm.steps.map((step, i) => (
                     <div key={i} className="p-3 bg-surface-hover rounded-lg border border-border/50">
-                      <div className="grid grid-cols-12 gap-2 items-center mb-2">
+                      <div className="ui-form-grid grid grid-cols-12 gap-2 items-center mb-2">
                         <span className="col-span-1 text-xs text-muted text-center font-bold">{i + 1}</span>
                         <input value={step.operationName} onChange={e => { const v = [...templateForm.steps]; v[i].operationName = e.target.value; setTemplateForm(f => ({ ...f, steps: v })) }} placeholder="Operation name" className="col-span-5 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
                         <select value={step.workCenterId} onChange={e => { const v = [...templateForm.steps]; v[i].workCenterId = e.target.value; setTemplateForm(f => ({ ...f, steps: v })) }} className="col-span-4 px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground">
@@ -3349,7 +3419,7 @@ export default function ManufacturingPage() {
                         <button onClick={() => setTemplateForm(f => ({ ...f, steps: f.steps.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-base text-center">×</button>
                         <div className="col-span-1" />
                       </div>
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="ui-form-grid grid grid-cols-3 gap-2">
                         <div>
                           <label className="text-[10px] text-muted block mb-0.5">Duration (min)</label>
                           <input type="number" min="0" value={step.durationMins} onChange={e => { const v = [...templateForm.steps]; v[i].durationMins = e.target.value; setTemplateForm(f => ({ ...f, steps: v })) }} className="w-full px-2 py-1.5 bg-surface border border-border rounded-lg text-xs text-foreground" />
@@ -3493,7 +3563,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
             )
           })()}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="ui-actions flex items-center gap-2 flex-shrink-0">
           <div className="relative group z-50">
             <button className="p-1.5 rounded hover:bg-surface-hover text-muted hover:text-emerald-400" title="Download Options"><Download className="w-4 h-4" /></button>
             <div className="absolute right-0 mt-1 w-48 bg-surface border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all flex flex-col overflow-hidden">
@@ -3538,7 +3608,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                     /* ── Edit row ── */
                     <div className="p-3 bg-accent/5">
                       <p className="text-xs font-medium text-accent mb-2">Editing: {item.rawMaterial?.name}</p>
-                      <div className="grid grid-cols-3 gap-2 mb-2">
+                      <div className="ui-form-grid grid grid-cols-3 gap-2 mb-2">
                         <div>
                           <label className="text-[10px] text-muted block mb-0.5">Quantity</label>
                           <input type="number" min="0.001" step="0.001" value={itemEdit.quantity}
@@ -3558,7 +3628,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                             className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
                         </div>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="ui-actions flex gap-2">
                         <button onClick={() => saveItemEdit(item.id)} disabled={saving}
                           className="px-3 py-1.5 bg-emerald-600 text-white rounded text-xs font-medium disabled:opacity-50 flex items-center gap-1">
                           <Save className="w-3 h-3" /> {saving ? 'Saving...' : 'Save'}
@@ -3587,7 +3657,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                       </div>
                       {/* Unit cost — auto from Raw Materials */}
                       <div className="text-center w-24">
-                        <p className="text-sm text-foreground font-semibold">₹{item.rawMaterial?.costPrice || 0}</p>
+                        <p className="text-sm text-foreground font-semibold">₹{item.unitCost > 0 ? item.unitCost : item.rawMaterial?.costPrice || 0}</p>
                         <p className="text-[10px] text-muted">cost/unit</p>
                       </div>
                       {/* Stock */}
@@ -3602,7 +3672,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                         {(item.rawMaterial?.stock || 0) < item.quantity * (1 + (item.wastagePercent || 0) / 100) ? '⚠ Short' : '✓ OK'}
                       </span>
                       {/* Action buttons — always visible */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <div className="ui-actions flex items-center gap-1.5 flex-shrink-0">
                         <button
                           onClick={() => { setEditingItemId(item.id); setItemEdit({ quantity: item.quantity, unitOfMeasure: item.unitOfMeasure, wastagePercent: item.wastagePercent, unitCost: item.unitCost }) }}
                           className="px-2.5 py-1 rounded-md bg-surface border border-border text-xs text-muted hover:text-accent hover:border-accent/50 transition-colors flex items-center gap-1">
@@ -3673,7 +3743,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                     className="w-full px-2 py-2 bg-surface border border-border rounded-lg text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent/50" />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="ui-actions flex items-center gap-2">
                 <button
                   onClick={handleAddItem}
                   disabled={saving || !newItem.rawMaterialId}
@@ -3709,19 +3779,19 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                   <div key={s.id} className="group">
                     {editingStepId === s.id ? (
                       <div className="p-3 bg-accent/5 border border-accent/20 rounded-lg">
-                        <div className="grid grid-cols-12 gap-2 items-center mb-2">
+                        <div className="ui-form-grid grid grid-cols-12 gap-2 items-center mb-2">
                           <span className="col-span-1 text-xs text-muted text-center font-bold">{s.stepNumber}</span>
                           <input value={stepEdit.operationName} onChange={e => setStepEdit(p => ({ ...p, operationName: e.target.value }))} className="col-span-5 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
                           <select value={stepEdit.workCenterId || ''} onChange={e => setStepEdit(p => ({ ...p, workCenterId: e.target.value }))} className="col-span-4 px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground">
                             <option value="">Work Center</option>
                             {workCenters.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
                           </select>
-                          <div className="col-span-2 flex gap-1 justify-end">
+                          <div className="ui-actions col-span-2 flex gap-1 justify-end">
                             <button onClick={() => saveStepEdit(s.id)} disabled={saving} className="p-1 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded"><Save className="w-3.5 h-3.5" /></button>
                             <button onClick={() => setEditingStepId(null)} className="p-1 bg-gray-500/10 text-gray-400 rounded"><X className="w-3.5 h-3.5" /></button>
                           </div>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="ui-form-grid grid grid-cols-3 gap-2">
                           <div>
                             <label className="text-[10px] text-muted block mb-0.5">Duration (min)</label>
                             <input type="number" min="0" value={stepEdit.durationMins} onChange={e => setStepEdit(p => ({ ...p, durationMins: e.target.value }))} className="w-full px-2 py-1.5 bg-surface border border-accent rounded text-xs text-foreground" />
@@ -3749,7 +3819,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                         {s.machineCostPerUnit > 0 && (
                           <span className="text-amber-400 text-xs">Machine: ₹{s.machineCostPerUnit}/unit</span>
                         )}
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 ml-auto">
+                        <div className="ui-actions flex gap-1 opacity-0 group-hover:opacity-100 ml-auto">
                           <button onClick={() => { setEditingStepId(s.id); setStepEdit({ operationName: s.operationName, workCenterId: s.workCenterId || '', durationMins: s.durationMins, labourRatePerHour: s.labourRatePerHour, machineCostPerUnit: s.machineCostPerUnit }) }} className="p-1 text-muted hover:text-accent"><Edit2 className="w-3 h-3" /></button>
                           <button onClick={async () => { if (!confirm('Remove this step?')) return; setSaving(true); const r = await removeBOMStep(s.id); if (r.success) onRefresh(); else alert(r.error); setSaving(false) }} className="p-1 text-muted hover:text-red-400"><Trash2 className="w-3 h-3" /></button>
                         </div>
@@ -3777,7 +3847,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
             {addStepMode && (
               <div className="mt-2 p-3 bg-accent/5 border border-accent/20 rounded-lg">
                 <p className="text-xs font-medium text-accent mb-2">Add Manufacturing Step</p>
-                <div className="grid grid-cols-12 gap-2 items-center mb-2">
+                <div className="ui-form-grid grid grid-cols-12 gap-2 items-center mb-2">
                   <input value={newStep.operationName} onChange={e => setNewStep(p => ({ ...p, operationName: e.target.value }))} placeholder="Operation name" className="col-span-6 px-2 py-1.5 bg-surface border border-border rounded text-xs text-foreground" />
                   <select value={newStep.workCenterId} onChange={e => setNewStep(p => ({ ...p, workCenterId: e.target.value }))} className="col-span-5 px-2 py-1.5 bg-surface border border-border rounded text-xs text-foreground">
                     <option value="">Work Center (optional)</option>
@@ -3785,7 +3855,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                   </select>
                   <div className="col-span-1" />
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-2">
+                <div className="ui-form-grid grid grid-cols-3 gap-2 mb-2">
                   <div>
                     <label className="text-[10px] text-muted block mb-0.5">Duration (min)</label>
                     <input type="number" min="0" value={newStep.durationMins} onChange={e => setNewStep(p => ({ ...p, durationMins: e.target.value }))} className="w-full px-2 py-1.5 bg-surface border border-border rounded text-xs text-foreground" />
@@ -3800,7 +3870,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
                     <input type="number" min="0" value={newStep.machineCostPerUnit} onChange={e => setNewStep(p => ({ ...p, machineCostPerUnit: e.target.value }))} className="w-full px-2 py-1.5 bg-surface border border-border rounded text-xs text-foreground" />
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   <button onClick={handleAddStep} disabled={saving || !newStep.operationName} className="px-3 py-1.5 bg-accent text-white rounded text-xs disabled:opacity-50">{saving ? '...' : 'Add Step'}</button>
                   <button onClick={() => setAddStepMode(false)} className="px-3 py-1.5 bg-surface border border-border text-muted rounded text-xs">Cancel</button>
                 </div>

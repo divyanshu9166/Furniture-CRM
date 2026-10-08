@@ -365,7 +365,7 @@ export default function EmailMarketingPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.5s_ease-out]">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
+      <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
             <Mail className="w-6 h-6 text-accent" /> Email Marketing
@@ -374,7 +374,7 @@ export default function EmailMarketingPage() {
             {campaigns.length} campaigns · {totalSent.toLocaleString()} emails sent · {audienceStats?.subscribed || 0} subscribers
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ui-actions flex items-center gap-2">
           {tab === 'templates' ? (
             <button onClick={() => { setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); setShowCreateTemplate(true); }} className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all">
               <Plus className="w-4 h-4" /> New Template
@@ -414,7 +414,7 @@ export default function EmailMarketingPage() {
       )}
 
       {/* Top Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="ui-stat-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: 'Total Sent', value: totalSent.toLocaleString(), icon: Send, iconColor: 'text-accent', bgColor: 'bg-accent-light' },
           { label: 'Opened', value: totalOpened.toLocaleString(), icon: MailOpen, iconColor: 'text-info', bgColor: 'bg-info-light' },
@@ -436,7 +436,7 @@ export default function EmailMarketingPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 p-1 bg-surface rounded-xl w-fit">
+      <div className="ui-tabs flex items-center gap-1 p-1 bg-surface rounded-xl w-fit">
         {[
           { key: 'campaigns', label: 'Campaigns', icon: Mail },
           { key: 'templates', label: 'Templates', icon: LayoutTemplate },
@@ -454,7 +454,7 @@ export default function EmailMarketingPage() {
       {tab === 'campaigns' && (
         <div className="space-y-4">
           {/* Filters */}
-          <div className="flex items-center gap-3 flex-wrap">
+          <div className="ui-filters flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px] max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
               <input type="text" placeholder="Search campaigns..." value={search} onChange={e => setSearch(e.target.value)}
@@ -479,7 +479,7 @@ export default function EmailMarketingPage() {
               <p className="text-sm mt-1">{campaigns.length === 0 ? 'Create your first email campaign' : 'Try adjusting your filters'}</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtered.map(c => {
                 const st = statusConfig[c.status] || statusConfig.DRAFT;
                 const StIcon = st.icon;
@@ -548,7 +548,7 @@ export default function EmailMarketingPage() {
             <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-500" /> Starter Templates
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="ui-stat-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {defaultTemplates.map((tpl, i) => (
                 <div key={i} className="glass-card p-4 hover:scale-[1.01] transition-transform">
                   <p className="text-xs font-medium text-accent mb-1">{tpl.category}</p>
@@ -573,7 +573,7 @@ export default function EmailMarketingPage() {
                 <p className="text-xs mt-1">Create a template or start from a starter above</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {templates.map(t => (
                   <div key={t.id} className="glass-card p-5">
                     <div className="flex items-start justify-between mb-2">
@@ -581,7 +581,7 @@ export default function EmailMarketingPage() {
                         <span className="text-[10px] font-medium text-accent bg-accent-light px-2 py-0.5 rounded-full">{t.category}</span>
                         <h4 className="text-sm font-semibold text-foreground mt-1.5">{t.name}</h4>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="ui-actions flex gap-1">
                         <button onClick={() => handleUseTemplate(t)} className="p-1.5 rounded-lg hover:bg-surface-hover text-muted hover:text-accent transition-colors" title="Use in campaign">
                           <Mail className="w-3.5 h-3.5" />
                         </button>
@@ -658,7 +658,7 @@ export default function EmailMarketingPage() {
                           <span>Opened: <strong className="text-info">{existing.opened}</strong></span>
                           <span>Clicked: <strong className="text-success">{existing.clicked}</strong></span>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="ui-actions flex items-center gap-3">
                           <button onClick={() => handleAutomationState(existing, existing.status !== 'SCHEDULED')} className="text-xs text-accent hover:underline">{existing.status === 'SCHEDULED' ? 'Pause' : 'Resume'}</button>
                           <button onClick={() => handleViewAnalytics(existing)} className="text-xs text-accent hover:underline">View Stats</button>
                         </div>
@@ -865,7 +865,7 @@ export default function EmailMarketingPage() {
 
               {/* Actions */}
               <div className="flex items-center justify-between pt-3 border-t border-border">
-                <div className="flex gap-2">
+                <div className="ui-actions flex gap-2">
                   {c.status !== 'SENT' && c.status !== 'SENDING' && <button onClick={() => openCampaignEditor(c)} className="px-3 py-2 text-xs text-accent hover:bg-accent/10 rounded-lg transition-colors flex items-center gap-1">
                     <PenLine className="w-3.5 h-3.5" /> Edit
                   </button>}
@@ -1171,7 +1171,7 @@ export default function EmailMarketingPage() {
           </div>
 
           {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2 border-t border-border">
+          <div className="ui-actions flex justify-end gap-3 pt-2 border-t border-border">
             <button onClick={() => setShowCreateCampaign(false)}
               className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button onClick={() => handleCreateCampaign(true)} disabled={submitting || !campaignForm.name || !campaignForm.subject || !campaignForm.body}
@@ -1248,7 +1248,7 @@ export default function EmailMarketingPage() {
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
+          <div className="ui-actions flex justify-end gap-3 pt-2">
             <button onClick={() => { setShowCreateTemplate(false); setEditingTemplate(null); setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' }); }}
               className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button onClick={handleCreateTemplate} disabled={submitting || !templateForm.name || !templateForm.subject || !templateForm.body}

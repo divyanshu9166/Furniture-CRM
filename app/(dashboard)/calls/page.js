@@ -275,7 +275,7 @@ export default function CallsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="ui-filters flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
@@ -365,7 +365,7 @@ export default function CallsPage() {
       </div>
 
       <div className="hidden md:block glass-card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="ui-table-scroll overflow-x-auto">
           <table className="crm-table">
             <thead>
               <tr>
@@ -432,7 +432,7 @@ export default function CallsPage() {
   const renderPhoneBook = () => (
     <div>
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+      <div className="ui-filters flex flex-wrap items-center gap-3 mb-4">
         <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
@@ -467,7 +467,7 @@ export default function CallsPage() {
       </div>
 
       {/* Phone Book Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredPhoneBook.map((contact) => (
           <div
             key={contact.phone || contact.name}
@@ -617,7 +617,7 @@ export default function CallsPage() {
                 className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="ui-form-grid grid grid-cols-2 gap-3">
               <div>
                 <label className="text-sm text-muted mb-1 block">Date</label>
                 <input
@@ -728,7 +728,7 @@ export default function CallsPage() {
           <StatCard icon={FileText} label="Quotations Sent" value={callStats.quotationsSent} trend="From calls" positive />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="ui-stat-grid grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Call Outcomes */}
           <div className="glass-card p-6">
             <h3 className="text-base font-semibold text-foreground mb-4">Call Outcomes</h3>
@@ -1135,7 +1135,7 @@ export default function CallsPage() {
               Recent AI Calls
             </h3>
             <div className="glass-card overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="ui-table-scroll overflow-x-auto">
                 <table className="crm-table">
                   <thead>
                     <tr>
@@ -1187,7 +1187,7 @@ export default function CallsPage() {
               <PhoneCall className="w-4 h-4 text-accent" />
               Quick AI Call — Recent Contacts
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="ui-stat-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {phoneBook.slice(0, 6).map((contact) => (
                 <div key={contact.phone} className="glass-card p-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -1221,14 +1221,14 @@ export default function CallsPage() {
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="ui-page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Call Center</h1>
           <p className="text-sm text-muted mt-1">
             Manage inbound & outbound calls, transcripts, and appointments
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+        <div className="ui-actions flex flex-wrap items-center gap-2 sm:justify-end">
           <button
             onClick={refreshLogs}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-muted hover:text-foreground transition-colors"
@@ -1378,7 +1378,7 @@ export default function CallsPage() {
               </div>
             )}
 
-            <div className="flex gap-2 pt-2">
+            <div className="ui-actions flex gap-2 pt-2">
               {selectedCall.recording && (
                 <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent/10 text-accent border border-accent/20 rounded-xl text-sm font-medium hover:bg-accent/20 transition-colors">
                   <Play className="w-4 h-4" />
@@ -1460,7 +1460,7 @@ export default function CallsPage() {
               </div>
             </div>
 
-            <div className="flex gap-2 pt-2">
+            <div className="ui-actions flex gap-2 pt-2">
               <button className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
                 <Phone className="w-4 h-4" />
                 Call Now
@@ -1546,7 +1546,7 @@ export default function CallsPage() {
               className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-accent/50"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="ui-form-grid grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm text-muted mb-1 block">Date</label>
               <input
