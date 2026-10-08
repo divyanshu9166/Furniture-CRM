@@ -2,6 +2,8 @@ import nodemailer from 'nodemailer'
 import { prisma } from '@/lib/db'
 import { addTrackingToEmail } from '@/lib/email-tracking'
 import { formatSmtpError, senderHeaders, smtpConfigSchema } from '@/lib/email-senders'
+import { emailFailureMessage, isSmtpAccountBlocked } from '@/lib/email-errors'
+import { getSuppressedCampaignEmails } from '@/lib/email-audience-service'
 
 export interface SmtpConfig {
   smtpHost: string
@@ -77,7 +79,7 @@ export async function sendEmail(options: {
 
     return { success: true, messageId: result.messageId }
   } catch (err: any) {
-    return { success: false, error: formatSmtpError(err, 'Failed to send email') }
+    return { success: false, error: emailFailureMessage(err) }
   }
 }
 
@@ -112,15 +114,18 @@ export async function sendBulkEmails(emails: {
   const batchSize = 5
   for (let i = 0; i < emails.length; i += batchSize) {
     const batch = emails.slice(i, i + batchSize)
+    const suppressed = new Set(await getSuppressedCampaignEmails(batch.map(email => email.to)))
 
     const results = await Promise.allSettled(
       batch.map(async (email) => {
-        await transporter.sendMail({
+        if (suppressed.has(email.to.trim().toLowerCase())) throw new Error('Recipient unsubscribed; email was not sent.')
+        const response = await transporter.sendMail({
           ...headers,
           to: email.to,
           subject: email.subject,
           html: addTrackingToEmail(email.html, email.recipientId),
         })
+        if (Array.isArray(response.accepted) && !response.accepted.length) throw new Error('SMTP did not accept this recipient.')
         return email.recipientId
       })
     )
@@ -132,11 +137,22 @@ export async function sendBulkEmails(emails: {
         deliveryResults.push({ recipientId, success: true })
       } else {
         failed++
-        const error = result.reason?.message || 'Unknown error'
+        const error = emailFailureMessage(result.reason)
         errors.push(error)
         deliveryResults.push({ recipientId, success: false, error })
       }
     })
+
+    // Do not keep hammering an account whose provider disabled outbound sending.
+    const blocked = results.find(result => result.status === 'rejected' && isSmtpAccountBlocked(result.reason))
+    if (blocked?.status === 'rejected') {
+      const error = emailFailureMessage(blocked.reason)
+      for (const email of emails.slice(i + batchSize)) {
+        failed++
+        deliveryResults.push({ recipientId: email.recipientId, success: false, error })
+      }
+      break
+    }
 
     // Throttle: wait 1 second between batches to avoid rate limits
     if (i + batchSize < emails.length) {
@@ -183,7 +199,7 @@ export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: 
     })
     return { success: true }
   } catch (err: any) {
-    return { success: false, error: formatSmtpError(err, 'Failed to send test email') }
+    return { success: false, error: emailFailureMessage(err) }
   }
 }
 

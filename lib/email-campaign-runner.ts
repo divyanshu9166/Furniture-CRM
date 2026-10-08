@@ -3,6 +3,8 @@ import { getSmtpConfig, replaceVariables, sendBulkEmails } from '@/lib/email'
 import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
 import { resolveSender, smtpConfigSchema } from '@/lib/email-senders'
 import { assertEmailContentReady } from '@/lib/email-content'
+import { resolveCampaignAudience } from '@/lib/email-audience-service'
+import { emailFailureMessage, isSmtpAccountBlocked } from '@/lib/email-errors'
 
 type DeliveryResult =
   | { success: true; data: { recipientCount: number; sent: number; failed: number; errors: string[] } }
@@ -16,13 +18,6 @@ function commonVariables(settings: { storeName: string; phone: string | null; em
     storeAddress: settings?.address || '',
     storeUrl: getPublicAppUrl() || '',
   }
-}
-
-async function eligibleContacts(audience: string) {
-  const where: Record<string, unknown> = { email: { not: null }, emailSubscribed: true }
-  if (audience === 'leads') where.leads = { some: {} }
-  if (audience === 'customers') where.orders = { some: {} }
-  return prisma.contact.findMany({ where, select: { id: true, name: true, email: true } })
 }
 
 /** Deliver one regular campaign. The status claim makes repeated button clicks and
@@ -61,14 +56,14 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
     if (await prisma.emailRecipient.count({ where: { campaignId } })) {
       return restore('This campaign already has delivery history. Review its recipient statuses and duplicate it for a new send; history will not be erased or automatically replayed.')
     }
-    const contacts = await eligibleContacts(campaign.audience)
+    const { recipients: contacts } = await resolveCampaignAudience(campaign.audience, campaign.audienceFilter)
     if (contacts.length === 0) return restore('No eligible subscribed recipients found.')
 
     const storeSettings = await prisma.storeSettings.findFirst({ where: { id: 1 }, select: { storeName: true, phone: true, email: true, address: true } })
     const cutoff = Math.floor(contacts.length * (campaign.abSplitPercent / 100))
     const recipientsToCreate = contacts.map((contact, index) => ({
       campaignId,
-      contactId: contact.id,
+      contactId: contact.contactId,
       email: contact.email!,
       name: contact.name,
       variant: campaign.isABTest && index >= cutoff ? 'B' : 'A',
@@ -117,7 +112,7 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
     return { success: true, data: { recipientCount: recipients.length, sent: delivery.sent, failed: delivery.failed, errors: delivery.errors } }
   } catch (error) {
     await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: deliveryStarted ? 'PAUSED' : current.status } }).catch(() => {})
-    return { success: false, error: error instanceof Error ? error.message : 'Unable to send campaign.' }
+    return { success: false, error: emailFailureMessage(error) }
   }
 }
 
@@ -164,7 +159,7 @@ async function deliverAutomationToContact(campaignId: number, contactId: number)
   await prisma.$transaction([
     prisma.emailRecipient.updateMany({ where: { id: recipient.id, status: 'queued' }, data: delivered ? { status: 'sent' } : { status: 'failed' } }),
     prisma.emailRecipient.update({ where: { id: recipient.id }, data: { sentAt: delivered ? now : null } }),
-    prisma.emailCampaign.update({ where: { id: campaignId }, data: delivered ? { sent: { increment: 1 } } : {} }),
+    prisma.emailCampaign.update({ where: { id: campaignId }, data: delivered ? { sent: { increment: 1 } } : result.errors.some(isSmtpAccountBlocked) ? { status: 'PAUSED' } : {} }),
   ])
   return delivered
 }

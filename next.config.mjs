@@ -27,6 +27,9 @@ const nextConfig = {
   },
   experimental: {
     serverActions: {
+      // Bounded campaign HTML plus up to 2,000 validated recipient records.
+      // CSV/Excel bytes are parsed locally, never posted to a server action.
+      bodySizeLimit: '4mb',
       allowedOrigins: [
         'localhost:3000',
         '*.github.dev',

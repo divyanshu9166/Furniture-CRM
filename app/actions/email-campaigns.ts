@@ -9,8 +9,10 @@ import { deliverEmailCampaign } from '@/lib/email-campaign-runner'
 import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
 import { formatSmtpError, getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema } from '@/lib/email-senders'
 import { recordEmailEvent as recordEvent } from '@/lib/email-events'
-import type { Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { assertEmailContentReady } from '@/lib/email-content'
+import { campaignAudienceSchema, recipientSelectionSchema } from '@/lib/email-audience'
+import { resolveCampaignAudience } from '@/lib/email-audience-service'
 
 // ─── VALIDATION SCHEMAS ─────────────────────────────
 
@@ -28,8 +30,8 @@ const campaignSchema = z.object({
   body: z.string().trim().min(1, 'Email body is required').max(200_000),
   fromEmail: z.union([senderEmailSchema, z.literal('')]).optional(),
   templateId: z.number().int().positive().optional(),
-  audience: z.enum(['all', 'leads', 'customers']).default('all'),
-  audienceFilter: z.any().optional(),
+  audience: campaignAudienceSchema.default('all'),
+  audienceFilter: recipientSelectionSchema.nullable().optional(),
   scheduledAt: z.string().datetime().optional(),
   isABTest: z.boolean().default(false),
   variantBSubject: z.string().trim().max(250).optional(),
@@ -40,6 +42,8 @@ const campaignSchema = z.object({
   triggerType: z.enum(['new_lead', 'post_visit', 'post_purchase']).optional(),
   triggerDelay: z.number().int().min(0).max(720).optional(),
 }).superRefine((data, context) => {
+  if (data.audience === 'selected' && !data.audienceFilter) context.addIssue({ code: 'custom', message: 'Choose recipients for the selected audience.' })
+  if (data.audience === 'selected' && data.isAutomated) context.addIssue({ code: 'custom', message: 'Selected/imported lists support regular or scheduled campaigns. Trigger automations require a CRM contact segment.' })
   if (data.isABTest && (!data.variantBSubject || !data.variantBBody)) {
     context.addIssue({ code: 'custom', message: 'Variant B subject and body are required for an A/B test.' })
   }
@@ -87,7 +91,7 @@ function campaignData(data: z.infer<typeof campaignSchema>, sender: { fromEmail:
   return {
     name: data.name, ...sender, subject: data.subject, body: data.body,
     templateId: data.templateId || null, audience: data.audience,
-    audienceFilter: data.audienceFilter || undefined, scheduledAt,
+    audienceFilter: data.audience === 'selected' ? data.audienceFilter! : Prisma.DbNull, scheduledAt,
     status: (data.isAutomated ? (data.activate ? 'SCHEDULED' : 'DRAFT') : scheduledAt ? 'SCHEDULED' : 'DRAFT') as 'SCHEDULED' | 'DRAFT',
     isABTest: data.isABTest, variantB: data.isABTest ? { subject: data.variantBSubject, body: data.variantBBody } : undefined,
     abSplitPercent: data.abSplitPercent, isAutomated: data.isAutomated,
@@ -184,6 +188,7 @@ export async function getEmailCampaigns() {
       scheduledAt: c.scheduledAt?.toISOString() || null,
       sentAt: c.sentAt?.toISOString() || null,
       audience: c.audience,
+      audienceFilter: c.audienceFilter,
       totalRecipients: c.totalRecipients,
       sent: c.sent,
       opened: c.opened,
@@ -209,6 +214,10 @@ export async function createEmailCampaign(data: unknown) {
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
     const sender = await campaignSender(parsed.data.fromEmail)
+    if (parsed.data.audience === 'selected' && parsed.data.activate) {
+      const audience = await resolveCampaignAudience(parsed.data.audience, parsed.data.audienceFilter)
+      if (!audience.recipients.length) return { success: false, error: 'No eligible recipients selected. Add valid, subscribed email addresses.' }
+    }
     const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
     if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
     const active = !!scheduledAt || (parsed.data.isAutomated && parsed.data.activate)
@@ -237,6 +246,10 @@ export async function updateEmailCampaign(id: number, data: unknown) {
       if (existing.status === 'SENT' || existing.status === 'SENDING') return { success: false, error: 'Sent or in-progress campaigns cannot be edited.' }
       const hasHistory = !!await tx.emailRecipient.count({ where: { campaignId: id } }) || existing.totalRecipients > 0
       if (hasHistory && !existing.isAutomated) return { success: false, error: 'Delivery history exists. Duplicate this campaign to make changes without replaying or erasing history.' }
+      if (parsed.data.audience === 'selected' && parsed.data.activate) {
+        const audience = await resolveCampaignAudience(parsed.data.audience, parsed.data.audienceFilter)
+        if (!audience.recipients.length) return { success: false, error: 'No eligible recipients selected. Add valid, subscribed email addresses.' }
+      }
       const previousEmail = existing.fromEmail || (await getSmtpConfig())?.smtpUser || null
       const sender = parsed.data.fromEmail === undefined && previousEmail
         ? { fromEmail: previousEmail, fromName: existing.fromName }
@@ -323,6 +336,32 @@ export async function getAudiencePreview(audience: string) {
       totalCount,
     },
   }
+}
+
+/** Searchable, paginated picker. No credential exposure or Contact mutation. */
+export async function searchCampaignContacts(input: unknown) {
+  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
+  const parsed = z.object({ search: z.string().trim().max(100).default(''), page: z.number().int().min(1).max(10000).default(1) }).safeParse(input)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  try {
+    const { search, page } = parsed.data
+    const where = { email: { not: null }, ...(search ? { OR: [{ name: { contains: search, mode: 'insensitive' as const } }, { email: { contains: search, mode: 'insensitive' as const } }] } : {}) }
+    const [contacts, total] = await Promise.all([
+      prisma.contact.findMany({ where, select: { id: true, name: true, email: true, emailSubscribed: true }, orderBy: [{ name: 'asc' }, { id: 'asc' }], skip: (page - 1) * 50, take: 50 }),
+      prisma.contact.count({ where }),
+    ])
+    return { success: true, data: { contacts: contacts.map(contact => ({ ...contact, selectable: contact.emailSubscribed && senderEmailSchema.safeParse(contact.email).success })), total, page } }
+  } catch { return { success: false, error: 'Unable to load contacts. Please retry.' } }
+}
+
+export async function previewCampaignRecipients(audience: unknown, filter?: unknown) {
+  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
+  try {
+    // Preview does not authorize delivery; save/send still enforce confirmation.
+    const draft = filter && typeof filter === 'object' && !Array.isArray(filter) ? { ...filter, consentConfirmed: true } : filter
+    const resolved = await resolveCampaignAudience(audience, draft)
+    return { success: true, data: { ...resolved, recipients: resolved.recipients.slice(0, 100), total: resolved.recipients.length } }
+  } catch (error) { return { success: false, error: formatSmtpError(error, 'Unable to preview recipients.') } }
 }
 
 // ─── SEND CAMPAIGN (populate recipients + send emails) ────────────

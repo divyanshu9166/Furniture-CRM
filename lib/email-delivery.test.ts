@@ -6,6 +6,8 @@ import ts from 'typescript'
 import { z } from 'zod'
 import * as senders from './email-senders'
 import * as emailContent from './email-content'
+import * as audience from './email-audience'
+import * as emailErrors from './email-errors'
 import * as crypto from 'node:crypto'
 
 // Execute the actual delivery modules with isolated dependencies. Never import
@@ -15,6 +17,8 @@ function isolatedModule(file: string, dependencies: Record<string, unknown>) {
   const exports: Record<string, any> = {}
   vm.runInNewContext(js, { exports, require: (name: string) => {
     if (name === '@/lib/email-content') return emailContent
+    if (name === '@/lib/email-audience' || name === './email-audience') return audience
+    if (name === '@/lib/email-errors') return emailErrors
     if (!(name in dependencies)) throw new Error(`Unexpected dependency: ${name}`)
     return dependencies[name]
   }, console: { error() {} }, process: { env: { EMAIL_TRACKING_SECRET: 'test-only-tracking-secret', NEXT_PUBLIC_SITE_URL: 'https://example.com' } }, setTimeout, setInterval, Date, Error, Buffer, URL, URLSearchParams, globalThis: {} }, { filename: file })
@@ -35,13 +39,14 @@ test('tracking signatures reject malformed Unicode without throwing and accept g
   assert.equal(tracking.verifyTrackingSignature(2, 'click', signature, 'https://example.com/'), false)
 })
 
-function mailHarness() {
+function mailHarness(options: { fail?: (index: number) => Error | null; suppressed?: string[]; emptyAcceptance?: boolean } = {}) {
   const messages: any[] = [], transports: any[] = []
   const email = isolatedModule('lib/email.ts', {
-    nodemailer: { createTransport(options: unknown) { transports.push(options); return { verify: async () => true, sendMail: async (message: unknown) => { messages.push(message); return { messageId: 'test-message' } } } } },
+    nodemailer: { createTransport(transport: unknown) { transports.push(transport); return { verify: async () => true, sendMail: async (message: unknown) => { messages.push(message); const error = options.fail?.(messages.length); if (error) throw error; return { messageId: 'test-message', ...(options.emptyAcceptance ? { accepted: [] } : {}) } } } } },
     '@/lib/db': { prisma: { storeSettings: { findFirst: async () => ({ ...config }) } } },
     '@/lib/email-tracking': { addTrackingToEmail: (body: string) => `tracked:${body}` },
     '@/lib/email-senders': senders,
+    '@/lib/email-audience-service': { getSuppressedCampaignEmails: async () => options.suppressed || [] },
   })
   return { email, messages, transports }
 }
@@ -108,6 +113,39 @@ test('invalid SSL/587 pairing returns readable errors before any actual SMTP ope
   assert.equal(transports.length, 0)
 })
 
+test('account-level sending rejection stops later batches and preserves results for every recipient', async () => {
+  const { email, messages } = mailHarness({ fail: () => new Error('554 5.7.1 Outbound sending is disabled for this account') })
+  const result = await email.sendBulkEmails(Array.from({ length: 12 }, (_, index) => ({ recipientId: index + 1, to: `client${index}@example.com`, subject: 'Hi', html: 'Hi' })), { config })
+  assert.equal(messages.length, 5)
+  assert.equal(result.sent, 0); assert.equal(result.failed, 12)
+  assert.equal(result.results.length, 12)
+  assert.match(result.errors[0], /hPanel/)
+  assert.equal(new Set(result.results.map((row: any) => row.recipientId)).size, 12)
+})
+
+test('bulk delivery excludes a newly unsubscribed email before contacting SMTP', async () => {
+  const { email, messages } = mailHarness({ suppressed: ['client@example.com'] })
+  const result = await email.sendBulkEmails([{ recipientId: 1, to: 'CLIENT@example.com', subject: 'Hi', html: 'Hi' }, { recipientId: 2, to: 'ok@example.com', subject: 'Hi', html: 'Hi' }], { config })
+  assert.equal(messages.length, 1)
+  assert.equal(result.sent, 1); assert.equal(result.failed, 1)
+  assert.match(result.results.find((row: any) => row.recipientId === 1).error, /unsubscribed/)
+})
+
+test('recipient-specific rejection does not stop later batches or miscount accepted emails', async () => {
+  const { email, messages } = mailHarness({ fail: index => index === 1 ? new Error('550 recipient not found') : null })
+  const result = await email.sendBulkEmails(Array.from({ length: 6 }, (_, index) => ({ recipientId: index + 1, to: `client${index}@example.com`, subject: 'Hi', html: 'Hi' })), { config })
+  assert.equal(messages.length, 6)
+  assert.equal(result.sent, 5); assert.equal(result.failed, 1)
+  assert.equal(result.results.length, 6)
+})
+
+test('empty SMTP accepted array is not reported as successful delivery', async () => {
+  const { email } = mailHarness({ emptyAcceptance: true })
+  const result = await email.sendBulkEmails([{ recipientId: 1, to: 'client@example.com', subject: 'Hi', html: 'Hi' }], { config })
+  assert.equal(result.sent, 0); assert.equal(result.failed, 1)
+  assert.match(result.errors[0], /did not accept/)
+})
+
 function campaignHarness(overrides: Record<string, unknown> = {}, aliases = config.smtpAliases) {
   const campaign: any = { id: 1, totalRecipients: 0, status: 'DRAFT', isAutomated: false, fromEmail: 'sales@example.com', fromName: 'Pinned Sales', audience: 'all', subject: 'Subject A', body: 'Body A', isABTest: true, abSplitPercent: 50, variantB: { subject: 'Subject B', body: 'Body B' }, ...overrides }
   const deliveries: any[] = []
@@ -151,7 +189,12 @@ function campaignHarness(overrides: Record<string, unknown> = {}, aliases = conf
     '@/lib/db': { prisma }, '@/lib/email-senders': senders,
     '@/lib/email-tracking': { getPublicAppUrl: () => 'https://example.com', isEmailTrackingConfigured: () => true },
     '@/lib/email': { getSmtpConfig: async () => ({ ...config, smtpAliases: aliases }), replaceVariables: (body: string) => body,
-      sendBulkEmails: async (emails: unknown[], sender: unknown) => { deliveries.push({ emails, sender }); if (overrides.deliveryError) throw new Error('Simulated lost SMTP result'); return { sent: overrides.reject ? 0 : emails.length, failed: overrides.reject ? emails.length : 0, errors: overrides.reject ? ['Rejected'] : [], results: emails.map((email: any) => ({ recipientId: email.recipientId, success: !overrides.reject })) } } },
+      sendBulkEmails: async (emails: unknown[], sender: unknown) => { deliveries.push({ emails, sender }); if (overrides.deliveryError) throw new Error('Simulated lost SMTP result'); return { sent: overrides.reject ? 0 : emails.length, failed: overrides.reject ? emails.length : 0, errors: overrides.reject ? [overrides.blocked ? '554 5.7.1 Outbound sending is disabled for this account' : 'Rejected'] : [], results: emails.map((email: any) => ({ recipientId: email.recipientId, success: !overrides.reject })) } } },
+    '@/lib/email-audience-service': { resolveCampaignAudience: async (segment: string, filter: unknown) => {
+      if (segment !== 'selected') return { recipients: contacts.map(row => ({ ...row, contactId: row.id })) }
+      const selected = audience.recipientSelectionSchema.parse(filter)
+      return audience.normalizeCampaignRecipients([...contacts.filter(row => selected.contactIds.includes(row.id)).map(row => ({ ...row, contactId: row.id })), ...selected.emails.map(row => ({ ...row, contactId: null }))], (overrides.suppressed as string[]) || [])
+    } },
   })
   return { runner, campaign, prisma, deliveries, replacedHistory: () => replacedHistory, rows: () => rows }
 }
@@ -166,6 +209,25 @@ test('actual immediate and scheduled runner forwards saved alias/name to both A/
     assert.deepEqual(deliveries[0].emails.map((email: any) => email.subject), ['Subject A', 'Subject B'])
     assert.equal(campaign.status, 'SENT')
   }
+})
+
+test('selected lists deliver only requested contacts/emails, deduplicate and preserve manual unsubscribe identity', async () => {
+  const fixture = campaignHarness({ audience: 'selected', audienceFilter: { version: 1, contactIds: [2], emails: [{ email: 'CLIENT2@example.com', name: 'Duplicate' }, { email: 'manual@example.com', name: 'Manual' }, { email: 'blocked@example.com', name: 'Blocked' }], consentConfirmed: true }, suppressed: ['blocked@example.com'], status: 'SCHEDULED' })
+  const result = await fixture.runner.deliverEmailCampaign(1)
+  assert.equal(result.success, true)
+  assert.deepEqual(fixture.rows().map((row: any) => row.email), ['client2@example.com', 'manual@example.com'])
+  assert.equal(fixture.rows()[0].contactId, 2)
+  assert.equal(fixture.rows()[1].contactId, null)
+  assert.equal(fixture.deliveries[0].emails[1].to, 'manual@example.com')
+})
+
+test('a selected campaign with missing consent fails before creating recipient history', async () => {
+  const fixture = campaignHarness({ audience: 'selected', audienceFilter: { emails: [{ email: 'new@example.com' }] } })
+  const result = await fixture.runner.deliverEmailCampaign(1)
+  assert.equal(result.success, false)
+  assert.match(result.error, /Confirm permission/)
+  assert.equal(fixture.rows().length, 0)
+  assert.equal(fixture.deliveries.length, 0)
 })
 
 test('removed alias restores campaign status without replacing recipient history or sending', async () => {
@@ -259,6 +321,11 @@ function campaignActionsHarness() {
     '@/lib/email-campaign-runner': { deliverEmailCampaign: async () => ({ success: true }) },
     '@/lib/email-tracking': { getPublicAppUrl: () => 'https://example.com', isEmailTrackingConfigured: () => true },
     '@/lib/email-senders': senders,
+    '@prisma/client': { Prisma: { DbNull: null } },
+    '@/lib/email-audience-service': { resolveCampaignAudience: async (segment: string, filter: unknown) => {
+      const selected = audience.recipientSelectionSchema.parse(filter)
+      return { recipients: selected.emails.map(row => ({ ...row, contactId: null })) }
+    } },
   })
   return { actions, writes, tests, original, prisma, setRole: (value: string) => { role = value } }
 }
@@ -304,6 +371,76 @@ test('actual campaign create/edit/copy persist selected identity and reject unli
   assert.equal(writes[2].fromName, 'Pinned Sales')
   assert.equal((await actions.createEmailCampaign({ ...payload, fromEmail: 'other@example.com' })).success, false)
   assert.equal(writes.length, 3)
+})
+
+test('campaign create/edit/duplicate persist explicit recipients; changing segment clears stale selection', async () => {
+  const { actions, writes, original } = campaignActionsHarness()
+  const audienceFilter = { version: 1, contactIds: [1], emails: [{ email: 'new@example.com', name: 'New' }], consentConfirmed: true }
+  const payload = { name: 'Selected', subject: 'Hi', body: '<p>Hello</p>', audience: 'selected', audienceFilter }
+  assert.equal((await actions.createEmailCampaign(payload)).success, true)
+  assert.deepEqual(writes[0].audienceFilter, audienceFilter)
+  assert.equal((await actions.updateEmailCampaign(1, payload)).success, true)
+  assert.deepEqual(writes[1].audienceFilter, audienceFilter)
+  Object.assign(original, payload)
+  assert.equal((await actions.duplicateCampaign(1)).success, true)
+  assert.deepEqual(writes[2].audienceFilter, audienceFilter)
+  assert.equal((await actions.updateEmailCampaign(1, { name: 'All', subject: 'Hi', body: 'Hi', audience: 'all' })).success, true)
+  assert.equal(writes[3].audienceFilter, null)
+})
+
+test('selected recipients validate server-side and are not allowed in trigger automations', async () => {
+  const { actions, writes, setRole } = campaignActionsHarness()
+  const base = { name: 'Selected', subject: 'Hi', body: 'Hi', audience: 'selected' }
+  for (const payload of [base, { ...base, audienceFilter: { emails: [{ email: 'invalid' }], consentConfirmed: true } }, { ...base, audienceFilter: { emails: [{ email: 'new@example.com' }] } }, { ...base, isAutomated: true, triggerType: 'new_lead', audienceFilter: { emails: [], contactIds: [1] } }]) {
+    assert.equal((await actions.createEmailCampaign(payload)).success, false)
+  }
+  assert.equal(writes.length, 0)
+  setRole('STAFF')
+  assert.equal((await actions.searchCampaignContacts({})).success, false)
+  assert.equal((await actions.previewCampaignRecipients('all')).success, false)
+})
+
+function audienceServiceHarness() {
+  const contacts = [
+    { id: 1, name: 'One', email: 'ONE@example.com', emailSubscribed: true, lead: true, customer: false },
+    { id: 2, name: 'Two', email: 'two@example.com', emailSubscribed: true, lead: false, customer: true },
+    { id: 3, name: 'Bad', email: 'not-email', emailSubscribed: true, lead: false, customer: false },
+    { id: 4, name: 'Opted out duplicate', email: 'TWO@example.com', emailSubscribed: false, lead: false, customer: false },
+  ]
+  const history = [{ email: 'manual-blocked@example.com' }]
+  let calls = 0
+  const prisma = {
+    contact: { findMany: async ({ where }: any) => {
+      calls++
+      if (where.emailSubscribed === false) return contacts.filter(row => !row.emailSubscribed && where.email.in.includes(row.email.toLowerCase()))
+      return contacts.filter(row => row.emailSubscribed && (!where.id || where.id.in.includes(row.id)) && (!where.leads || row.lead) && (!where.orders || row.customer))
+    } },
+    emailRecipient: { findMany: async ({ where }: any) => history.filter(row => where.email.in.includes(row.email)) },
+  }
+  const service = isolatedModule('lib/email-audience-service.ts', { '@/lib/db': { prisma } })
+  return { service, contacts, history, calls: () => calls }
+}
+
+test('actual audience resolver rechecks current contact emails, segment membership and email-only unsubscribe history', async () => {
+  const { service, contacts } = audienceServiceHarness()
+  const all = await service.resolveCampaignAudience('all')
+  assert.deepEqual(all.recipients.map((row: any) => row.email), ['one@example.com'])
+  assert.equal(all.invalid, 1); assert.equal(all.unsubscribed, 1)
+  assert.equal((await service.resolveCampaignAudience('customers')).recipients.length, 0)
+  assert.equal((await service.resolveCampaignAudience('leads')).recipients.length, 1)
+  contacts[0].email = 'changed@example.com'
+  const result = await service.resolveCampaignAudience('selected', { contactIds: [1, 4, 999], emails: [{ email: 'manual-blocked@example.com' }, { email: 'new@example.com' }], consentConfirmed: true })
+  assert.deepEqual(result.recipients.map((row: any) => row.email), ['changed@example.com', 'new@example.com'])
+  assert.equal(result.unavailableContacts, 2)
+  assert.equal(result.unsubscribed, 1)
+  assert.equal(result.recipients[1].contactId, null)
+})
+
+test('actual audience resolver fails closed on unsupported segments/malformed selections without database work', async () => {
+  const { service, calls } = audienceServiceHarness()
+  await assert.rejects(service.resolveCampaignAudience('unexpected'))
+  await assert.rejects(service.resolveCampaignAudience('selected', { contactIds: [-1] }))
+  assert.equal(calls(), 0)
 })
 
 test('actual test-email action reuses saved secret only server-side; managers cannot test unsaved aliases', async () => {
@@ -396,6 +533,16 @@ test('automated campaigns recheck customer audience before claiming or sending',
   assert.equal((await fixture.runner.processDueEmailCampaigns()).automationDeliveries, 0)
   assert.equal(fixture.deliveries.length, 0)
   assert.equal(fixture.rows().length, 0)
+})
+
+test('account-blocked automation pauses and retains history instead of retrying every customer', async () => {
+  const fixture = campaignHarness({ status: 'SCHEDULED', isAutomated: true, reject: true, blocked: true })
+  fixture.prisma.lead.findMany = async () => [{ contactId: 1 }, { contactId: 2 }]
+  const result = await fixture.runner.processDueEmailCampaigns()
+  assert.equal(result.automationFailures, 1)
+  assert.equal(fixture.campaign.status, 'PAUSED')
+  assert.equal(fixture.deliveries.length, 1)
+  assert.equal(fixture.rows().length, 1)
 })
 
 test('automation queries exclude delivery history before the bounded candidate window', async () => {

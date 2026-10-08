@@ -1,0 +1,6 @@
+Email,Name
+alice@example.com,Alice duplicate
+csv-client@example.com,CSV Client
+CSV-CLIENT@example.com,CSV duplicate
+not-an-email,Invalid row
+manual-blocked@example.com,Previously unsubscribed
