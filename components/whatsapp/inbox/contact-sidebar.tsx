@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { toast } from 'sonner';
 import type { Contact, Deal, ContactNote, Tag } from "@/types";
 import {
   Phone,
@@ -26,9 +27,21 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
+  const activeContactId = useRef<string | null>(null);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    activeContactId.current = contact?.id ?? null;
+    // Clear old contact data immediately; late requests must never cross chats.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDeals([]); setNotes([]); setTags([]); setNewNote(''); setAddingNote(false); setCopied(false); setLoadError('');
+    return () => { activeContactId.current = null; };
+  }, [contact?.id]);
 
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
+    const targetId = contact.id;
+    try {
 
     // Fetch deals, notes, and contact details (with tags) in parallel
     const [dealsRes, notesRes, contactRes] = await Promise.all([
@@ -36,20 +49,27 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
       fetch(`/api/whatsapp/contacts/${contact.id}/notes`, { cache: 'no-store' }),
       fetch(`/api/whatsapp/contacts/${contact.id}`, { cache: 'no-store' }),
     ]);
+    if (activeContactId.current !== targetId) return;
+    if (!dealsRes.ok || !notesRes.ok || !contactRes.ok) throw new Error('Unable to load contact details');
 
     if (dealsRes.ok) {
       const body = await dealsRes.json();
+      if (activeContactId.current !== targetId) return;
       setDeals(body.data ?? []);
     }
     if (notesRes.ok) {
       const body = await notesRes.json();
+      if (activeContactId.current !== targetId) return;
       setNotes(body.data ?? []);
     }
     if (contactRes.ok) {
       const body = await contactRes.json();
+      if (activeContactId.current !== targetId) return;
       const rawTags = body.data?.tags ?? [];
       setTags(rawTags);
     }
+    setLoadError('');
+    } catch { if (activeContactId.current === targetId) setLoadError('Unable to refresh contact details.'); }
   }, [contact]);
 
   // Load on contact change.
@@ -60,9 +80,13 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   const handleCopyPhone = useCallback(async () => {
     if (!contact?.phone) return;
-    await navigator.clipboard.writeText(contact.phone);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(contact.phone);
+      if (activeContactId.current === contact.id) {
+        setCopied(true);
+        setTimeout(() => { if (activeContactId.current === contact.id) setCopied(false); }, 2000);
+      }
+    } catch { toast.error('Unable to copy phone number'); }
     // Dep is the whole `contact` object (not `contact?.phone`) so the
     // React Compiler's inference agrees with the manual dep list —
     // fixes the `preserve-manual-memoization` lint error.
@@ -71,21 +95,25 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const handleAddNote = useCallback(async () => {
     if (!contact || !newNote.trim()) return;
     setAddingNote(true);
-
+    const targetId = contact.id;
+    try {
     const res = await fetch(`/api/whatsapp/contacts/${contact.id}/notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note_text: newNote.trim() }),
     });
 
+    if (!res.ok) throw new Error('Unable to save note');
     if (res.ok) {
       const body = await res.json();
+      if (activeContactId.current !== targetId) return;
       if (body.data) {
         setNotes((prev) => [body.data, ...prev]);
         setNewNote('');
       }
     }
-    setAddingNote(false);
+    } catch { toast.error('Unable to save note. Please retry.'); }
+    finally { if (activeContactId.current === targetId) setAddingNote(false); }
   }, [contact, newNote]);
 
   if (!contact) {
@@ -102,6 +130,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   return (
     <div className="flex h-full min-h-0 w-[20rem] flex-col border-l border-border bg-surface">
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {loadError && <div role="alert" className="bg-warning-light p-3 text-xs text-warning">{loadError} <button type="button" onClick={fetchContactData} className="rounded-lg border border-border px-2 py-2">Retry</button></div>}
         <div className="p-4">
           {/* Contact Info */}
           <div className="flex flex-col items-center text-center">

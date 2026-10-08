@@ -230,6 +230,32 @@ body {
 /* WhatsApp Marketing was originally imported from a dark dashboard. Keep the
    translation scoped so nested widgets and body-level portals inherit the CRM
    palette without affecting the rest of the app. */
+/* Semantic bubble colors: never translate contrasting outgoing text into the
+   light theme's dark foreground. One width constraint lives on the action row. */
+.wa-message-wrap { width: fit-content; }
+.wa-inbox, .wa-marketing { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+.dark :is(.wa-inbox, .wa-template-picker, .wa-inbox-menu, .wa-marketing .ui-tabs, .wa-marketing .ui-page-header) { --accent: #a5b4fc; --color-accent: #a5b4fc; }
+.dashboard-content:has(> .wa-marketing.ui-inbox-shell) { padding-bottom: 0; overflow: hidden; }
+.wa-marketing.ui-inbox-shell { margin-bottom: 0; }
+.wa-message-bubble { width: fit-content; max-width: 100%; font-family: inherit; line-height: 1.55; overflow-wrap: anywhere; }
+.wa-contact-body > div { max-width: 100%; flex: 1; }
+.wa-thread-header > :first-child { flex: 1 1 210px; }
+.wa-thread-header > :last-child { flex: 0 1 auto; }
+.wa-message-bubble p { font-size: 14px; line-height: 1.55; word-break: normal; }
+.wa-message-out { background: #4f46e5; color: #fff; }
+.wa-message-in { background: var(--color-surface-light); color: var(--color-foreground); border: 1px solid var(--color-border); }
+.wa-message-meta { white-space: nowrap; color: var(--color-muted); }
+.wa-message-out .wa-message-meta { color: #e0e7ff; }
+.wa-message-out .wa-message-meta svg { color: #e0e7ff !important; }
+.wa-message-out .wa-message-meta .text-blue-400 { color: #a5f3fc !important; }
+.wa-message-out .wa-message-meta .text-red-400 { color: #fecaca !important; }
+.wa-template-label { background: var(--color-accent-light); color: var(--color-accent); }
+.wa-message-out .wa-template-label { background: rgba(255,255,255,.15); color: #fff; }
+.wa-message-bubble :is(img, video, audio) { max-width: 100%; }
+.wa-message-bubble .bg-surface-light { color: var(--color-foreground); }
+.wa-send-button { background: #4f46e5 !important; color: #fff !important; }
+.wa-unread-badge { background: #4f46e5; color: #fff; }
+
 :where(.wa-light, .wa-light-active) :is(.bg-slate-950, .bg-slate-950\/95, .bg-slate-950\/90, .bg-slate-950\/80, .bg-slate-950\/70, .bg-slate-950\/60, .bg-slate-950\/50, .bg-slate-950\/40, .bg-slate-950\/30, .bg-slate-950\/20, .bg-slate-950\/10,
   .bg-slate-900, .bg-slate-900\/95, .bg-slate-900\/90, .bg-slate-900\/80, .bg-slate-900\/70, .bg-slate-900\/60, .bg-slate-900\/50, .bg-slate-900\/40, .bg-slate-900\/30, .bg-slate-900\/20, .bg-slate-900\/10,
   .bg-black, .bg-black\/20) {

@@ -15,7 +15,8 @@ interface ReplyDraft {
 interface MessageComposerProps {
   conversationId: string;
   sessionExpired: boolean;
-  onSend: (text: string, replyToId?: string) => void;
+  loading?: boolean;
+  onSend: (text: string, replyToId?: string) => Promise<boolean>;
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
@@ -24,6 +25,7 @@ interface MessageComposerProps {
 export function MessageComposer({
   conversationId,
   sessionExpired,
+  loading = false,
   onSend,
   onOpenTemplates,
   replyTo,
@@ -32,6 +34,7 @@ export function MessageComposer({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendInFlight = useRef(false);
 
   const adjustHeight = useCallback(() => {
     const el = textareaRef.current;
@@ -43,23 +46,26 @@ export function MessageComposer({
 
   const handleSend = useCallback(async () => {
     const trimmed = text.trim();
-    if (!trimmed || sending || sessionExpired) return;
+    if (!trimmed || sendInFlight.current || sessionExpired || loading) return;
 
+    sendInFlight.current = true;
     setSending(true);
     try {
-      onSend(trimmed, replyTo?.id);
+      const accepted = await onSend(trimmed, replyTo?.id);
+      if (!accepted) return;
       setText("");
       if (textareaRef.current) {
         textareaRef.current.style.height = "auto";
       }
     } finally {
+      sendInFlight.current = false;
       setSending(false);
     }
-  }, [text, sending, sessionExpired, onSend, replyTo?.id]);
+  }, [text, sessionExpired, loading, onSend, replyTo?.id]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault();
         handleSend();
       }
@@ -76,7 +82,7 @@ export function MessageComposer({
   );
 
   return (
-    <div className="ui-inbox-composer shrink-0 border-t border-border bg-surface p-3 pb-[calc(0.75rem+60px+env(safe-area-inset-bottom))] md:pb-3">
+    <div className="ui-inbox-composer shrink-0 border-t border-border bg-surface p-3">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -87,7 +93,7 @@ export function MessageComposer({
         </div>
       )}
 
-      {sessionExpired && (
+      {sessionExpired && !loading && (
         <div className="ui-actions mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
           <p className="text-xs text-amber-400">
             24-hour session expired. Use a template to re-engage.
@@ -122,11 +128,13 @@ export function MessageComposer({
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder={
-            sessionExpired
+            loading ? 'Loading messages…' : sessionExpired
               ? "Session expired - use a template"
-              : "Type a message... (Shift+Enter for new line)"
+              : "Type a message…"
           }
-          disabled={sessionExpired}
+          disabled={sessionExpired || sending || loading}
+          aria-label="Message text"
+          dir="auto"
           rows={1}
           className={cn(
             "flex-1 resize-none rounded-xl border border-border bg-surface-light px-3 py-2 sm:px-4 sm:py-2.5 text-sm text-foreground placeholder-muted outline-none transition-colors focus:border-accent",
@@ -136,8 +144,8 @@ export function MessageComposer({
 
         <Button
           size="sm"
-          className="h-9 w-9 shrink-0 bg-accent p-0 hover:bg-accent disabled:opacity-40"
-          disabled={!text.trim() || sessionExpired || sending}
+          className="wa-send-button h-9 w-9 shrink-0 bg-accent p-0 hover:bg-accent disabled:opacity-40"
+          disabled={!text.trim() || sessionExpired || sending || loading}
           onClick={handleSend}
           aria-label="Send message"
         >
@@ -149,7 +157,7 @@ export function MessageComposer({
           `items-end` buttons below the textarea. Indented to line up
           under the textarea left edge (w-9 button + gap-2 = 44px). */}
       <p className="mt-1 pl-11 text-[10px] text-muted">
-        Type &apos;/&apos; for quick replies
+        Enter to send · Shift+Enter for a new line
       </p>
     </div>
   );

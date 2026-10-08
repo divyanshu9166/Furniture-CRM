@@ -21,8 +21,10 @@ import {
   ArrowLeft,
   Bot,
   User,
+  Info, RefreshCw,
 } from "lucide-react";
-import { format, isToday, isYesterday, differenceInHours } from "date-fns";
+import { format, isToday, isYesterday, isValid } from "date-fns";
+import { customerSession, mergeInboxMessages, templatePickerProblem } from "@/lib/whatsapp/inbox-state";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -57,7 +59,7 @@ async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> 
 }
 
 function renderTemplateBody(body: string, params: string[]): string {
-  return body.replace(/\{\{(\d+)\}\}/g, (_, raw) => {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, raw) => {
     const idx = Number(raw) - 1;
     return params[idx] ?? `{{${raw}}}`;
   });
@@ -67,7 +69,7 @@ interface MessageThreadProps {
   conversation: Conversation | null;
   contact: Contact | null;
   messages: Message[];
-  onMessagesLoaded: (messages: Message[]) => void;
+  onMessagesLoaded: (messages: Message[], conversationId: string) => void;
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
   onStatusChange: (conversationId: string, status: ConversationStatus) => void;
@@ -83,10 +85,12 @@ interface MessageThreadProps {
    * mobile only.
    */
   onBack?: () => void;
+  onShowContact?: () => void;
 }
 
 function formatDateSeparator(dateStr: string): string {
   const date = new Date(dateStr);
+  if (!isValid(date)) return 'Date unavailable';
   if (isToday(date)) return "Today";
   if (isYesterday(date)) return "Yesterday";
   return format(date, "MMMM d, yyyy");
@@ -97,7 +101,8 @@ function groupMessagesByDate(messages: Message[]) {
   let currentDate = "";
 
   for (const msg of messages) {
-    const day = format(new Date(msg.created_at), "yyyy-MM-dd");
+    const date = new Date(msg.created_at);
+    const day = isValid(date) ? format(date, "yyyy-MM-dd") : 'unknown';
     if (day !== currentDate) {
       currentDate = day;
       groups.push({ date: msg.created_at, messages: [msg] });
@@ -126,9 +131,15 @@ export function MessageThread({
   onNeedsHumanChange,
   onAssignChange,
   onBack,
+  onShowContact,
 }: MessageThreadProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const [atBottom, setAtBottom] = useState(true);
+  const followBottomRef = useRef(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -136,6 +147,15 @@ export function MessageThread({
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
   const messagesRef = useRef<Message[]>(messages);
   const reactionsRef = useRef<MessageReaction[]>(reactions);
+  const activeIdRef = useRef(conversation?.id);
+  const pendingReactions = useRef(new Set<string>());
+  const refreshReactionsRef = useRef<(() => Promise<void>) | null>(null);
+  const headerInFlight = useRef(false);
+  const [headerBusy, setHeaderBusy] = useState(false);
+  useEffect(() => {
+    activeIdRef.current = conversation?.id;
+    return () => { activeIdRef.current = undefined; };
+  }, [conversation?.id]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -168,32 +188,11 @@ export function MessageThread({
     };
   }, []);
 
-  // 24-hour session timer
-  const sessionInfo = useMemo(() => {
-    if (!messages.length) return { expired: false, remaining: "" };
-
-    // Find last customer message
-    const lastCustomerMsg = [...messages]
-      .reverse()
-      .find((m) => m.sender_type === "customer");
-
-    if (!lastCustomerMsg) return { expired: true, remaining: "No customer messages" };
-
-    const hoursSince = differenceInHours(new Date(), new Date(lastCustomerMsg.created_at));
-    const expired = hoursSince >= 24;
-
-    if (expired) {
-      return { expired: true, remaining: "Expired" };
-    }
-
-    const hoursLeft = 24 - hoursSince;
-    const remaining =
-      hoursLeft >= 1
-        ? `${Math.floor(hoursLeft)}h remaining`
-        : `${Math.floor(hoursLeft * 60)}m remaining`;
-
-    return { expired, remaining };
-  }, [messages]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const sessionInfo = useMemo(() => customerSession(messages, now), [messages, now]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -218,6 +217,8 @@ export function MessageThread({
     if (!conversationId) return;
     let cancelled = false;
     let initial = true;
+    let inFlight = false;
+    followBottomRef.current = true;
 
     const finishInitial = () => {
       if (!initial) return;
@@ -226,23 +227,12 @@ export function MessageThread({
     };
 
     const mergeMessages = (serverMessages: Message[]) => {
-      const tempMessages = messagesRef.current.filter((m) =>
-        m.id.startsWith("temp-")
-      );
-      const serverIds = new Set(serverMessages.map((m) => m.id));
-      const merged = [
-        ...serverMessages,
-        ...tempMessages.filter((m) => !serverIds.has(m.id)),
-      ];
-      merged.sort(
-        (a, b) =>
-          new Date(a.created_at).getTime() -
-          new Date(b.created_at).getTime()
-      );
-      return merged;
+      return mergeInboxMessages(messagesRef.current, serverMessages, conversationId);
     };
 
     const fetchMessages = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
       if (initial) setLoading(true);
 
       try {
@@ -251,22 +241,28 @@ export function MessageThread({
           { cache: "no-store" }
         );
         if (cancelled) return;
-        onMessagesLoadedRef.current(mergeMessages(body.data ?? []));
+        setLoadError('');
+        onMessagesLoadedRef.current(mergeMessages(body.data ?? []), conversationId);
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to fetch messages:", error);
+        setLoadError('Unable to refresh this chat. Your messages are preserved.');
       } finally {
+        inFlight = false;
         if (cancelled) return;
         finishInitial();
       }
     };
 
     fetchMessages();
+    // Keep the active thread current even when the socket is unavailable.
+    const timer = window.setInterval(fetchMessages, 15_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
-  }, [conversationId]);
+  }, [conversationId, reloadToken]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -275,19 +271,22 @@ export function MessageThread({
       return;
     }
     let cancelled = false;
+    let inFlight = false;
 
     const mergeReactions = (serverReactions: MessageReaction[]) => {
-      const tempReactions = reactionsRef.current.filter((reaction) =>
-        reaction.id.startsWith("temp-")
+      const pending = pendingReactions.current;
+      const localReactions = reactionsRef.current.filter((reaction) =>
+        reaction.conversation_id === conversationId && pending.has(reaction.message_id)
       );
-      const serverIds = new Set(serverReactions.map((reaction) => reaction.id));
       return [
-        ...serverReactions,
-        ...tempReactions.filter((reaction) => !serverIds.has(reaction.id)),
+        ...serverReactions.filter(reaction => reaction.conversation_id === conversationId && !pending.has(reaction.message_id)),
+        ...localReactions,
       ];
     };
 
     const fetchReactions = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       try {
         const body = await fetchJson<{ data: MessageReaction[] }>(
           `/api/whatsapp/reactions?conversation_id=${conversationId}`,
@@ -299,19 +298,25 @@ export function MessageThread({
       } catch (error) {
         if (cancelled) return;
         console.error("Failed to fetch reactions:", error);
-      }
+      } finally { inFlight = false; }
     };
 
+    refreshReactionsRef.current = fetchReactions;
     fetchReactions();
+    const timer = window.setInterval(fetchReactions, 15_000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      refreshReactionsRef.current = null;
     };
   }, [conversationId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setReplyTo(null);
+    setTemplateModalOpen(false);
+    setReactions([]);
   }, [conversationId]);
 
   // Reset the server-side unread_count to 0 whenever an unread count
@@ -336,17 +341,17 @@ export function MessageThread({
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && followBottomRef.current) {
       const el = scrollRef.current;
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, loading]);
 
   const handleSend = useCallback(
     async (text: string, replyToId?: string) => {
-      if (!conversation) return;
+      if (!conversation || customerSession(messagesRef.current).expired) return false;
 
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${crypto.randomUUID()}`;
 
       // Optimistic update — shows the message immediately with "sending" status
       const optimisticMsg: Message = {
@@ -360,7 +365,6 @@ export function MessageThread({
         reply_to_message_id: replyToId,
       };
       onNewMessage(optimisticMsg);
-      setReplyTo(null);
 
       try {
         const res = await fetch("/api/whatsapp/send", {
@@ -382,7 +386,7 @@ export function MessageThread({
           toast.error(`Failed to send: ${reason}`);
           // Mark the optimistic bubble as failed so the user sees what happened
           onUpdateMessage(tempId, { status: "failed" });
-          return;
+          return false;
         }
 
         const nextId = payload?.message_id as string | undefined;
@@ -398,11 +402,14 @@ export function MessageThread({
           // Flip status so the UI stops showing "sending".
           onUpdateMessage(tempId, { status: "sent" });
         }
+        if (activeIdRef.current === conversation.id) setReplyTo(null);
+        return true;
       } catch (err) {
         console.error("Failed to send message:", err);
         const reason = err instanceof Error ? err.message : "network error";
         toast.error(`Failed to send: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
+        return false;
       }
     },
     [conversation, onNewMessage, onUpdateMessage]
@@ -410,7 +417,9 @@ export function MessageThread({
 
   const handleStatusChange = useCallback(
     async (status: ConversationStatus) => {
-      if (!conversation) return;
+      if (!conversation || headerInFlight.current) return;
+      headerInFlight.current = true;
+      setHeaderBusy(true);
 
       try {
         await fetchJson(`/api/whatsapp/conversations/${conversation.id}`, {
@@ -423,14 +432,16 @@ export function MessageThread({
       } catch (error) {
         console.error("Failed to update status:", error);
         toast.error("Failed to update status");
-      }
+      } finally { headerInFlight.current = false; setHeaderBusy(false); }
     },
     [conversation, onStatusChange]
   );
 
   const handleNeedsHumanToggle = useCallback(
     async () => {
-      if (!conversation) return;
+      if (!conversation || headerInFlight.current) return;
+      headerInFlight.current = true;
+      setHeaderBusy(true);
       const newNeedsHuman = !conversation.needs_human;
 
       try {
@@ -446,7 +457,7 @@ export function MessageThread({
       } catch (error) {
         console.error("Failed to toggle human takeover:", error);
         toast.error("Failed to toggle AI mode");
-      }
+      } finally { headerInFlight.current = false; setHeaderBusy(false); }
     },
     [conversation, onNeedsHumanChange]
   );
@@ -457,10 +468,12 @@ export function MessageThread({
 
   const handleSendTemplate = useCallback(
     async (template: MessageTemplate, params: string[]) => {
-      if (!conversation) return;
+      if (!conversation) return false;
+      const problem = templatePickerProblem(template);
+      if (problem) { toast.error(problem); return false; }
 
       const renderedBody = renderTemplateBody(template.body_text, params);
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${crypto.randomUUID()}`;
 
       const optimisticMsg: Message = {
         id: tempId,
@@ -494,7 +507,7 @@ export function MessageThread({
           console.error("Failed to send template:", reason);
           toast.error(`Failed to send template: ${reason}`);
           onUpdateMessage(tempId, { status: "failed" });
-          return;
+          return false;
         }
 
         const nextId = payload?.message_id as string | undefined;
@@ -509,11 +522,13 @@ export function MessageThread({
         } else {
           onUpdateMessage(tempId, { status: "sent" });
         }
+        return true;
       } catch (err) {
         console.error("Failed to send template:", err);
         const reason = err instanceof Error ? err.message : "network error";
         toast.error(`Failed to send template: ${reason}`);
         onUpdateMessage(tempId, { status: "failed" });
+        return false;
       }
     },
     [conversation, onNewMessage, onUpdateMessage],
@@ -549,6 +564,7 @@ export function MessageThread({
 
   const handleStartReply = useCallback(
     (message: Message) => {
+      if (message.id.startsWith('temp-') || message.status === 'failed') { toast.error('Wait for a sent message before replying'); return; }
       setReplyTo({
         id: message.id,
         authorLabel: authorLabelFor(message),
@@ -569,10 +585,11 @@ export function MessageThread({
 
       const conversationId = conversation.id;
       const userId = currentUserId;
-      let snapshot: MessageReaction[] = [];
+      if (pendingReactions.current.has(messageId)) return;
+      pendingReactions.current.add(messageId);
+      const snapshot = reactionsRef.current.filter(reaction => reaction.message_id === messageId && reaction.actor_type === 'agent' && reaction.actor_id === userId);
 
       setReactions((prev) => {
-        snapshot = prev;
         const own = prev.find(
           (reaction) =>
             reaction.message_id === messageId &&
@@ -593,7 +610,7 @@ export function MessageThread({
         return [
           ...prev,
           {
-            id: `temp-${Date.now()}`,
+            id: `temp-${crypto.randomUUID()}`,
             message_id: messageId,
             conversation_id: conversationId,
             actor_type: "agent",
@@ -618,7 +635,10 @@ export function MessageThread({
       } catch (err) {
         const reason = err instanceof Error ? err.message : "network error";
         toast.error(`Reaction failed: ${reason}`);
-        setReactions(snapshot);
+        if (activeIdRef.current === conversationId) setReactions(prev => [...prev.filter(reaction => !(reaction.message_id === messageId && reaction.actor_type === 'agent' && reaction.actor_id === userId)), ...snapshot]);
+      } finally {
+        pendingReactions.current.delete(messageId);
+        if (activeIdRef.current === conversationId) void refreshReactionsRef.current?.();
       }
     },
     [conversation, currentUserId],
@@ -626,7 +646,9 @@ export function MessageThread({
 
   const handleAssignChange = useCallback(
     async (agentId: string | null) => {
-      if (!conversation) return;
+      if (!conversation || headerInFlight.current) return;
+      headerInFlight.current = true;
+      setHeaderBusy(true);
 
       try {
         await fetchJson(`/api/whatsapp/conversations/${conversation.id}`, {
@@ -639,7 +661,7 @@ export function MessageThread({
       } catch (error) {
         console.error("Failed to update assignment:", error);
         toast.error("Failed to update assignment");
-      }
+      } finally { headerInFlight.current = false; setHeaderBusy(false); }
     },
     [conversation, onAssignChange],
   );
@@ -675,7 +697,7 @@ export function MessageThread({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-surface">
       {/* Header */}
-      <div className="ui-inbox-header flex shrink-0 items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
+      <div className="ui-inbox-header wa-thread-header flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-surface px-3 py-3 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -701,7 +723,7 @@ export function MessageThread({
           <Badge
             variant="outline"
             className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
+              "ml-1 hidden shrink-0 whitespace-nowrap gap-1 border-border text-[10px] xl:inline-flex xl:ml-2",
               sessionInfo.expired ? "text-red-400" : "text-accent"
             )}
           >
@@ -710,10 +732,12 @@ export function MessageThread({
           </Badge>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-2">
+          {onShowContact && <button type="button" onClick={onShowContact} aria-label="Contact details" className="ui-icon-button flex h-9 w-9 items-center justify-center rounded-lg text-muted hover:bg-surface-light 2xl:hidden"><Info className="h-4 w-4" /></button>}
           {/* AI Auto-Reply Toggle */}
           <button
             onClick={handleNeedsHumanToggle}
+            disabled={headerBusy}
             className={cn(
               "inline-flex items-center justify-center h-7 px-2 text-xs rounded-md transition-colors border",
               !conversation.needs_human 
@@ -737,7 +761,7 @@ export function MessageThread({
 
           {/* Status dropdown */}
           <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
+            <DropdownMenuTrigger disabled={headerBusy} className={cn(
               "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-surface-light",
               currentStatus?.color ?? "text-muted"
             )}>
@@ -746,7 +770,7 @@ export function MessageThread({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="border-border bg-surface-light"
+              className="wa-inbox-menu border-border bg-surface-light"
             >
               {STATUS_OPTIONS.map((opt) => (
                 <DropdownMenuItem
@@ -763,18 +787,19 @@ export function MessageThread({
           {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
+              disabled={headerBusy}
               className={cn(
                 "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-surface-light",
                 assignedAgentId ? "text-accent" : "text-muted"
               )}
             >
               <UserPlus className="h-3 w-3" />
-              <span className="inline">{assignLabel}</span>
+              <span title={assignLabel} className="inline-block max-w-24 truncate">{assignLabel}</span>
               <ChevronDown className="h-3 w-3" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="border-border bg-surface-light"
+              className="wa-inbox-menu border-border bg-surface-light"
             >
               {profiles.length === 0 ? (
                 <DropdownMenuItem disabled className="text-sm text-muted">
@@ -817,8 +842,11 @@ export function MessageThread({
         </div>
       </div>
 
+      {loadError && <div role="alert" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-warning-light p-3 text-xs text-warning"><span>{loadError}</span><button type="button" onClick={() => setReloadToken(value => value + 1)} className="flex items-center gap-1 rounded-lg border border-border px-3 py-2"><RefreshCw className="h-3 w-3" /> Retry</button></div>}
+
       {/* Messages Area */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3 sm:px-4 sm:py-4">
+      <div className="relative min-h-0 flex-1">
+      <div ref={scrollRef} tabIndex={0} aria-label="Conversation messages" onScroll={event => { const el = event.currentTarget; const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 64; followBottomRef.current = nearBottom; setAtBottom(nearBottom); }} className="wa-message-scroll h-full min-h-0 overflow-y-auto overscroll-contain bg-background px-3 py-3 sm:px-5 sm:py-4">
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
@@ -888,11 +916,15 @@ export function MessageThread({
           </div>
         )}
       </div>
+      {!atBottom && <button type="button" onClick={() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; followBottomRef.current = true; setAtBottom(true); }} className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-border bg-surface px-3 py-2 text-xs text-accent shadow-md">Latest messages ↓</button>}
+      </div>
 
       {/* Composer */}
       <MessageComposer
+        key={conversation.id}
         conversationId={conversation.id}
         sessionExpired={sessionInfo.expired}
+        loading={loading}
         onSend={handleSend}
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}

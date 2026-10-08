@@ -9,6 +9,8 @@ import { MessageThread } from "@/components/whatsapp/inbox/message-thread";
 import { ContactSidebar } from "@/components/whatsapp/inbox/contact-sidebar";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { mergeInboxMessages, mergeMessage } from "@/lib/whatsapp/inbox-state";
 
 export function InboxTab() {
   const router = useRouter();
@@ -25,6 +27,7 @@ export function InboxTab() {
     useState<Conversation | null>(null);
   const [activeContact, setActiveContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [contactOpen, setContactOpen] = useState(false);
   const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
     null
   );
@@ -34,6 +37,8 @@ export function InboxTab() {
   // back to the deep-linked conversation if they've already clicked
   // elsewhere.
   const autoSelectedForDeepLinkRef = useRef<string | null>(null);
+  const activeConversationIdRef = useRef<string | null>(null);
+  const seenInserts = useRef(new Set<string>());
 
   useEffect(() => {
     fetch('/api/whatsapp/config', { cache: 'no-store' })
@@ -50,13 +55,14 @@ export function InboxTab() {
       if (!newMsg) return;
 
       if (event.eventType === "INSERT") {
+        if (seenInserts.current.has(newMsg.id)) return;
+        seenInserts.current.add(newMsg.id);
+        // Bound the replay cache for long-running sessions.
+        if (seenInserts.current.size > 2000) seenInserts.current.delete(seenInserts.current.values().next().value!);
         // Add to messages if it belongs to the currently active conversation
-        if (activeConversation && newMsg.conversation_id === activeConversation.id) {
+        if (newMsg.conversation_id === activeConversationIdRef.current) {
           setMessages((prev) => {
-            if (prev.some((m) => m.id === newMsg.id)) return prev;
-            // Replace optimistic bubble if one exists
-            const withoutOptimistic = prev.filter((m) => !m.id.startsWith("temp-"));
-            return [...withoutOptimistic, newMsg];
+            return newMsg.conversation_id === activeConversationIdRef.current ? mergeInboxMessages(prev, [newMsg], newMsg.conversation_id) : prev;
           });
         }
 
@@ -66,12 +72,12 @@ export function InboxTab() {
             c.id === newMsg.conversation_id
               ? {
                   ...c,
-                  last_message_text: newMsg.content_text ?? "",
-                  last_message_at: newMsg.created_at,
+                  last_message_text: Date.parse(newMsg.created_at) >= (Date.parse(c.last_message_at ?? '') || 0) ? newMsg.content_text ?? "" : c.last_message_text,
+                  last_message_at: Date.parse(newMsg.created_at) >= (Date.parse(c.last_message_at ?? '') || 0) ? newMsg.created_at : c.last_message_at,
                   unread_count:
-                    activeConversation?.id === newMsg.conversation_id
+                    activeConversationIdRef.current === newMsg.conversation_id
                       ? 0
-                      : (c.unread_count ?? 0) + 1,
+                      : newMsg.sender_type === 'customer' ? (c.unread_count ?? 0) + 1 : c.unread_count,
                 }
               : c
           )
@@ -80,11 +86,11 @@ export function InboxTab() {
 
       if (event.eventType === "UPDATE") {
         setMessages((prev) =>
-          prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m))
+          prev.map((m) => (m.id === newMsg.id ? mergeMessage(m, newMsg) : m))
         );
       }
     },
-    [activeConversation]
+    []
   );
 
   const handleConversationEvent = useCallback(
@@ -103,12 +109,12 @@ export function InboxTab() {
         setConversations((prev) =>
           prev.map((c) => (c.id === conv.id ? { ...c, ...conv } : c))
         );
-        if (activeConversation && conv.id === activeConversation.id) {
-          setActiveConversation((prev) => (prev ? { ...prev, ...conv } : prev));
+        if (conv.id === activeConversationIdRef.current) {
+          setActiveConversation((prev) => (prev?.id === conv.id ? { ...prev, ...conv } : prev));
         }
       }
     },
-    [activeConversation]
+    []
   );
 
   // Wire up the WebSocket gateway
@@ -122,15 +128,18 @@ export function InboxTab() {
   const handleConversationsLoaded = useCallback(
     (loaded: Conversation[]) => {
       setConversations(loaded);
+      const active = loaded.find(c => c.id === activeConversationIdRef.current);
+      if (active) { setActiveConversation(active); setActiveContact(active.contact ?? null); }
       if (
         deepLinkConvId &&
         autoSelectedForDeepLinkRef.current !== deepLinkConvId &&
         loaded.length > 0
       ) {
-        autoSelectedForDeepLinkRef.current = deepLinkConvId;
         if (activeConversation?.id === deepLinkConvId) return;
         const match = loaded.find((c) => c.id === deepLinkConvId);
         if (match) {
+          autoSelectedForDeepLinkRef.current = deepLinkConvId;
+          activeConversationIdRef.current = match.id;
           setActiveConversation(match);
           setActiveContact(match.contact ?? null);
           setMessages([]);
@@ -144,6 +153,8 @@ export function InboxTab() {
     (conv: Conversation) => {
       if (activeConversation?.id === conv.id) return;
       setActiveConversation(conv);
+      setContactOpen(false);
+      activeConversationIdRef.current = conv.id;
       setActiveContact(conv.contact ?? null);
       setMessages([]);
       autoSelectedForDeepLinkRef.current = conv.id;
@@ -154,28 +165,33 @@ export function InboxTab() {
 
   const handleCloseConversation = useCallback(() => {
     setActiveConversation(null);
+    setContactOpen(false);
+    activeConversationIdRef.current = null;
     setActiveContact(null);
     setMessages([]);
     autoSelectedForDeepLinkRef.current = null;
     router.replace("/whatsapp-marketing?tab=inbox", { scroll: false });
   }, [router]);
 
-  const handleMessagesLoaded = useCallback((loaded: Message[]) => {
-    setMessages(loaded);
+  const handleMessagesLoaded = useCallback((loaded: Message[], conversationId: string) => {
+    if (activeConversationIdRef.current !== conversationId) return;
+    setMessages(prev => mergeInboxMessages(prev, loaded, conversationId));
   }, []);
 
   const handleNewMessage = useCallback((msg: Message) => {
+    if (activeConversationIdRef.current !== msg.conversation_id) return;
     setMessages((prev) => {
-      if (prev.some((m) => m.id === msg.id)) return prev;
-      return [...prev, msg];
+      return mergeInboxMessages(prev, [msg], msg.conversation_id);
     });
   }, []);
 
   const handleUpdateMessage = useCallback(
     (id: string, updates: Partial<Message>) => {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, ...updates } : m))
-      );
+      setMessages(prev => {
+        const original = prev.find(m => m.id === id);
+        if (!original || original.conversation_id !== activeConversationIdRef.current) return prev;
+        return mergeInboxMessages(prev, [mergeMessage(original, updates)], original.conversation_id, id);
+      });
     },
     []
   );
@@ -185,11 +201,11 @@ export function InboxTab() {
       setConversations((prev) =>
         prev.map((c) => (c.id === conversationId ? { ...c, status } : c))
       );
-      if (activeConversation?.id === conversationId) {
-        setActiveConversation((prev) => (prev ? { ...prev, status } : prev));
+      if (activeConversationIdRef.current === conversationId) {
+        setActiveConversation((prev) => (prev?.id === conversationId ? { ...prev, status } : prev));
       }
     },
-    [activeConversation]
+    []
   );
 
   const handleAssignChange = useCallback(
@@ -201,15 +217,15 @@ export function InboxTab() {
             : c
         )
       );
-      if (activeConversation?.id === conversationId) {
+      if (activeConversationIdRef.current === conversationId) {
         setActiveConversation((prev) =>
-          prev
+          prev?.id === conversationId
             ? { ...prev, assigned_agent_id: assignedAgentId ?? undefined }
             : prev
         );
       }
     },
-    [activeConversation]
+    []
   );
 
   const handleNeedsHumanChange = useCallback(
@@ -219,19 +235,19 @@ export function InboxTab() {
           c.id === conversationId ? { ...c, needs_human: needsHuman } : c
         )
       );
-      if (activeConversation?.id === conversationId) {
+      if (activeConversationIdRef.current === conversationId) {
         setActiveConversation((prev) =>
-          prev ? { ...prev, needs_human: needsHuman } : prev
+          prev?.id === conversationId ? { ...prev, needs_human: needsHuman } : prev
         );
       }
     },
-    [activeConversation]
+    []
   );
 
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="wa-inbox relative flex h-full min-h-0 flex-col overflow-hidden">
       {/* WhatsApp connection banner */}
       {whatsappConnected === false && (
         <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
@@ -277,14 +293,21 @@ export function InboxTab() {
             onNeedsHumanChange={handleNeedsHumanChange}
             onAssignChange={handleAssignChange}
             onBack={handleCloseConversation}
+            onShowContact={() => setContactOpen(true)}
           />
         </div>
 
         {/* Right panel: Contact sidebar — desktop only */}
-        <div className="hidden h-full min-h-0 flex-col shrink-0 lg:flex">
+        <div className="hidden h-full min-h-0 flex-col shrink-0 2xl:flex">
           <ContactSidebar contact={activeContact} />
         </div>
       </div>
+      <Sheet open={contactOpen && !!activeContact} onOpenChange={setContactOpen}>
+        <SheetContent side="right" className="wa-contact-drawer wa-inbox-menu min-h-0 gap-0 border-border bg-surface text-foreground data-[side=right]:w-full sm:max-w-80">
+          <SheetHeader className="shrink-0 border-b border-border pr-14"><SheetTitle>Contact details</SheetTitle><SheetDescription className="sr-only">Contact information, tags, deals and notes for the selected conversation.</SheetDescription></SheetHeader>
+          <div className="wa-contact-body flex min-h-0 flex-1">{activeContact && <ContactSidebar key={activeContact.id} contact={activeContact} />}</div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

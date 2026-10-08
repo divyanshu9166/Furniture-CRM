@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown } from "lucide-react";
+import { Search, ChevronDown, RefreshCw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Input } from "@/components/ui/input";
 import {
@@ -42,6 +42,8 @@ export function ConversationList({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConversationStatus | "all">("all");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -63,6 +65,7 @@ export function ConversationList({
   useEffect(() => {
     let cancelled = false;
     let initial = true;
+    let inFlight = false;
 
     const finishInitial = () => {
       if (!initial) return;
@@ -71,21 +74,22 @@ export function ConversationList({
     };
 
     const fetchConversations = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       if (initial) setLoading(true);
-
-      const res = await fetch('/api/whatsapp/conversations', { cache: 'no-store' });
-      if (cancelled) return;
-
-      if (!res.ok) {
-        console.error('Failed to fetch conversations:', res.status, res.statusText);
-        finishInitial();
-        return;
+      try {
+        const res = await fetch('/api/whatsapp/conversations', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Unable to load conversations');
+        const body = await res.json();
+        if (cancelled) return;
+        onConversationsLoadedRef.current(body.data ?? []);
+        setLoadError('');
+      } catch {
+        if (!cancelled) setLoadError('Unable to refresh conversations. Please retry.');
+      } finally {
+        inFlight = false;
+        if (!cancelled) finishInitial();
       }
-
-      const body = await res.json();
-      if (cancelled) return;
-      onConversationsLoadedRef.current(body.data ?? []);
-      finishInitial();
     };
 
     fetchConversations();
@@ -99,7 +103,7 @@ export function ConversationList({
       cancelled = true;
       window.clearInterval(refreshInterval);
     };
-  }, []);
+  }, [reloadToken]);
 
   const filtered = useMemo(() => {
     let result = conversations;
@@ -118,7 +122,7 @@ export function ConversationList({
       });
     }
 
-    return result;
+    return [...result].sort((a, b) => (Date.parse(b.last_message_at || '') || 0) - (Date.parse(a.last_message_at || '') || 0));
   }, [conversations, filter, search]);
 
   const handleSearchChange = useCallback(
@@ -161,7 +165,7 @@ export function ConversationList({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
-            className="border-border bg-surface-light"
+            className="wa-inbox-menu border-border bg-surface-light"
           >
             {FILTER_OPTIONS.map((opt) => (
               <DropdownMenuItem
@@ -181,6 +185,8 @@ export function ConversationList({
         </DropdownMenu>
       </div>
 
+      {loadError && <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-border bg-warning-light px-3 py-2 text-xs text-warning"><span>{loadError}</span><button type="button" onClick={() => setReloadToken(value => value + 1)} className="flex items-center gap-1 rounded-lg border border-border px-2 py-2"><RefreshCw className="h-3 w-3" /> Retry</button></div>}
+
       {/* Conversation Items */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {loading ? (
@@ -192,7 +198,7 @@ export function ConversationList({
             <p className="text-sm text-muted">No conversations found</p>
           </div>
         ) : (
-          <div className="flex flex-col pb-[calc(60px+env(safe-area-inset-bottom))] md:pb-0">
+          <div className="flex flex-col pb-[env(safe-area-inset-bottom)] md:pb-0">
             {filtered.map((conv) => (
               <ConversationItem
                 key={conv.id}
@@ -227,7 +233,7 @@ function ConversationItem({
     onSelect(conversation);
   }, [onSelect, conversation]);
 
-  const timeAgo = conversation.last_message_at
+  const timeAgo = conversation.last_message_at && Number.isFinite(Date.parse(conversation.last_message_at))
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
       addSuffix: false,
     })
@@ -268,7 +274,7 @@ function ConversationItem({
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             {conversation.unread_count > 0 && (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold text-foreground">
+              <span className="wa-unread-badge flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold">
                 {conversation.unread_count}
               </span>
             )}

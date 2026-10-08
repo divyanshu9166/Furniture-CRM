@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import type { Message, MessageReaction } from "@/types";
 import {
@@ -13,7 +13,7 @@ import {
   LayoutTemplate,
   ImageOff,
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, isValid } from "date-fns";
 import { MessageReactions } from "./message-reactions";
 import { ReplyQuote } from "./reply-quote";
 
@@ -56,38 +56,36 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const loadImage = useCallback(async () => {
-    if (!url) return;
-
-    // Proxy URLs need auth fetch to create blob URL
-    if (url.startsWith("/api/whatsapp/media/")) {
-      try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load media");
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        setSrc(blobUrl);
-      } catch {
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      setSrc(url);
-      setLoading(false);
-    }
-  }, [url]);
-
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadImage();
-    return () => {
-      if (src?.startsWith("blob:")) {
-        URL.revokeObjectURL(src);
+    const controller = new AbortController();
+    let blobUrl: string | null = null;
+    const load = async () => {
+      setLoading(true);
+      setError(false);
+      setSrc(null);
+      try {
+        let nextSrc = url;
+        if (url.startsWith('/api/whatsapp/media/')) {
+          const res = await fetch(url, { signal: controller.signal });
+          if (!res.ok) throw new Error('Failed to load media');
+          const blob = await res.blob();
+          if (controller.signal.aborted) return;
+          blobUrl = URL.createObjectURL(blob);
+          nextSrc = blobUrl;
+        }
+        if (!controller.signal.aborted) setSrc(nextSrc);
+      } catch {
+        if (!controller.signal.aborted) setError(true);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadImage]);
+    void load();
+    return () => {
+      controller.abort();
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [url]);
 
   if (error) {
     return (
@@ -192,7 +190,7 @@ function MessageContent({ message }: { message: Message }) {
     case "template":
       return (
         <div>
-          <span className="mb-1 inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-[10px] font-medium text-accent">
+          <span className="wa-template-label mb-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium">
             <LayoutTemplate className="h-3 w-3" />
             Template
           </span>
@@ -229,21 +227,22 @@ export function MessageBubble({
   onToggleReaction,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
-  const time = format(new Date(message.created_at), "HH:mm");
+  const date = new Date(message.created_at);
+  const time = isValid(date) ? format(date, "HH:mm") : "";
 
   return (
     <div
       className={cn(
-        "flex flex-col",
+        "wa-message flex min-w-0 flex-col",
         isAgent ? "items-end" : "items-start"
       )}
     >
       <div
         className={cn(
-          "relative max-w-[78vw] rounded-2xl px-3 py-2 sm:max-w-[70%]",
+          "wa-message-bubble relative min-w-0 rounded-2xl px-3.5 py-2.5",
           isAgent
-            ? "rounded-br-md bg-accent text-foreground"
-            : "rounded-bl-md bg-surface-light text-foreground"
+            ? "wa-message-out rounded-br-md"
+            : "wa-message-in rounded-bl-md"
         )}
       >
         {reply && (
@@ -252,12 +251,13 @@ export function MessageBubble({
         <MessageContent message={message} />
         <div
           className={cn(
-            "mt-1 flex items-center gap-1",
+            "wa-message-meta mt-1 flex items-center gap-1",
             isAgent ? "justify-end" : "justify-start"
           )}
         >
-          <span className="text-[10px] text-muted">{time}</span>
+          <span className="text-[11px]">{time}</span>
           {isAgent && <StatusIcon status={message.status} />}
+          {isAgent && message.status === 'failed' && <span className="text-[11px]">Not sent</span>}
         </div>
       </div>
       {reactions && reactions.length > 0 && onToggleReaction && (

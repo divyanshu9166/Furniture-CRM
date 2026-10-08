@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import { templatePickerProblem } from '@/lib/whatsapp/inbox-state';
 import type { MessageTemplate } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,23 +25,22 @@ import {
 interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (template: MessageTemplate, params: string[]) => void;
+  onSelect: (template: MessageTemplate, params: string[]) => Promise<boolean>;
 }
 
 // Meta numbers template placeholders from 1 ({{1}}, {{2}}, …) and the
 // indices passed to the Graph API must be contiguous starting at 1.
-// We sort + dedupe here so a body using only {{2}} still drives a single
-// input slot, and so render-order matches send-order.
+// Validation rejects gaps/named variables; sorting keeps input/send order aligned.
 function extractVariables(body: string): number[] {
   const ids = new Set<number>();
-  for (const m of body.matchAll(/\{\{(\d+)\}\}/g)) {
+  for (const m of body.matchAll(/\{\{\s*(\d+)\s*\}\}/g)) {
     ids.add(Number(m[1]));
   }
   return Array.from(ids).sort((a, b) => a - b);
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
-  return body.replace(/\{\{(\d+)\}\}/g, (_, raw) => {
+  return body.replace(/\{\{\s*(\d+)\s*\}\}/g, (_, raw) => {
     const idx = Number(raw) - 1;
     const value = params[idx];
     return value && value.trim().length > 0 ? value : `{{${raw}}}`;
@@ -56,6 +56,12 @@ export function TemplatePicker({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
   const [params, setParams] = useState<string[]>([]);
+  const [loadError, setLoadError] = useState('');
+  const [reloadToken, setReloadToken] = useState(0);
+  const [sending, setSending] = useState(false);
+  const sendInFlight = useRef(false);
+  const openGeneration = useRef(0);
+  useEffect(() => { openGeneration.current += 1; }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -63,6 +69,7 @@ export function TemplatePicker({
     let cancelled = false;
     (async () => {
       setLoading(true);
+      try {
       // Only Approved templates are sendable through Meta — anything else
       // would 400 on the send route. Hide them rather than letting the
       // user pick a template that will be rejected.
@@ -72,19 +79,21 @@ export function TemplatePicker({
 
       if (cancelled) return;
       if (!res.ok) {
-        console.error('Failed to fetch templates:', res.status);
-        setTemplates([]);
+        throw new Error('Unable to load approved templates');
       } else {
         const body = await res.json();
+        if (cancelled) return;
         setTemplates((body.templates as MessageTemplate[]) ?? []);
+        setLoadError('');
       }
-      setLoading(false);
+      } catch { if (!cancelled) setLoadError('Unable to load templates. Please retry.'); }
+      finally { if (!cancelled) setLoading(false); }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, reloadToken]);
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -94,11 +103,25 @@ export function TemplatePicker({
     onOpenChange(next);
   }
 
+  async function sendTemplate(template: MessageTemplate, values: string[]) {
+    if (sendInFlight.current) return;
+    sendInFlight.current = true;
+    const generation = openGeneration.current;
+    setSending(true);
+    try {
+      const accepted = await onSelect(template, values);
+      if (generation !== openGeneration.current) return;
+      if (accepted) handleOpenChange(false);
+      else setLoadError('Template was not sent. Review the error before retrying.');
+    } catch { if (generation === openGeneration.current) setLoadError('Unable to send template. Please retry.'); }
+    finally { sendInFlight.current = false; setSending(false); }
+  }
+
   function pickTemplate(template: MessageTemplate) {
+    if (sending || templatePickerProblem(template)) return;
     const vars = extractVariables(template.body_text);
     if (vars.length === 0) {
-      onSelect(template, []);
-      handleOpenChange(false);
+      void sendTemplate(template, []);
       return;
     }
     setSelected(template);
@@ -107,8 +130,7 @@ export function TemplatePicker({
 
   function confirm() {
     if (!selected) return;
-    onSelect(selected, params);
-    handleOpenChange(false);
+    void sendTemplate(selected, params);
   }
 
   const variables = selected ? extractVariables(selected.body_text) : [];
@@ -118,7 +140,7 @@ export function TemplatePicker({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="border-border bg-surface sm:max-w-lg">
+      <DialogContent className="wa-template-picker border-border bg-surface sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-foreground">
             <LayoutTemplate className="h-4 w-4 text-accent" />
@@ -130,6 +152,7 @@ export function TemplatePicker({
               : "Pick an approved WhatsApp template to send to this contact."}
           </DialogDescription>
         </DialogHeader>
+        {loadError && <div role="alert" className="rounded-lg bg-warning-light p-3 text-xs text-warning">{loadError} <button type="button" disabled={sending} onClick={() => setReloadToken(value => value + 1)} className="ml-2 rounded-lg border border-border px-2 py-2">Retry loading</button></div>}
 
         {!selected ? (
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
@@ -151,6 +174,7 @@ export function TemplatePicker({
                   key={t.id}
                   type="button"
                   onClick={() => pickTemplate(t)}
+                  disabled={sending || !!templatePickerProblem(t)}
                   className="w-full rounded-md border border-border bg-surface p-3 text-left transition-colors hover:border-accent hover:bg-surface"
                 >
                   <div className="flex items-start gap-2">
@@ -159,7 +183,7 @@ export function TemplatePicker({
                         <p className="truncate text-sm font-medium text-foreground">
                           {t.name}
                         </p>
-                        <Badge className="border border-accent bg-accent text-[10px] text-accent">
+                        <Badge className="border border-accent/20 bg-accent-light text-[10px] text-accent">
                           {t.category}
                         </Badge>
                         {t.language && (
@@ -171,6 +195,7 @@ export function TemplatePicker({
                       <p className="mt-1 line-clamp-2 text-xs text-muted">
                         {t.body_text}
                       </p>
+                      {templatePickerProblem(t) && <p className="mt-1 text-xs text-warning">{templatePickerProblem(t)}</p>}
                     </div>
                     <ChevronRight className="h-4 w-4 flex-shrink-0 text-muted" />
                   </div>
@@ -224,9 +249,9 @@ export function TemplatePicker({
                 Back
               </Button>
               <Button
-                disabled={!canConfirm}
+                disabled={!canConfirm || sending}
                 onClick={confirm}
-                className="bg-accent text-foreground hover:bg-accent disabled:opacity-50"
+                className="wa-send-button bg-accent hover:bg-accent disabled:opacity-50"
               >
                 Send template
               </Button>
