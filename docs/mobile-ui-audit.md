@@ -91,3 +91,11 @@ and does not connect to auth, APIs or the database. Stop it with Ctrl+C.
 
 This UI pass itself needs no database migration. Any migrations from earlier
 feature work must be reviewed and deployed independently.
+
+## Follow-up: inventory tab track and empty footer
+
+The [email/mobile follow-up audit](email-marketing-mobile-audit.md) fixes the
+nested inventory background track shrinking during scrolling, and removes the
+empty fixed 36px footer that overlapped the hamburger drawer. Only real safe-area
+clearance remains. Drawer scrolling, Escape dismissal and resize cleanup are
+verified in a local preview using the actual components, with sample data.

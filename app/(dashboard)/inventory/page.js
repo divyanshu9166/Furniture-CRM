@@ -680,7 +680,7 @@ export default function InventoryPage() {
 
       {/* Tabs */}
       <div className="ui-tabs overflow-x-auto overscroll-x-contain hide-scrollbar">
-        <div className="flex bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit">
+        <div className="flex shrink-0 bg-surface rounded-xl border border-border p-0.5 w-max min-w-full md:w-fit">
           <button onClick={() => setTab('products')} className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs md:text-sm font-medium transition-all flex-shrink-0 whitespace-nowrap ${tab === 'products' ? 'bg-accent text-white' : 'text-muted hover:text-foreground'}`}>
             <Package className="w-3.5 h-3.5" /> Products
           </button>
@@ -713,7 +713,7 @@ export default function InventoryPage() {
         <>
           {/* Product Type Sub-Tabs */}
           <div className="ui-tabs w-full min-w-0 overflow-x-auto overscroll-x-contain hide-scrollbar pb-1">
-            <div className="flex w-max min-w-full md:w-fit md:min-w-0 bg-surface border border-border rounded-xl p-1 gap-0.5">
+            <div className="flex shrink-0 w-max min-w-full md:w-fit md:min-w-0 bg-surface border border-border rounded-xl p-1 gap-0.5">
               <button
                 onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'finished'

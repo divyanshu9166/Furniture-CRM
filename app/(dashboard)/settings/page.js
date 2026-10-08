@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import SenderSettings from '@/components/email/SenderSettings';
 import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText, ShieldCheck, Factory } from 'lucide-react';
 import Image from 'next/image';
 import { getStoreSettings, updateStoreSettings, getManufacturingPermissions, updateManufacturingPermissions } from '@/app/actions/settings';
@@ -181,7 +182,11 @@ export default function SettingsPage() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
 
   // SMTP email state
-  const [smtpForm, setSmtpForm] = useState({ smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', smtpFromName: '', smtpSecure: false });
+  const [smtpForm, setSmtpForm] = useState({ smtpHost: '', smtpPort: 587, smtpUser: '', smtpPass: '', smtpFromName: '', smtpSecure: false, smtpFromEmail: '', smtpAliases: [] });
+  const [smtpTestFrom, setSmtpTestFrom] = useState('');
+  const smtpHasPassword = Boolean(smtpForm.smtpPass || (storeSettings?.smtpHasPassword
+    && storeSettings.smtpHost?.trim().toLowerCase() === smtpForm.smtpHost.trim().toLowerCase()
+    && storeSettings.smtpUser?.trim().toLowerCase() === smtpForm.smtpUser.trim().toLowerCase()));
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState(null);
   const [smtpSending, setSmtpSending] = useState(false);
@@ -460,9 +465,11 @@ export default function SettingsPage() {
           smtpHost: settingsRes.data.smtpHost || '',
           smtpPort: settingsRes.data.smtpPort || 587,
           smtpUser: settingsRes.data.smtpUser || '',
-          smtpPass: settingsRes.data.smtpPass || '',
+          smtpPass: '',
           smtpFromName: settingsRes.data.smtpFromName || settingsRes.data.storeName || '',
           smtpSecure: settingsRes.data.smtpSecure || false,
+          smtpFromEmail: settingsRes.data.smtpFromEmail || '',
+          smtpAliases: Array.isArray(settingsRes.data.smtpAliases) ? settingsRes.data.smtpAliases : [],
         });
       }
       if (staffRes.success) setTeamMembers(staffRes.data.map(mapTeamMember));
@@ -1432,6 +1439,7 @@ export default function SettingsPage() {
                 <p className="text-sm text-muted mb-5">Configure your business email to send campaigns, follow-ups, and transactional emails to customers.</p>
 
                 <div className="space-y-4 max-w-2xl">
+                  <fieldset className="space-y-4 min-w-0" disabled={smtpSaving || smtpSending || smtpTesting}>
                   {/* SMTP Presets */}
                   <div>
                     <label className="block text-xs font-medium text-muted mb-2">Quick Setup — Select Your Email Provider</label>
@@ -1442,6 +1450,8 @@ export default function SettingsPage() {
                         { name: 'Yahoo', host: 'smtp.mail.yahoo.com', port: 465, secure: true },
                         { name: 'Zoho', host: 'smtp.zoho.in', port: 587, secure: false },
                         { name: 'GoDaddy', host: 'smtpout.secureserver.net', port: 465, secure: true },
+                        { name: 'Hostinger', host: 'smtp.hostinger.com', port: 465, secure: true },
+                        { name: 'Titan', host: 'smtp.titan.email', port: 465, secure: true },
                       ].map(preset => (
                         <button key={preset.name} type="button"
                           onClick={() => setSmtpForm(f => ({ ...f, smtpHost: preset.host, smtpPort: preset.port, smtpSecure: preset.secure }))}
@@ -1466,15 +1476,17 @@ export default function SettingsPage() {
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted mb-1.5">Email Address *</label>
+                      <label className="block text-xs font-medium text-muted mb-1.5">SMTP Login / Main Mailbox *</label>
                       <input type="email" placeholder="your-business@gmail.com" value={smtpForm.smtpUser}
-                        onChange={e => setSmtpForm(f => ({ ...f, smtpUser: e.target.value }))}
+                        onChange={e => { const value = e.target.value; setSmtpForm(f => ({ ...f, smtpUser: value,
+                          smtpFromEmail: !f.smtpFromEmail || f.smtpFromEmail.trim().toLowerCase() === f.smtpUser.trim().toLowerCase() ? value : f.smtpFromEmail,
+                        })); }}
                         className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-muted mb-1.5">App Password *</label>
+                      <label className="block text-xs font-medium text-muted mb-1.5">SMTP / App Password *</label>
                       <div className="relative">
-                        <input type={showSmtpPass ? 'text' : 'password'} placeholder="App-specific password" value={smtpForm.smtpPass}
+                        <input type={showSmtpPass ? 'text' : 'password'} autoComplete="new-password" placeholder={smtpHasPassword && !smtpForm.smtpPass ? 'Saved password — leave blank to keep' : 'Mailbox or app-specific password'} value={smtpForm.smtpPass}
                           onChange={e => setSmtpForm(f => ({ ...f, smtpPass: e.target.value }))}
                           className="w-full px-4 py-2.5 pr-10 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
                         <button type="button" onClick={() => setShowSmtpPass(!showSmtpPass)}
@@ -1499,6 +1511,9 @@ export default function SettingsPage() {
                     </div>
                   </div>
 
+                  <SenderSettings config={smtpForm} onChange={setSmtpForm} testFrom={smtpTestFrom} onTestFromChange={setSmtpTestFrom} disabled={smtpSaving || smtpSending || smtpTesting} />
+                  </fieldset>
+
                   {/* Gmail Setup Info */}
                   {smtpForm.smtpHost === 'smtp.gmail.com' && (
                     <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/20 text-xs text-amber-700">
@@ -1508,23 +1523,23 @@ export default function SettingsPage() {
                   )}
 
                   {/* Test & Save Actions */}
-                  <div className="flex flex-col sm:flex-row items-start sm:items-end gap-3 pt-3 border-t border-border">
+                  <div className="ui-actions flex flex-col sm:flex-row items-start sm:items-end gap-3 pt-3 border-t border-border">
                     {/* Test Connection */}
                     <button
                       onClick={async () => {
                         setSmtpTesting(true); setSmtpTestResult(null);
-                        const res = await testSmtp(smtpForm);
-                        setSmtpTestResult(res);
-                        setSmtpTesting(false);
+                        try { setSmtpTestResult(await testSmtp(smtpForm)); }
+                        catch { setSmtpTestResult({ success: false, error: 'Unable to test SMTP. Please retry.' }); }
+                        finally { setSmtpTesting(false); }
                       }}
-                      disabled={smtpTesting || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpForm.smtpPass}
+                      disabled={smtpTesting || smtpSaving || smtpSending || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
                       className="px-4 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50 flex items-center gap-2">
                       {smtpTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Link2 className="w-4 h-4" />}
                       Test Connection
                     </button>
 
                     {/* Send Test Email */}
-                    <div className="flex items-center gap-2 flex-1">
+                    <div className="ui-actions flex items-center gap-2 flex-1 min-w-0">
                       <input type="email" placeholder="Send test to..." value={smtpTestEmail}
                         onChange={e => setSmtpTestEmail(e.target.value)}
                         className="flex-1 min-w-[200px] px-4 py-2.5 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50" />
@@ -1532,11 +1547,15 @@ export default function SettingsPage() {
                         onClick={async () => {
                           if (!smtpTestEmail) return;
                           setSmtpSending(true); setSmtpSendResult(null);
-                          const res = await sendSmtpTestEmail(smtpForm, smtpTestEmail);
-                          setSmtpSendResult(res);
-                          setSmtpSending(false);
+                          try {
+                          const available = [smtpForm.smtpUser, ...smtpForm.smtpAliases.map(alias => alias.email)];
+                          const from = available.includes(smtpTestFrom) ? smtpTestFrom : smtpForm.smtpFromEmail || smtpForm.smtpUser;
+                          const res = await sendSmtpTestEmail(smtpForm, smtpTestEmail, from);
+                          setSmtpSendResult({ ...res, toEmail: smtpTestEmail });
+                          } catch { setSmtpSendResult({ success: false, error: 'Unable to send the test email. Please retry.' }); }
+                          finally { setSmtpSending(false); }
                         }}
-                        disabled={smtpSending || !smtpTestEmail || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpForm.smtpPass}
+                        disabled={smtpSending || smtpSaving || smtpTesting || !smtpTestEmail || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
                         className="px-4 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
                         {smtpSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                         Send Test
@@ -1547,14 +1566,19 @@ export default function SettingsPage() {
                     <button
                       onClick={async () => {
                         setSmtpSaving(true);
+                        try {
                         const res = await updateStoreSettings({ ...smtpForm, smtpConfigured: true });
                         if (res.success) {
-                          setStoreSettings(prev => ({ ...prev, ...smtpForm, smtpConfigured: true }));
+                          setStoreSettings(prev => ({ ...prev, ...res.data, smtpConfigured: true }));
+                          setSmtpForm({ smtpHost: res.data.smtpHost, smtpPort: res.data.smtpPort, smtpUser: res.data.smtpUser,
+                            smtpPass: '', smtpFromName: res.data.smtpFromName || '', smtpSecure: res.data.smtpSecure,
+                            smtpAliases: res.data.smtpAliases, smtpFromEmail: res.data.smtpFromEmail || res.data.smtpUser });
                           alert('SMTP settings saved!');
                         } else alert(res.error);
-                        setSmtpSaving(false);
+                        } catch { alert('Unable to save SMTP settings. Please retry.'); }
+                        finally { setSmtpSaving(false); }
                       }}
-                      disabled={smtpSaving || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpForm.smtpPass}
+                      disabled={smtpSaving || smtpSending || smtpTesting || !smtpForm.smtpHost || !smtpForm.smtpUser || !smtpHasPassword}
                       className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 flex items-center gap-2 whitespace-nowrap">
                       {smtpSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                       Save Settings
@@ -1571,7 +1595,7 @@ export default function SettingsPage() {
                   {smtpSendResult && (
                     <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${smtpSendResult.success ? 'bg-success-light text-success' : 'bg-red-500/10 text-red-500'}`}>
                       {smtpSendResult.success ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      {smtpSendResult.success ? `Test email sent to ${smtpTestEmail}!` : `Failed: ${smtpSendResult.error}`}
+                      {smtpSendResult.success ? `SMTP accepted a test email from ${smtpSendResult.fromEmail} to ${smtpSendResult.toEmail}. Check inbox/spam and the reply address.` : `Failed: ${smtpSendResult.error}`}
                     </div>
                   )}
 
@@ -1579,7 +1603,7 @@ export default function SettingsPage() {
                   {storeSettings?.smtpConfigured && (
                     <div className="flex items-center gap-2 p-3 rounded-xl bg-success-light/50 text-success text-sm">
                       <CheckCircle2 className="w-4 h-4" />
-                      Email is configured and ready — sending from <strong>{storeSettings.smtpUser}</strong>
+                      Default sender: <strong>{storeSettings.smtpFromEmail || storeSettings.smtpUser}</strong> · SMTP login: {storeSettings.smtpUser}
                     </div>
                   )}
                 </div>

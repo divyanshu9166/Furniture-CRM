@@ -918,11 +918,13 @@ model StoreSettings {
   // SMTP Email Configuration
   smtpHost       String? // e.g. smtp.gmail.com, smtp.office365.com
   smtpPort       Int?     @default(587)
-  smtpUser       String? // email address used to send
+  smtpUser       String? // authenticated mailbox; aliases do not change SMTP login
   smtpPass       String? // app password / SMTP password
   smtpFromName   String? // "Furniture Store" — display name in From header
   smtpSecure     Boolean  @default(false) // true for port 465 (SSL), false for 587 (STARTTLS)
-  smtpConfigured Boolean  @default(false) // true once test email succeeds
+  smtpConfigured Boolean  @default(false) // SMTP settings saved; provider acceptance still needs testing
+  smtpFromEmail  String? // default sender; null preserves the authenticated mailbox
+  smtpAliases    Json     @default("[]") // admin-configured [{email, name}] sender identities
   updatedAt      DateTime @updatedAt
 }
 
@@ -1067,6 +1069,8 @@ model EmailCampaign {
   name            String
   subject         String
   body            String              @db.Text
+  fromEmail       String? // selected sender, pinned for scheduled/automated delivery
+  fromName        String? // display-name snapshot; legacy campaigns remain null
   templateId      Int?
   template        EmailTemplate?      @relation(fields: [templateId], references: [id])
   status          EmailCampaignStatus @default(DRAFT)

@@ -4,7 +4,7 @@
 @media (max-width: 767px) {
   :root {
     --app-header-height: calc(56px + env(safe-area-inset-top, 0px));
-    --app-footer-height: calc(36px + env(safe-area-inset-bottom, 0px));
+    --app-footer-height: env(safe-area-inset-bottom, 0px);
     --content-pad-inline: 14px;
     --content-pad-block: 20px;
   }

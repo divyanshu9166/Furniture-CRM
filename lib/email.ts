@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer'
 import { prisma } from '@/lib/db'
 import { addTrackingToEmail } from '@/lib/email-tracking'
+import { senderHeaders, smtpConfigSchema } from '@/lib/email-senders'
 
 export interface SmtpConfig {
   smtpHost: string
@@ -9,6 +10,8 @@ export interface SmtpConfig {
   smtpPass: string
   smtpFromName: string
   smtpSecure: boolean
+  smtpFromEmail?: string | null
+  smtpAliases?: unknown
 }
 
 // ─── GET SMTP CONFIG FROM DB ────────────────────────
@@ -24,16 +27,20 @@ export async function getSmtpConfig(): Promise<SmtpConfig | null> {
     smtpPass: settings.smtpPass,
     smtpFromName: settings.smtpFromName || settings.storeName || 'Furniture Store',
     smtpSecure: settings.smtpSecure,
+    smtpFromEmail: settings.smtpFromEmail,
+    smtpAliases: settings.smtpAliases,
   }
 }
 
 // ─── CREATE TRANSPORTER ─────────────────────────────
 
 export function createTransporter(config: SmtpConfig) {
+  config = smtpConfigSchema.parse(config)
   return nodemailer.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpSecure, // true for 465, false for 587 (STARTTLS)
+    requireTLS: !config.smtpSecure,
     auth: {
       user: config.smtpUser,
       pass: config.smtpPass,
@@ -52,16 +59,17 @@ export async function sendEmail(options: {
   subject: string
   html: string
   recipientId?: number // for tracking pixel injection
+  fromEmail?: string
+  fromName?: string
 }): Promise<{ success: boolean; error?: string; messageId?: string }> {
-  const config = await getSmtpConfig()
-  if (!config) return { success: false, error: 'SMTP not configured. Go to Settings → Email Setup.' }
-
-  const transporter = createTransporter(config)
-  const html = options.recipientId ? addTrackingToEmail(options.html, options.recipientId) : options.html
-
   try {
+    const config = await getSmtpConfig()
+    if (!config) return { success: false, error: 'SMTP not configured. Go to Settings → Email Setup.' }
+    const headers = senderHeaders(config, options.fromEmail, options.fromName)
+    const transporter = createTransporter(config)
+    const html = options.recipientId ? addTrackingToEmail(options.html, options.recipientId) : options.html
     const result = await transporter.sendMail({
-      from: `"${config.smtpFromName}" <${config.smtpUser}>`,
+      ...headers,
       to: options.to,
       subject: options.subject,
       html,
@@ -80,13 +88,17 @@ export async function sendBulkEmails(emails: {
   subject: string
   html: string
   recipientId: number
-}[]): Promise<{ sent: number; failed: number; errors: string[]; results: Array<{ recipientId: number; success: boolean; error?: string }> }> {
-  const config = await getSmtpConfig()
-  if (!config) return {
-    sent: 0,
-    failed: emails.length,
-    errors: ['SMTP not configured'],
-    results: emails.map(email => ({ recipientId: email.recipientId, success: false, error: 'SMTP not configured' })),
+}[], sender: { fromEmail?: string | null; fromName?: string | null; config?: SmtpConfig } = {}): Promise<{ sent: number; failed: number; errors: string[]; results: Array<{ recipientId: number; success: boolean; error?: string }> }> {
+  let config: SmtpConfig
+  let headers: ReturnType<typeof senderHeaders>
+  try {
+    const loaded = sender.config || await getSmtpConfig()
+    if (!loaded) throw new Error('SMTP not configured')
+    config = smtpConfigSchema.parse(loaded)
+    headers = senderHeaders(config, sender.fromEmail, sender.fromName)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid SMTP sender settings.'
+    return { sent: 0, failed: emails.length, errors: [message], results: emails.map(email => ({ recipientId: email.recipientId, success: false, error: message })) }
   }
 
   const transporter = createTransporter(config)
@@ -104,7 +116,7 @@ export async function sendBulkEmails(emails: {
     const results = await Promise.allSettled(
       batch.map(async (email) => {
         await transporter.sendMail({
-          from: `"${config.smtpFromName}" <${config.smtpUser}>`,
+          ...headers,
           to: email.to,
           subject: email.subject,
           html: addTrackingToEmail(email.html, email.recipientId),
@@ -149,11 +161,12 @@ export async function testSmtpConnection(config: SmtpConfig): Promise<{ success:
 
 // ─── SEND TEST EMAIL ────────────────────────────────
 
-export async function sendTestEmail(config: SmtpConfig, to: string): Promise<{ success: boolean; error?: string }> {
+export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: string): Promise<{ success: boolean; error?: string }> {
   try {
+    const headers = senderHeaders(config, fromEmail)
     const transporter = createTransporter(config)
     await transporter.sendMail({
-      from: `"${config.smtpFromName}" <${config.smtpUser}>`,
+      ...headers,
       to,
       subject: 'Test Email from Furzentic',
       html: `
@@ -161,8 +174,8 @@ export async function sendTestEmail(config: SmtpConfig, to: string): Promise<{ s
           <h2 style="color: #1a1a1a;">Email Setup Successful!</h2>
           <p style="color: #555;">Your Furzentic email is configured and working correctly.</p>
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="color: #166534; margin: 0; font-weight: 600;">SMTP Host: ${config.smtpHost}</p>
-            <p style="color: #166534; margin: 4px 0 0;">From: ${config.smtpUser}</p>
+            <p style="color: #166534; margin: 0; font-weight: 600;">Your selected sender was accepted by the SMTP server.</p>
+            <p style="color: #166534; margin: 4px 0 0;">Check this message's From and Reply-To addresses before using it for campaigns.</p>
           </div>
           <p style="color: #888; font-size: 13px;">You can now send email campaigns to your customers.</p>
         </div>
@@ -176,10 +189,12 @@ export async function sendTestEmail(config: SmtpConfig, to: string): Promise<{ s
 
 // ─── REPLACE TEMPLATE VARIABLES ─────────────────────
 
-export function replaceVariables(template: string, variables: Record<string, string>): string {
-  let result = template
-  for (const [key, value] of Object.entries(variables)) {
-    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value)
-  }
-  return result
+export function replaceVariables(template: string, variables: Record<string, string>, context: 'html' | 'text' = 'html'): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (placeholder, key: string) => {
+    if (!Object.prototype.hasOwnProperty.call(variables, key)) return placeholder
+    const value = variables[key]
+    // Callback substitution keeps $&, $1 etc literal; HTML values cannot inject
+    // markup/attributes. Subjects remain plain text rather than HTML entities.
+    return context === 'text' ? value : value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+  })
 }

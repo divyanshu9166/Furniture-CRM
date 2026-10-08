@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireRole } from '@/lib/auth-helpers'
+import { prepareSmtpConfig, senderAliasesSchema, senderEmailSchema } from '@/lib/email-senders'
 
 const updateSettingsSchema = z.object({
   storeName: z.string().min(1).optional(),
@@ -37,6 +38,8 @@ const updateSettingsSchema = z.object({
   smtpFromName: z.string().optional(),
   smtpSecure: z.boolean().optional(),
   smtpConfigured: z.boolean().optional(),
+  smtpFromEmail: z.union([senderEmailSchema, z.literal('')]).optional(),
+  smtpAliases: senderAliasesSchema.optional(),
 })
 
 const supportsStoreSettingsPaymentQr = Boolean(
@@ -124,10 +127,13 @@ export async function getStoreSettings() {
       smtpHost: settings.smtpHost,
       smtpPort: settings.smtpPort,
       smtpUser: settings.smtpUser,
-      smtpPass: settings.smtpPass,
+      smtpPass: '', // Never return the stored SMTP credential to clients.
+      smtpHasPassword: Boolean(settings.smtpPass),
       smtpFromName: settings.smtpFromName,
       smtpSecure: settings.smtpSecure,
       smtpConfigured: settings.smtpConfigured,
+      smtpFromEmail: settings.smtpFromEmail || settings.smtpUser || '',
+      smtpAliases: settings.smtpAliases,
     },
   }
 }
@@ -136,6 +142,21 @@ export async function updateStoreSettings(data: unknown) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = updateSettingsSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+
+  if (Object.keys(parsed.data).some(key => key.startsWith('smtp'))) {
+    try {
+      const saved = await prisma.storeSettings.findUnique({ where: { id: 1 } })
+      const config = prepareSmtpConfig(parsed.data, saved ? { ...saved } : null)
+      const allowed = [config.smtpUser, ...(config.smtpAliases || []).map(alias => alias.email)]
+      const inUse = await prisma.emailCampaign.count({ where: {
+        status: { in: ['SCHEDULED', 'SENDING'] }, fromEmail: { notIn: allowed },
+      } })
+      if (inUse) return { success: false, error: 'An active campaign uses a sender you are removing. Pause or edit that campaign before changing its sender settings.' }
+      Object.assign(parsed.data, config)
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Invalid SMTP settings.' }
+    }
+  }
 
   const { paymentQr, ...settingsWithoutPaymentQr } = parsed.data
   const { whatsappNumber, ...settingsWithoutExtras } = settingsWithoutPaymentQr
@@ -190,7 +211,7 @@ export async function updateStoreSettings(data: unknown) {
     : await readWhatsappNumberFromDb()
 
   revalidatePath('/settings')
-  return { success: true, data: { ...settings, paymentQr: resolvedPaymentQr, whatsappNumber: resolvedWhatsappNumber } }
+  return { success: true, data: { ...settings, smtpPass: '', smtpHasPassword: Boolean(settings.smtpPass), paymentQr: resolvedPaymentQr, whatsappNumber: resolvedWhatsappNumber } }
 }
 
 export async function getMarketplaceChannels() {

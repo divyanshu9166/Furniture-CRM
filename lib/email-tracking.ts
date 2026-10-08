@@ -36,7 +36,9 @@ export function createTrackingSignature(recipientId: number, type: EmailTracking
 }
 
 export function verifyTrackingSignature(recipientId: number, type: EmailTrackingType, signature: string | null, target = '') {
-  if (!signature) return false
+  // SHA-256 base64url is exactly 43 ASCII characters. Reject malformed Unicode
+  // before timingSafeEqual, which otherwise throws for unequal byte lengths.
+  if (!signature || !/^[A-Za-z0-9_-]{43}$/.test(signature)) return false
   const expected = createTrackingSignature(recipientId, type, target)
   if (!expected || expected.length !== signature.length) return false
   return timingSafeEqual(Buffer.from(expected), Buffer.from(signature))

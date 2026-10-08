@@ -595,9 +595,9 @@ input[type="number"] {
 }
 
 /* ── Mobile bottom safe-area clearance ─────────────────────── */
-/* Reserve space for 60px BottomNav + device safe area inset   */
+/* Content breathing room + device safe area; no blank fixed footer. */
 .mobile-bottom-safe {
-  padding-bottom: calc(28px + 8px + env(safe-area-inset-bottom) + 16px);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
 }
 
 @media (min-width: 768px) {

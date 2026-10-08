@@ -5,33 +5,38 @@ import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
 import { z } from 'zod'
 import { testSmtpConnection, sendTestEmail, getSmtpConfig } from '@/lib/email'
-import type { SmtpConfig } from '@/lib/email'
 import { deliverEmailCampaign } from '@/lib/email-campaign-runner'
 import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
+import { getSenderIdentities, prepareSmtpConfig, resolveSender, senderEmailSchema } from '@/lib/email-senders'
+import { recordEmailEvent as recordEvent } from '@/lib/email-events'
+import type { Prisma } from '@prisma/client'
+import { assertEmailContentReady } from '@/lib/email-content'
 
 // ─── VALIDATION SCHEMAS ─────────────────────────────
 
 const templateSchema = z.object({
-  name: z.string().min(1, 'Template name is required'),
-  subject: z.string().min(1, 'Subject is required'),
-  body: z.string().min(1, 'Body is required'),
-  category: z.string().default('Promotional'),
-  variables: z.array(z.string()).default([]),
+  name: z.string().trim().min(1, 'Template name is required').max(150),
+  subject: z.string().trim().min(1, 'Subject is required').max(250),
+  body: z.string().trim().min(1, 'Body is required').max(200_000),
+  category: z.string().trim().min(1).max(100).default('Promotional'),
+  variables: z.array(z.string().trim().regex(/^[a-zA-Z0-9_]+$/, 'Use letters, numbers and underscores for variable names.').max(80)).max(50).default([]),
 })
 
 const campaignSchema = z.object({
   name: z.string().trim().min(1, 'Campaign name is required').max(150),
   subject: z.string().trim().min(1, 'Subject is required').max(250),
-  body: z.string().min(1, 'Email body is required').max(200_000),
-  templateId: z.number().optional(),
+  body: z.string().trim().min(1, 'Email body is required').max(200_000),
+  fromEmail: z.union([senderEmailSchema, z.literal('')]).optional(),
+  templateId: z.number().int().positive().optional(),
   audience: z.enum(['all', 'leads', 'customers']).default('all'),
   audienceFilter: z.any().optional(),
   scheduledAt: z.string().datetime().optional(),
   isABTest: z.boolean().default(false),
   variantBSubject: z.string().trim().max(250).optional(),
   variantBBody: z.string().max(200_000).optional(),
-  abSplitPercent: z.number().min(10).max(90).default(50),
+  abSplitPercent: z.number().int().min(10).max(90).default(50),
   isAutomated: z.boolean().default(false),
+  activate: z.boolean().default(true),
   triggerType: z.enum(['new_lead', 'post_visit', 'post_purchase']).optional(),
   triggerDelay: z.number().int().min(0).max(720).optional(),
 }).superRefine((data, context) => {
@@ -44,6 +49,10 @@ const campaignSchema = z.object({
   if (data.isAutomated && data.scheduledAt) {
     context.addIssue({ code: 'custom', message: 'Automated campaigns cannot also have a scheduled send time.' })
   }
+  if (data.scheduledAt || (data.isAutomated && data.activate)) {
+    try { assertEmailContentReady(data.subject, data.body, data.isABTest ? { subject: data.variantBSubject, body: data.variantBBody } : null) }
+    catch (error) { context.addIssue({ code: 'custom', message: error instanceof Error ? error.message : 'Resolve template placeholders before activation.' }) }
+  }
 })
 
 async function hasMarketingAccess() {
@@ -52,6 +61,38 @@ async function hasMarketingAccess() {
     return true
   } catch {
     return false
+  }
+}
+
+async function campaignSender(selected?: string) {
+  const config = await getSmtpConfig()
+  if (!config) {
+    if (selected) throw new Error('Configure SMTP before selecting a campaign sender.')
+    return { fromEmail: null, fromName: null }
+  }
+  const identity = resolveSender(config, selected)
+  return { fromEmail: identity.email, fromName: identity.name }
+}
+
+async function triggerAvailable(tx: Prisma.TransactionClient, triggerType: string, excludeId?: number) {
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-trigger:${triggerType}`}))`
+  return !await tx.emailCampaign.findFirst({ where: {
+    isAutomated: true, triggerType, status: 'SCHEDULED', ...(excludeId ? { id: { not: excludeId } } : {}),
+  }, select: { id: true } })
+}
+
+const validId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2147483647
+
+function campaignData(data: z.infer<typeof campaignSchema>, sender: { fromEmail: string | null; fromName: string | null }, scheduledAt: Date | null) {
+  return {
+    name: data.name, ...sender, subject: data.subject, body: data.body,
+    templateId: data.templateId || null, audience: data.audience,
+    audienceFilter: data.audienceFilter || undefined, scheduledAt,
+    status: (data.isAutomated ? (data.activate ? 'SCHEDULED' : 'DRAFT') : scheduledAt ? 'SCHEDULED' : 'DRAFT') as 'SCHEDULED' | 'DRAFT',
+    isABTest: data.isABTest, variantB: data.isABTest ? { subject: data.variantBSubject, body: data.variantBBody } : undefined,
+    abSplitPercent: data.abSplitPercent, isAutomated: data.isAutomated,
+    triggerType: data.isAutomated ? data.triggerType : null,
+    triggerDelay: data.isAutomated ? data.triggerDelay || 0 : null,
   }
 }
 
@@ -93,9 +134,11 @@ export async function createEmailTemplate(data: unknown) {
 
 export async function updateEmailTemplate(id: number, data: unknown) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  if (!validId(id)) return { success: false, error: 'Invalid template' }
   const parsed = templateSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
+  if (!await prisma.emailTemplate.count({ where: { id } })) return { success: false, error: 'Template not found' }
   await prisma.emailTemplate.update({ where: { id }, data: parsed.data })
   revalidatePath('/email-marketing')
   return { success: true }
@@ -103,9 +146,11 @@ export async function updateEmailTemplate(id: number, data: unknown) {
 
 export async function deleteEmailTemplate(id: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  if (!validId(id)) return { success: false, error: 'Invalid template' }
   const usedCount = await prisma.emailCampaign.count({ where: { templateId: id } })
   if (usedCount > 0) return { success: false, error: `Template is used by ${usedCount} campaign(s). Remove them first.` }
 
+  if (!await prisma.emailTemplate.count({ where: { id } })) return { success: false, error: 'Template not found' }
   await prisma.emailTemplate.delete({ where: { id } })
   revalidatePath('/email-marketing')
   return { success: true }
@@ -130,6 +175,8 @@ export async function getEmailCampaigns() {
       id: c.id,
       name: c.name,
       subject: c.subject,
+      fromEmail: c.fromEmail,
+      fromName: c.fromName,
       body: c.body,
       templateName: c.template?.name || null,
       templateId: c.templateId,
@@ -160,98 +207,73 @@ export async function createEmailCampaign(data: unknown) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const parsed = campaignSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
-  if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
-  if (parsed.data.templateId) {
-    const templateExists = await prisma.emailTemplate.count({ where: { id: parsed.data.templateId } })
-    if (!templateExists) return { success: false, error: 'Selected template no longer exists.' }
-  }
-  if (parsed.data.isAutomated) {
-    const duplicate = await prisma.emailCampaign.findFirst({
-      where: { isAutomated: true, triggerType: parsed.data.triggerType, status: { not: 'PAUSED' } },
-      select: { id: true },
+  try {
+    const sender = await campaignSender(parsed.data.fromEmail)
+    const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
+    if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
+    const active = !!scheduledAt || (parsed.data.isAutomated && parsed.data.activate)
+    if (active && (!sender.fromEmail || !isEmailTrackingConfigured())) return { success: false, error: 'Configure SMTP and signed tracking/unsubscribe links before scheduling or activating emails.' }
+    const result = await prisma.$transaction(async tx => {
+      if (parsed.data.templateId && !await tx.emailTemplate.count({ where: { id: parsed.data.templateId } })) return { success: false, error: 'Selected template no longer exists.' }
+      if (parsed.data.isAutomated && parsed.data.activate && !await triggerAvailable(tx, parsed.data.triggerType!)) return { success: false, error: 'An active automation already exists for this trigger. Pause it first.' }
+      const campaign = await tx.emailCampaign.create({ data: campaignData(parsed.data, sender, scheduledAt) })
+      return { success: true, data: { id: campaign.id } }
     })
-    if (duplicate) return { success: false, error: 'An active automation already exists for this trigger. Pause it before creating another.' }
-  }
-
-  const campaign = await prisma.emailCampaign.create({
-    data: {
-      name: parsed.data.name,
-      subject: parsed.data.subject,
-      body: parsed.data.body,
-      templateId: parsed.data.templateId,
-      audience: parsed.data.audience,
-      audienceFilter: parsed.data.audienceFilter || undefined,
-      scheduledAt,
-      status: parsed.data.isAutomated || scheduledAt ? 'SCHEDULED' : 'DRAFT',
-      isABTest: parsed.data.isABTest,
-      variantB: parsed.data.isABTest ? { subject: parsed.data.variantBSubject, body: parsed.data.variantBBody } : undefined,
-      abSplitPercent: parsed.data.abSplitPercent,
-      isAutomated: parsed.data.isAutomated,
-      triggerType: parsed.data.triggerType,
-      triggerDelay: parsed.data.triggerDelay,
-    },
-  })
-
-  revalidatePath('/email-marketing')
-  return { success: true, data: { id: campaign.id } }
+    if (result.success) revalidatePath('/email-marketing')
+    return result
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to save campaign.' } }
 }
 
 export async function updateEmailCampaign(id: number, data: unknown) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  if (!validId(id)) return { success: false, error: 'Invalid campaign' }
   const parsed = campaignSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
-
-  const existing = await prisma.emailCampaign.findUnique({ where: { id }, select: { status: true } })
-  if (!existing) return { success: false, error: 'Campaign not found' }
-  if (existing.status === 'SENT' || existing.status === 'SENDING') return { success: false, error: 'Sent or in-progress campaigns cannot be edited.' }
-  const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
-  if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
-  if (parsed.data.templateId) {
-    const templateExists = await prisma.emailTemplate.count({ where: { id: parsed.data.templateId } })
-    if (!templateExists) return { success: false, error: 'Selected template no longer exists.' }
-  }
-  if (parsed.data.isAutomated) {
-    const duplicate = await prisma.emailCampaign.findFirst({
-      where: { id: { not: id }, isAutomated: true, triggerType: parsed.data.triggerType, status: { not: 'PAUSED' } },
-      select: { id: true },
+  try {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "EmailCampaign" WHERE id = ${id} FOR UPDATE`
+      const existing = await tx.emailCampaign.findUnique({ where: { id } })
+      if (!existing) return { success: false, error: 'Campaign not found' }
+      if (existing.status === 'SENT' || existing.status === 'SENDING') return { success: false, error: 'Sent or in-progress campaigns cannot be edited.' }
+      const hasHistory = !!await tx.emailRecipient.count({ where: { campaignId: id } }) || existing.totalRecipients > 0
+      if (hasHistory && !existing.isAutomated) return { success: false, error: 'Delivery history exists. Duplicate this campaign to make changes without replaying or erasing history.' }
+      const previousEmail = existing.fromEmail || (await getSmtpConfig())?.smtpUser || null
+      const sender = parsed.data.fromEmail === undefined && previousEmail
+        ? { fromEmail: previousEmail, fromName: existing.fromName }
+        : await campaignSender(parsed.data.fromEmail || (hasHistory ? previousEmail || undefined : undefined))
+      if (hasHistory && (sender.fromEmail !== previousEmail || !parsed.data.isAutomated || parsed.data.triggerType !== existing.triggerType || parsed.data.audience !== existing.audience)) return { success: false, error: 'This automation has delivery history. Create a new automation to change its sender, audience or trigger.' }
+      const scheduledAt = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : null
+      if (scheduledAt && scheduledAt <= new Date()) return { success: false, error: 'Scheduled time must be in the future.' }
+      const active = !!scheduledAt || (parsed.data.isAutomated && parsed.data.activate)
+      if (active) {
+        const config = await getSmtpConfig()
+        if (!config || !isEmailTrackingConfigured()) return { success: false, error: 'Configure SMTP and signed tracking/unsubscribe links before activating emails.' }
+        resolveSender(config, sender.fromEmail || config.smtpUser, sender.fromName)
+      }
+      if (parsed.data.templateId && !await tx.emailTemplate.count({ where: { id: parsed.data.templateId } })) return { success: false, error: 'Selected template no longer exists.' }
+      if (parsed.data.isAutomated && parsed.data.activate && !await triggerAvailable(tx, parsed.data.triggerType!, id)) return { success: false, error: 'An active automation already exists for this trigger.' }
+      await tx.emailCampaign.update({ where: { id }, data: campaignData(parsed.data, sender, scheduledAt) })
+      return { success: true }
     })
-    if (duplicate) return { success: false, error: 'An active automation already exists for this trigger.' }
-  }
-
-  await prisma.emailCampaign.update({
-    where: { id },
-    data: {
-      name: parsed.data.name,
-      subject: parsed.data.subject,
-      body: parsed.data.body,
-      templateId: parsed.data.templateId,
-      audience: parsed.data.audience,
-      audienceFilter: parsed.data.audienceFilter || undefined,
-      scheduledAt,
-      status: parsed.data.isAutomated || scheduledAt ? 'SCHEDULED' : 'DRAFT',
-      isABTest: parsed.data.isABTest,
-      variantB: parsed.data.isABTest ? { subject: parsed.data.variantBSubject, body: parsed.data.variantBBody } : undefined,
-      abSplitPercent: parsed.data.abSplitPercent,
-      isAutomated: parsed.data.isAutomated,
-      triggerType: parsed.data.triggerType,
-      triggerDelay: parsed.data.triggerDelay,
-    },
-  })
-
-  revalidatePath('/email-marketing')
-  return { success: true }
+    if (result.success) revalidatePath('/email-marketing')
+    return result
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to update campaign.' } }
 }
 
 export async function deleteEmailCampaign(id: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
-  const campaign = await prisma.emailCampaign.findUnique({ where: { id }, select: { status: true } })
-  if (!campaign) return { success: false, error: 'Campaign not found' }
-  if (campaign.status === 'SENDING') return { success: false, error: 'Campaign is currently sending and cannot be deleted.' }
-  await prisma.emailCampaign.delete({ where: { id } })
-  revalidatePath('/email-marketing')
-  return { success: true }
+  if (!validId(id)) return { success: false, error: 'Invalid campaign' }
+  const result = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "EmailCampaign" WHERE id = ${id} FOR UPDATE`
+    const campaign = await tx.emailCampaign.findUnique({ where: { id } })
+    if (!campaign) return { success: false, error: 'Campaign not found' }
+    if (campaign.status === 'SENDING') return { success: false, error: 'Campaign is currently sending and cannot be deleted.' }
+    if (campaign.sent > 0 || await tx.emailRecipient.count({ where: { campaignId: id } })) return { success: false, error: 'Campaign has delivery history. Pause automated delivery instead; recipient activity and unsubscribe links must be preserved.' }
+    await tx.emailCampaign.delete({ where: { id } })
+    return { success: true }
+  })
+  if (result.success) revalidatePath('/email-marketing')
+  return result
 }
 
 // ─── AUDIENCE / RECIPIENTS ──────────────────────────
@@ -275,6 +297,7 @@ export async function getAudienceStats() {
 
 export async function getAudiencePreview(audience: string) {
   if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: null }
+  if (!['all', 'leads', 'customers'].includes(audience)) return { success: false, error: 'Invalid audience', data: null }
 
   const where: Record<string, unknown> = { email: { not: null }, emailSubscribed: true }
 
@@ -314,33 +337,43 @@ export async function sendEmailCampaign(campaignId: number) {
 
 // ─── SMTP TEST & CONFIG ACTIONS ─────────────────────
 
-export async function testSmtp(config: {
-  smtpHost: string; smtpPort: number; smtpUser: string; smtpPass: string; smtpFromName: string; smtpSecure: boolean
-}) {
+export async function testSmtp(config: Record<string, unknown>) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const result = await testSmtpConnection(config as SmtpConfig)
-  return result
+  try {
+    const saved = await prisma.storeSettings.findUnique({ where: { id: 1 } })
+    return await testSmtpConnection(prepareSmtpConfig(config, saved ? { ...saved } : null))
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Invalid SMTP settings.' } }
 }
 
-export async function sendSmtpTestEmail(config: {
-  smtpHost: string; smtpPort: number; smtpUser: string; smtpPass: string; smtpFromName: string; smtpSecure: boolean
-}, toEmail: string) {
+export async function sendSmtpTestEmail(config: Record<string, unknown>, toEmail: string, fromEmail?: string) {
   try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
-  const result = await sendTestEmail(config as SmtpConfig, toEmail)
-  return result
+  try {
+    const saved = await prisma.storeSettings.findUnique({ where: { id: 1 } })
+    const parsed = prepareSmtpConfig(config, saved ? { ...saved } : null)
+    const sender = resolveSender(parsed, fromEmail)
+    const result = await sendTestEmail(parsed, senderEmailSchema.parse(toEmail), sender.email)
+    return { ...result, fromEmail: sender.email }
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to send the test email.' } }
 }
 
 export async function getEmailConfigStatus() {
   if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
 
-  const config = await getSmtpConfig()
-  return {
-    success: true,
-    configured: !!config,
-    smtpHost: config?.smtpHost || null,
-    smtpUser: config?.smtpUser || null,
-    fromName: config?.smtpFromName || null,
-    trackingConfigured: isEmailTrackingConfigured(),
+  try {
+    const config = await getSmtpConfig()
+    const sender = config ? resolveSender(config) : null
+    return {
+      success: true,
+      configured: !!config,
+      smtpHost: config?.smtpHost || null,
+      smtpUser: config?.smtpUser || null,
+      fromName: sender?.name || null,
+      fromEmail: sender?.email || null,
+      senders: config ? getSenderIdentities(config) : [],
+      trackingConfigured: isEmailTrackingConfigured(),
+    }
+  } catch {
+    return { success: false, configured: false, error: 'Email sender settings are invalid or unavailable. Review Email Setup before sending.', senders: [], trackingConfigured: isEmailTrackingConfigured() }
   }
 }
 
@@ -348,6 +381,7 @@ export async function getEmailConfigStatus() {
 
 export async function getCampaignAnalytics(campaignId: number) {
   if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
+  if (!validId(campaignId)) return { success: false, error: 'Invalid campaign' }
 
   const campaign = await prisma.emailCampaign.findUnique({
     where: { id: campaignId },
@@ -373,42 +407,30 @@ export async function getCampaignAnalytics(campaignId: number) {
 
   if (!campaign) return { success: false, error: 'Campaign not found' }
 
-  // Aggregate events timeline (last 7 days)
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-  const events = await prisma.emailEvent.findMany({
-    where: {
-      recipient: { campaignId },
-      createdAt: { gte: sevenDaysAgo },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 500,
-    select: { type: true, createdAt: true, recipient: { select: { variant: true } } },
-  })
-
-  // A/B test breakdown
-  let abStats: {
-    A: { sent: number; opened: number; clicked: number; openRate: number; clickRate: number }
-    B: { sent: number; opened: number; clicked: number; openRate: number; clickRate: number }
-  } | null = null
+  // Query the full campaign, not the 200-row UI preview or a 500-event sample.
+  const start = new Date()
+  start.setUTCHours(0, 0, 0, 0)
+  start.setUTCDate(start.getUTCDate() - 6)
+  const events = await prisma.$queryRaw<Array<{ day: Date; type: string; total: number }>>`
+    SELECT date_trunc('day', e."createdAt") AS day, e.type, COUNT(*)::int AS total
+    FROM "EmailEvent" e JOIN "EmailRecipient" r ON r.id = e."recipientId"
+    WHERE r."campaignId" = ${campaignId} AND e."createdAt" >= ${start}
+    AND e.type IN ('open', 'click')
+    GROUP BY day, e.type ORDER BY day
+  `
+  let abStats: Record<'A' | 'B', { sent: number; opened: number; clicked: number; openRate: number; clickRate: number }> | null = null
   if (campaign.isABTest) {
-    const variantA = campaign.recipients.filter(r => r.variant === 'A')
-    const variantB = campaign.recipients.filter(r => r.variant === 'B')
-    abStats = {
-      A: {
-        sent: variantA.length,
-        opened: variantA.filter(r => r.openedAt).length,
-        clicked: variantA.filter(r => r.clickedAt).length,
-        openRate: variantA.length > 0 ? Math.round((variantA.filter(r => r.openedAt).length / variantA.length) * 100) : 0,
-        clickRate: variantA.length > 0 ? Math.round((variantA.filter(r => r.clickedAt).length / variantA.length) * 100) : 0,
-      },
-      B: {
-        sent: variantB.length,
-        opened: variantB.filter(r => r.openedAt).length,
-        clicked: variantB.filter(r => r.clickedAt).length,
-        openRate: variantB.length > 0 ? Math.round((variantB.filter(r => r.openedAt).length / variantB.length) * 100) : 0,
-        clickRate: variantB.length > 0 ? Math.round((variantB.filter(r => r.clickedAt).length / variantB.length) * 100) : 0,
-      },
+    const variantStats = async (variant: 'A' | 'B') => {
+      const where = { campaignId, variant, sentAt: { not: null } }
+      const [sent, opened, clicked] = await Promise.all([
+        prisma.emailRecipient.count({ where }),
+        prisma.emailRecipient.count({ where: { ...where, openedAt: { not: null } } }),
+        prisma.emailRecipient.count({ where: { ...where, clickedAt: { not: null } } }),
+      ])
+      return { sent, opened, clicked, openRate: sent ? Math.round(opened / sent * 100) : 0, clickRate: sent ? Math.round(clicked / sent * 100) : 0 }
     }
+    const [A, B] = await Promise.all([variantStats('A'), variantStats('B')])
+    abStats = { A, B }
   }
 
   // Build daily timeline
@@ -419,10 +441,10 @@ export async function getCampaignAnalytics(campaignId: number) {
     timeline[key] = { opens: 0, clicks: 0 }
   }
   events.forEach(e => {
-    const key = e.createdAt.toISOString().split('T')[0]
+    const key = e.day.toISOString().split('T')[0]
     if (timeline[key]) {
-      if (e.type === 'open') timeline[key].opens++
-      if (e.type === 'click') timeline[key].clicks++
+      if (e.type === 'open') timeline[key].opens += e.total
+      if (e.type === 'click') timeline[key].clicks += e.total
     }
   })
 
@@ -442,6 +464,7 @@ export async function getCampaignAnalytics(campaignId: number) {
         unsubscribed: campaign.unsubscribed,
         openRate: campaign.sent > 0 ? Math.round((campaign.opened / campaign.sent) * 100) : 0,
         clickRate: campaign.sent > 0 ? Math.round((campaign.clicked / campaign.sent) * 100) : 0,
+        abWinner: campaign.abWinner,
         bounceRate: campaign.sent > 0 ? Math.round((campaign.bounced / campaign.sent) * 100) : 0,
       },
       recipients: campaign.recipients.map(r => ({
@@ -459,57 +482,8 @@ export async function getCampaignAnalytics(campaignId: number) {
 // ─── RECORD TRACKING EVENT ──────────────────────────
 
 export async function recordEmailEvent(recipientId: number, type: 'open' | 'click' | 'bounce' | 'unsubscribe', metadata?: Record<string, unknown>) {
-  const recipient = await prisma.emailRecipient.findUnique({
-    where: { id: recipientId },
-    include: { campaign: true },
-  })
-  if (!recipient) return { success: false }
-
-  if (type === 'unsubscribe' && recipient.status === 'unsubscribed') return { success: true }
-  if (type === 'bounce' && recipient.bouncedAt) return { success: true }
-
-  await prisma.emailEvent.create({ data: { recipientId, type, metadata: (metadata || {}) as any } })
-
-  // Update recipient stats
-  const recipientUpdate: Record<string, unknown> = {}
-  const campaignUpdate: Record<string, unknown> = {}
-
-  if (type === 'open') {
-    recipientUpdate.opens = { increment: 1 }
-    if (!recipient.openedAt) {
-      recipientUpdate.openedAt = new Date()
-      recipientUpdate.status = 'opened'
-      campaignUpdate.opened = { increment: 1 }
-    }
-  } else if (type === 'click') {
-    recipientUpdate.clicks = { increment: 1 }
-    if (!recipient.clickedAt) {
-      recipientUpdate.clickedAt = new Date()
-      recipientUpdate.status = 'clicked'
-      campaignUpdate.clicked = { increment: 1 }
-    }
-  } else if (type === 'bounce') {
-    recipientUpdate.status = 'bounced'
-    recipientUpdate.bouncedAt = new Date()
-    campaignUpdate.bounced = { increment: 1 }
-  } else if (type === 'unsubscribe') {
-    recipientUpdate.status = 'unsubscribed'
-    campaignUpdate.unsubscribed = { increment: 1 }
-    // Also update contact subscription
-    if (recipient.contactId) {
-      await prisma.contact.update({
-        where: { id: recipient.contactId },
-        data: { emailSubscribed: false },
-      })
-    }
-  }
-
-  await prisma.$transaction([
-    prisma.emailRecipient.update({ where: { id: recipientId }, data: recipientUpdate }),
-    prisma.emailCampaign.update({ where: { id: recipient.campaignId }, data: campaignUpdate }),
-  ])
-
-  return { success: true }
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  return recordEvent(recipientId, type, metadata)
 }
 
 // ─── AUTOMATED CAMPAIGN HELPERS ─────────────────────
@@ -540,19 +514,32 @@ export async function getAutomatedCampaigns() {
 
 export async function setEmailAutomationActive(campaignId: number, active: boolean) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
-  if (!Number.isInteger(campaignId) || campaignId <= 0) return { success: false, error: 'Invalid campaign' }
-
-  const campaign = await prisma.emailCampaign.findUnique({ where: { id: campaignId }, select: { isAutomated: true, status: true } })
-  if (!campaign?.isAutomated) return { success: false, error: 'Automation not found' }
-  if (campaign.status === 'SENDING' || campaign.status === 'SENT') return { success: false, error: 'This automation can no longer be changed.' }
-
-  await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: active ? 'SCHEDULED' : 'PAUSED' } })
-  revalidatePath('/email-marketing')
-  return { success: true }
+  if (!validId(campaignId) || typeof active !== 'boolean') return { success: false, error: 'Invalid automation' }
+  try {
+    const result = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "EmailCampaign" WHERE id = ${campaignId} FOR UPDATE`
+      const campaign = await tx.emailCampaign.findUnique({ where: { id: campaignId } })
+      if (!campaign?.isAutomated) return { success: false, error: 'Automation not found' }
+      if (campaign.status === 'SENDING' || campaign.status === 'SENT') return { success: false, error: 'This automation can no longer be changed.' }
+      if (active) {
+        assertEmailContentReady(campaign.subject, campaign.body, campaign.isABTest ? campaign.variantB as { subject?: string; body?: string } | null : null)
+        const config = await getSmtpConfig()
+        if (!config || !isEmailTrackingConfigured()) return { success: false, error: 'Configure SMTP and signed tracking/unsubscribe links before enabling an automation.' }
+        resolveSender(config, campaign.fromEmail || config.smtpUser, campaign.fromName)
+        if (!campaign.triggerType || !['new_lead', 'post_visit', 'post_purchase'].includes(campaign.triggerType)) return { success: false, error: 'Select a supported automation trigger.' }
+        if (!await triggerAvailable(tx, campaign.triggerType, campaignId)) return { success: false, error: 'Another active automation already uses this trigger.' }
+      }
+      await tx.emailCampaign.update({ where: { id: campaignId }, data: { status: active ? 'SCHEDULED' : 'PAUSED' } })
+      return { success: true }
+    })
+    if (result.success) revalidatePath('/email-marketing')
+    return result
+  } catch (error) { return { success: false, error: error instanceof Error ? error.message : 'Unable to update automation.' } }
 }
 
 export async function duplicateCampaign(campaignId: number) {
   try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  if (!validId(campaignId)) return { success: false, error: 'Invalid campaign' }
 
   const original = await prisma.emailCampaign.findUnique({ where: { id: campaignId } })
   if (!original) return { success: false, error: 'Campaign not found' }
@@ -561,6 +548,8 @@ export async function duplicateCampaign(campaignId: number) {
     data: {
       name: `${original.name} (Copy)`,
       subject: original.subject,
+      fromEmail: original.fromEmail,
+      fromName: original.fromName,
       body: original.body,
       templateId: original.templateId,
       audience: original.audience,

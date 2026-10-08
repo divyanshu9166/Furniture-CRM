@@ -85,6 +85,19 @@ export default function Sidebar() {
   const [indiaMartEnabled, setIndiaMartEnabled] = useState(false);
 
   useEffect(() => {
+    if (!sidebarOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = event => { if (event.key === 'Escape') setSidebarOpen(false); };
+    const desktop = window.matchMedia('(min-width: 768px)');
+    const onResize = () => { if (desktop.matches) setSidebarOpen(false); };
+    window.addEventListener('keydown', onKeyDown);
+    desktop.addEventListener('change', onResize);
+    onResize();
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', onKeyDown); desktop.removeEventListener('change', onResize); };
+  }, [sidebarOpen, setSidebarOpen]);
+
+  useEffect(() => {
     getStoreSettings().then(res => {
       if (res.success && res.data.logo) setLogoUrl(res.data.logo);
     });
@@ -155,7 +168,7 @@ export default function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 py-3 px-2.5 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 min-h-0 py-3 px-2.5 space-y-0.5 overflow-y-auto overscroll-contain">
           {visibleNav.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href;
@@ -179,7 +192,7 @@ export default function Sidebar() {
         </nav>
 
         {/* User section (mobile only) */}
-        <div className="md:hidden px-4 py-3 border-t border-white/10">
+        <div className="md:hidden shrink-0 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] border-t border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center text-white text-xs font-semibold">
               {userInitials}

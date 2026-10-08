@@ -9,6 +9,7 @@ import {
   Target, CalendarClock, Bot, Sparkles, LayoutTemplate, PenLine,
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import SenderSelect from '@/components/email/SenderSelect';
 import {
   getEmailCampaigns, createEmailCampaign, updateEmailCampaign, deleteEmailCampaign,
   sendEmailCampaign, duplicateCampaign, getCampaignAnalytics, setEmailAutomationActive,
@@ -124,6 +125,7 @@ export default function EmailMarketingPage() {
   const [templates, setTemplates] = useState([]);
   const [audienceStats, setAudienceStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [emailConfig, setEmailConfig] = useState(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -139,7 +141,7 @@ export default function EmailMarketingPage() {
 
   // Form state
   const [campaignForm, setCampaignForm] = useState({
-    name: '', subject: '', body: '', templateId: '', audience: 'all',
+    name: '', subject: '', body: '', templateId: '', audience: 'all', fromEmail: '',
     scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '',
     abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '',
   });
@@ -147,34 +149,35 @@ export default function EmailMarketingPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const refresh = async () => {
-    const [cRes, tRes, aRes, ecRes] = await Promise.all([
-      getEmailCampaigns(), getEmailTemplates(), getAudienceStats(), getEmailConfigStatus(),
-    ]);
+    const results = await Promise.allSettled([getEmailCampaigns(), getEmailTemplates(), getAudienceStats(), getEmailConfigStatus()]);
+    const [cRes, tRes, aRes, ecRes] = results.map(result => result.status === 'fulfilled' ? result.value : { success: false, error: 'Unable to load email marketing. Please retry.' });
     if (cRes.success) setCampaigns(cRes.data);
     if (tRes.success) setTemplates(tRes.data);
     if (aRes.success) setAudienceStats(aRes.data);
-    if (ecRes.success) setEmailConfig(ecRes);
+    setEmailConfig(ecRes);
+    setLoadError([cRes, tRes, aRes, ecRes].find(result => !result.success)?.error || '');
   };
 
   useEffect(() => {
     let cancelled = false;
     async function loadInitialData() {
-      const [cRes, tRes, aRes, ecRes] = await Promise.all([
-        getEmailCampaigns(), getEmailTemplates(), getAudienceStats(), getEmailConfigStatus(),
-      ]);
-      if (cancelled) return;
-      if (cRes.success) setCampaigns(cRes.data);
-      if (tRes.success) setTemplates(tRes.data);
-      if (aRes.success) setAudienceStats(aRes.data);
-      if (ecRes.success) setEmailConfig(ecRes);
-      setLoading(false);
+      try {
+        const results = await Promise.allSettled([getEmailCampaigns(), getEmailTemplates(), getAudienceStats(), getEmailConfigStatus()]);
+        if (cancelled) return;
+        const [cRes, tRes, aRes, ecRes] = results.map(result => result.status === 'fulfilled' ? result.value : { success: false, error: 'Unable to load email marketing. Please retry.' });
+        if (cRes.success) setCampaigns(cRes.data);
+        if (tRes.success) setTemplates(tRes.data);
+        if (aRes.success) setAudienceStats(aRes.data);
+        setEmailConfig(ecRes);
+        setLoadError([cRes, tRes, aRes, ecRes].find(result => !result.success)?.error || '');
+      } finally { if (!cancelled) setLoading(false); }
     }
     void loadInitialData();
     return () => { cancelled = true; };
   }, []);
 
   // Computed stats
-  const sentCampaigns = campaigns.filter(c => c.status === 'SENT');
+  const sentCampaigns = campaigns.filter(c => c.sent > 0);
   const totalSent = sentCampaigns.reduce((s, c) => s + c.sent, 0);
   const totalOpened = sentCampaigns.reduce((s, c) => s + c.opened, 0);
   const totalClicked = sentCampaigns.reduce((s, c) => s + c.clicked, 0);
@@ -195,12 +198,14 @@ export default function EmailMarketingPage() {
     if (!campaignForm.name || !campaignForm.subject || !campaignForm.body) return;
     setSubmitting(true);
     try {
-      const isAutomated = !asDraft && campaignForm.isAutomated;
+      const isAutomated = campaignForm.isAutomated;
       const payload = {
         ...campaignForm,
+        fromEmail: campaignForm.fromEmail || emailConfig?.fromEmail || '',
         templateId: campaignForm.templateId ? parseInt(campaignForm.templateId) : undefined,
         triggerDelay: campaignForm.triggerDelay ? parseInt(campaignForm.triggerDelay) : undefined,
         isAutomated,
+        activate: !asDraft,
         triggerType: isAutomated ? campaignForm.triggerType || undefined : undefined,
         scheduledAt: asDraft || isAutomated || !campaignForm.scheduledAt ? undefined : new Date(campaignForm.scheduledAt).toISOString(),
       };
@@ -210,10 +215,10 @@ export default function EmailMarketingPage() {
       if (res.success) {
         setShowCreateCampaign(false);
         setEditingCampaign(null);
-        setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' });
+        setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', fromEmail: '', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' });
         await refresh();
       } else alert(res.error);
-    } finally { setSubmitting(false); }
+    } catch (error) { alert(error.message || 'Unable to save. Please retry.'); } finally { setSubmitting(false); }
   };
 
   const handleCreateTemplate = async () => {
@@ -233,40 +238,45 @@ export default function EmailMarketingPage() {
         setTemplateForm({ name: '', subject: '', body: '', category: 'Promotional', variables: '' });
         await refresh();
       } else alert(res.error);
-    } finally { setSubmitting(false); }
+    } catch (error) { alert(error.message || 'Unable to save. Please retry.'); } finally { setSubmitting(false); }
   };
 
-  const handleSendCampaign = async (id) => {
-    if (!confirm('This will send the campaign to all eligible recipients. Continue?')) return;
+  const runAction = async task => {
+    if (submitting) return;
     setSubmitting(true);
-    const res = await sendEmailCampaign(id);
-    if (res.success) {
-      alert(`Campaign finished: ${res.data.sent} sent, ${res.data.failed} failed out of ${res.data.recipientCount} recipients.`);
-      await refresh();
-    } else alert(res.error);
-    setSubmitting(false);
+    try { await task(); }
+    catch (error) { alert(error.message || 'Unable to complete the request. Please retry.'); }
+    finally { setSubmitting(false); }
   };
 
-  const handleDeleteCampaign = async (id) => {
-    if (!confirm('Delete this campaign permanently?')) return;
-    const res = await deleteEmailCampaign(id);
-    if (res.success) {
+  const handleSendCampaign = id => {
+    if (!confirm('This will send the campaign to all eligible recipients. Continue?')) return;
+    return runAction(async () => {
+      const res = await sendEmailCampaign(id);
+      if (!res.success) { alert(res.error); return; }
+      alert(`SMTP accepted ${res.data.sent} emails; ${res.data.failed} failed out of ${res.data.recipientCount}. Inbox delivery is not guaranteed by SMTP acceptance.`);
       setSelectedCampaign(null);
       await refresh();
-    } else alert(res.error || 'Unable to delete campaign');
+    });
   };
-
-  const handleDuplicate = async (id) => {
+  const handleDeleteCampaign = id => {
+    if (!confirm('Delete this campaign permanently?')) return;
+    return runAction(async () => {
+      const res = await deleteEmailCampaign(id);
+      if (!res.success) { alert(res.error || 'Unable to delete campaign'); return; }
+      setSelectedCampaign(null); await refresh();
+    });
+  };
+  const handleDuplicate = id => runAction(async () => {
     const res = await duplicateCampaign(id);
-    if (res.success) await refresh();
-    else alert(res.error || 'Unable to duplicate campaign');
-  };
-
-  const handleDeleteTemplate = async (id) => {
+    if (res.success) await refresh(); else alert(res.error || 'Unable to duplicate campaign');
+  });
+  const handleDeleteTemplate = id => {
     if (!confirm('Delete this template?')) return;
-    const res = await deleteEmailTemplate(id);
-    if (!res.success) alert(res.error);
-    await refresh();
+    return runAction(async () => {
+      const res = await deleteEmailTemplate(id);
+      if (res.success) await refresh(); else alert(res.error);
+    });
   };
 
   const openTemplateEditor = (template) => {
@@ -281,19 +291,15 @@ export default function EmailMarketingPage() {
     setShowCreateTemplate(true);
   };
 
-  const handleViewAnalytics = async (campaign) => {
+  const handleViewAnalytics = campaign => runAction(async () => {
     const res = await getCampaignAnalytics(campaign.id);
-    if (res.success) {
-      setCampaignAnalytics(res.data);
-      setShowAnalytics(true);
-    } else alert(res.error || 'Unable to load campaign analytics');
-  };
-
-  const handleAutomationState = async (campaign, active) => {
+    if (res.success) { setCampaignAnalytics(res.data); setShowAnalytics(true); }
+    else alert(res.error || 'Unable to load campaign analytics');
+  });
+  const handleAutomationState = (campaign, active) => runAction(async () => {
     const res = await setEmailAutomationActive(campaign.id, active);
-    if (res.success) await refresh();
-    else alert(res.error || 'Unable to update automation');
-  };
+    if (res.success) await refresh(); else alert(res.error || 'Unable to update automation');
+  });
 
   const openCampaignEditor = (campaign) => {
     const scheduledAt = campaign.scheduledAt
@@ -307,6 +313,7 @@ export default function EmailMarketingPage() {
     setEditingCampaign(campaign);
     setCampaignForm({
       name: campaign.name,
+      fromEmail: campaign.fromEmail || emailConfig?.smtpUser || '',
       subject: campaign.subject,
       body: campaign.body,
       templateId: campaign.templateId ? String(campaign.templateId) : '',
@@ -325,12 +332,12 @@ export default function EmailMarketingPage() {
   };
 
   const handleUseTemplate = (template) => {
-    setCampaignForm(f => ({
-      ...f,
+    setEditingCampaign(null);
+    setCampaignForm({ name: '', fromEmail: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '',
       subject: template.subject,
       body: template.body,
       templateId: String(template.id),
-    }));
+    });
     setShowCreateCampaign(true);
   };
 
@@ -387,13 +394,14 @@ export default function EmailMarketingPage() {
         </div>
       </div>
 
+      {loadError && <div role="alert" className="ui-actions flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3"><p className="flex-1 text-sm text-red-500">{loadError}</p><button disabled={submitting} onClick={() => runAction(refresh)} className="rounded-xl border border-border px-3 py-2 text-sm">Retry</button></div>}
       {/* Email Config Status Banner */}
       {emailConfig && !emailConfig.configured && (
         <div className="flex items-center gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
           <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
           <div className="flex-1">
-            <p className="text-sm font-medium text-foreground">Email not configured yet</p>
-            <p className="text-xs text-muted">Set up your business email (SMTP) to start sending campaigns to customers.</p>
+            <p className="text-sm font-medium text-foreground">{emailConfig.error ? 'Email setup needs attention' : 'Email not configured yet'}</p>
+            <p className="text-xs text-muted">{emailConfig.error || 'Set up your business email (SMTP) to start sending campaigns to customers.'}</p>
           </div>
           <Link href="/settings" className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all whitespace-nowrap">
             Configure Email →
@@ -401,9 +409,9 @@ export default function EmailMarketingPage() {
         </div>
       )}
       {emailConfig?.configured && (
-        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-success-light/50 text-success text-sm">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-xl bg-success-light/50 text-success text-sm break-all">
           <CheckCircle2 className="w-4 h-4" />
-          Sending from <strong>{emailConfig.fromName}</strong> ({emailConfig.smtpUser})
+          Default sender: <strong>{emailConfig.fromName}</strong> ({emailConfig.fromEmail || emailConfig.smtpUser}) · Choose a sender for each campaign
         </div>
       )}
       {emailConfig?.configured && !emailConfig.trackingConfigured && (
@@ -436,7 +444,7 @@ export default function EmailMarketingPage() {
       </div>
 
       {/* Tabs */}
-      <div className="ui-tabs flex items-center gap-1 p-1 bg-surface rounded-xl w-fit">
+      <div className="ui-tabs flex items-center gap-1 p-1 bg-surface rounded-xl w-fit max-w-full overflow-x-auto">
         {[
           { key: 'campaigns', label: 'Campaigns', icon: Mail },
           { key: 'templates', label: 'Templates', icon: LayoutTemplate },
@@ -444,7 +452,7 @@ export default function EmailMarketingPage() {
           { key: 'tracking', label: 'Email Tracking', icon: BarChart3 },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>
+            className={`flex shrink-0 whitespace-nowrap items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === t.key ? 'bg-accent text-white shadow-sm' : 'text-muted hover:text-foreground hover:bg-surface-hover'}`}>
             <t.icon className="w-3.5 h-3.5" /> {t.label}
           </button>
         ))}
@@ -492,6 +500,7 @@ export default function EmailMarketingPage() {
                         <div className="flex-1 min-w-0">
                           <h3 className="text-sm font-semibold text-foreground truncate">{c.name}</h3>
                           <p className="text-xs text-muted mt-0.5 truncate">{c.subject}</p>
+                          <p className="text-xs text-muted mt-1 break-all">From: {c.fromEmail || emailConfig?.smtpUser || 'SMTP mailbox (legacy)'}</p>
                         </div>
                         <span className={`badge text-[10px] ml-2 flex items-center gap-1 ${st.color}`}>
                           <StIcon className="w-3 h-3" /> {st.label}
@@ -621,7 +630,7 @@ export default function EmailMarketingPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {triggerOptions.map(trigger => {
-                const existing = campaigns.find(c => c.isAutomated && c.triggerType === trigger.value);
+                const existing = campaigns.find(c => c.isAutomated && c.triggerType === trigger.value && c.status === 'SCHEDULED') || campaigns.find(c => c.isAutomated && c.triggerType === trigger.value);
                 return (
                   <div key={trigger.value} className="p-4 rounded-xl border border-border bg-surface/50 hover:bg-surface-hover/50 transition-colors">
                     <div className="flex items-start justify-between">
@@ -633,7 +642,7 @@ export default function EmailMarketingPage() {
                           <h4 className="text-sm font-semibold text-foreground">{trigger.label}</h4>
                           <p className="text-xs text-muted mt-0.5">{trigger.desc}</p>
                           <p className="text-xs text-muted mt-1 flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> Sends {trigger.delay}h after trigger
+                            <Clock className="w-3 h-3" /> Sends {existing ? existing.triggerDelay || 0 : trigger.delay}h after trigger
                           </p>
                         </div>
                       </div>
@@ -642,7 +651,8 @@ export default function EmailMarketingPage() {
                       ) : (
                         <button
                           onClick={() => {
-                            setCampaignForm(f => ({ ...f, scheduledAt: '', isAutomated: true, triggerType: trigger.value, triggerDelay: String(trigger.delay) }));
+                            setEditingCampaign(null);
+                            setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', fromEmail: '', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: true, triggerType: trigger.value, triggerDelay: String(trigger.delay) });
                             setShowCreateCampaign(true);
                           }}
                           className="text-xs text-accent hover:text-accent-hover font-medium flex items-center gap-1 whitespace-nowrap"
@@ -652,14 +662,14 @@ export default function EmailMarketingPage() {
                       )}
                     </div>
                     {existing && (
-                      <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
+                      <div className="ui-actions mt-3 pt-3 border-t border-border flex items-center justify-between">
                         <div className="flex items-center gap-4 text-xs text-muted">
                           <span>Sent: <strong className="text-foreground">{existing.sent}</strong></span>
                           <span>Opened: <strong className="text-info">{existing.opened}</strong></span>
                           <span>Clicked: <strong className="text-success">{existing.clicked}</strong></span>
                         </div>
                         <div className="ui-actions flex items-center gap-3">
-                          <button onClick={() => handleAutomationState(existing, existing.status !== 'SCHEDULED')} className="text-xs text-accent hover:underline">{existing.status === 'SCHEDULED' ? 'Pause' : 'Resume'}</button>
+                          <button disabled={submitting} onClick={() => handleAutomationState(existing, existing.status !== 'SCHEDULED')} className="text-xs text-accent hover:underline">{existing.status === 'SCHEDULED' ? 'Pause' : 'Resume'}</button>
                           <button onClick={() => handleViewAnalytics(existing)} className="text-xs text-accent hover:underline">View Stats</button>
                         </div>
                       </div>
@@ -675,7 +685,7 @@ export default function EmailMarketingPage() {
             <h3 className="text-sm font-semibold text-foreground mb-3">Automation Best Practices</h3>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {[
-                { title: 'Timing Matters', desc: 'Follow-ups within 24 hours have 3x higher engagement than delayed ones.', icon: Clock },
+                { title: 'Timing Matters', desc: 'Choose a delay that fits the customer event, business hours and your mailing policy.', icon: Clock },
                 { title: 'Personalize Content', desc: 'Use {{customerName}} and product details to make emails feel personal.', icon: Target },
                 { title: 'Test & Iterate', desc: 'Use A/B testing to find what subject lines and content drive the most opens.', icon: FlaskConical },
               ].map((tip, i) => (
@@ -698,7 +708,8 @@ export default function EmailMarketingPage() {
             <h3 className="text-base font-semibold text-foreground flex items-center gap-2 mb-1">
               <BarChart3 className="w-5 h-5 text-accent" /> Email Tracking Dashboard
             </h3>
-            <p className="text-sm text-muted mb-5">Real-time insights into email engagement. Know when your emails are opened and links are clicked.</p>
+            <p className="text-sm text-muted mb-3">Recorded email engagement. Image blocking and privacy scanners can affect open/click counts; SMTP acceptance does not guarantee inbox delivery.</p>
+            <button disabled={submitting} onClick={() => runAction(refresh)} className="mb-5 flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-sm text-muted hover:text-foreground disabled:opacity-50"><RefreshCw className="w-4 h-4" /> Refresh metrics</button>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
               <div className="p-4 rounded-xl bg-surface text-center">
@@ -733,11 +744,11 @@ export default function EmailMarketingPage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <MousePointerClick className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
-                  <div><strong className="text-foreground">Click Tracking</strong><br/>Links in your emails are wrapped with tracking URLs. When clicked, the click is logged before redirecting to the destination.</div>
+                  <div><strong className="text-foreground">Click Tracking</strong><br/>Signed links redirect to the destination while engagement is recorded in the background.</div>
                 </div>
                 <div className="flex items-start gap-2">
                   <TrendingUp className="w-4 h-4 text-accent mt-0.5 flex-shrink-0" />
-                  <div><strong className="text-foreground">Real-time Metrics</strong><br/>All events update in real-time. View per-recipient engagement on any sent campaign to optimize follow-ups.</div>
+                  <div><strong className="text-foreground">Saved Metrics</strong><br/>Refresh to load the latest stored events. Recipient history distinguishes SMTP failures from accepted sends; later bounce reporting requires provider feedback.</div>
                 </div>
               </div>
             </div>
@@ -752,7 +763,7 @@ export default function EmailMarketingPage() {
                 <p className="text-sm">No sent campaigns to track yet</p>
               </div>
             ) : (
-              <div className="glass-card overflow-hidden">
+              <div className="ui-table-scroll glass-card max-w-full overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border">
@@ -826,6 +837,7 @@ export default function EmailMarketingPage() {
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">{c.name}</h3>
                   <p className="text-sm text-muted">{c.subject}</p>
+                  <p className="text-xs text-muted mt-2 break-all">From: {c.fromName || ''} {c.fromEmail || emailConfig?.smtpUser || 'SMTP mailbox (legacy)'}</p>
                 </div>
                 <span className={`badge flex items-center gap-1 ${st.color}`}>
                   <StIcon className="w-3.5 h-3.5" /> {st.label}
@@ -860,31 +872,32 @@ export default function EmailMarketingPage() {
               {/* Email Preview */}
               <div>
                 <p className="text-xs font-medium text-muted mb-2">Email Preview</p>
+                {!c.isAutomated && c.recipientCount > 0 && c.status !== 'SENT' && <p role="status" className="text-xs text-amber-600 mb-2">Delivery history exists. Review recipient activity before duplicating for another send; automatic replay is blocked.</p>}
                 <iframe title={`${c.name} email preview`} sandbox="" srcDoc={c.body} className="w-full h-[300px] rounded-xl border border-border bg-white" />
               </div>
 
               {/* Actions */}
-              <div className="flex items-center justify-between pt-3 border-t border-border">
+              <div className="ui-actions flex items-center justify-between pt-3 border-t border-border">
                 <div className="ui-actions flex gap-2">
-                  {c.status !== 'SENT' && c.status !== 'SENDING' && <button onClick={() => openCampaignEditor(c)} className="px-3 py-2 text-xs text-accent hover:bg-accent/10 rounded-lg transition-colors flex items-center gap-1">
+                  {c.status !== 'SENT' && c.status !== 'SENDING' && (c.isAutomated || !c.recipientCount) && <button onClick={() => openCampaignEditor(c)} className="px-3 py-2 text-xs text-accent hover:bg-accent/10 rounded-lg transition-colors flex items-center gap-1">
                     <PenLine className="w-3.5 h-3.5" /> Edit
                   </button>}
-                  <button onClick={() => handleDeleteCampaign(c.id)} className="px-3 py-2 text-xs text-red-500 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1">
+                  <button disabled={submitting || c.status === 'SENDING' || c.recipientCount > 0} title={c.recipientCount > 0 ? 'Delivery history and unsubscribe links are preserved' : undefined} onClick={() => handleDeleteCampaign(c.id)} className="px-3 py-2 text-xs text-red-500 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1">
                     <Trash2 className="w-3.5 h-3.5" /> Delete
                   </button>
-                  <button onClick={() => handleDuplicate(c.id)} className="px-3 py-2 text-xs text-muted hover:text-foreground hover:bg-surface-hover rounded-lg transition-colors flex items-center gap-1">
+                  <button disabled={submitting} onClick={() => handleDuplicate(c.id)} className="px-3 py-2 text-xs text-muted hover:text-foreground hover:bg-surface-hover rounded-lg transition-colors flex items-center gap-1">
                     <Copy className="w-3.5 h-3.5" /> Duplicate
                   </button>
                 </div>
                 <div className="flex gap-2">
-                  {c.status === 'SENT' && (
+                  {(c.status === 'SENT' || c.recipientCount > 0) && (
                     <button onClick={() => { setSelectedCampaign(null); handleViewAnalytics(c); }}
                       className="px-4 py-2 text-xs bg-accent/10 text-accent rounded-lg font-medium flex items-center gap-1">
                       <BarChart3 className="w-3.5 h-3.5" /> View Analytics
                     </button>
                   )}
                   {!c.isAutomated && (c.status === 'DRAFT' || c.status === 'SCHEDULED' || c.status === 'PAUSED') && (
-                    <button onClick={() => handleSendCampaign(c.id)} disabled={submitting}
+                    <button onClick={() => handleSendCampaign(c.id)} disabled={submitting || c.recipientCount > 0}
                       className="px-4 py-2 text-xs bg-accent hover:bg-accent-hover text-white rounded-lg font-semibold flex items-center gap-1 disabled:opacity-50">
                       <Send className="w-3.5 h-3.5" /> Send Now
                     </button>
@@ -981,7 +994,7 @@ export default function EmailMarketingPage() {
               {/* Recipient List */}
               <div>
                 <h4 className="text-sm font-semibold text-foreground mb-2">Recipient Activity (latest 200)</h4>
-                <div className="max-h-[250px] overflow-y-auto rounded-xl border border-border">
+                <div className="ui-table-scroll max-h-[250px] overflow-y-auto rounded-xl border border-border">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-surface">
                       <tr className="border-b border-border">
@@ -1026,7 +1039,7 @@ export default function EmailMarketingPage() {
       </Modal>
 
       {/* ═══════════════ CREATE CAMPAIGN MODAL ═══════════════ */}
-      <Modal isOpen={showCreateCampaign} onClose={() => { setShowCreateCampaign(false); setEditingCampaign(null); setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' }); }} title={editingCampaign ? 'Edit Email Campaign' : 'Create Email Campaign'} size="xl">
+      <Modal isOpen={showCreateCampaign} onClose={() => { setShowCreateCampaign(false); setEditingCampaign(null); setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', fromEmail: '', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' }); }} title={editingCampaign ? 'Edit Email Campaign' : 'Create Email Campaign'} size="xl">
         <div className="space-y-5">
           {/* Basic Info */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1060,11 +1073,17 @@ export default function EmailMarketingPage() {
           </div>
 
           {/* Body */}
+          <SenderSelect value={campaignForm.fromEmail} defaultEmail={emailConfig?.fromEmail || ''} senders={emailConfig?.senders || []}
+            onChange={value => setCampaignForm(f => ({ ...f, fromEmail: value }))} disabled={submitting} />
+          <Link href="/settings" className="text-xs text-accent underline">Manage aliases in Settings → Email Setup</Link>
+
+          {/* Body editor */}
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Email Body (HTML) *</label>
             <textarea rows={8} placeholder="Write your email HTML content..." value={campaignForm.body}
               onChange={e => setCampaignForm(f => ({ ...f, body: e.target.value }))}
               className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm resize-none focus:outline-none focus:border-accent/50 font-mono text-xs" />
+            <p className="text-xs text-muted mt-2">Customer name and store details are filled automatically. Replace starter placeholders such as collectionName, discountPercent, offerCode and expiryDate with your actual values in both subject and HTML before sending.</p>
           </div>
 
           {/* Audience */}
@@ -1172,7 +1191,7 @@ export default function EmailMarketingPage() {
 
           {/* Actions */}
           <div className="ui-actions flex justify-end gap-3 pt-2 border-t border-border">
-            <button onClick={() => setShowCreateCampaign(false)}
+            <button onClick={() => { setShowCreateCampaign(false); setEditingCampaign(null); setCampaignForm({ name: '', subject: '', body: '', templateId: '', audience: 'all', fromEmail: '', scheduledAt: '', isABTest: false, variantBSubject: '', variantBBody: '', abSplitPercent: 50, isAutomated: false, triggerType: '', triggerDelay: '' }); }}
               className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors">Cancel</button>
             <button onClick={() => handleCreateCampaign(true)} disabled={submitting || !campaignForm.name || !campaignForm.subject || !campaignForm.body}
               className="px-5 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-surface-hover transition-colors disabled:opacity-50">

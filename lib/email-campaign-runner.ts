@@ -1,6 +1,8 @@
 import { prisma } from '@/lib/db'
 import { getSmtpConfig, replaceVariables, sendBulkEmails } from '@/lib/email'
 import { getPublicAppUrl, isEmailTrackingConfigured } from '@/lib/email-tracking'
+import { resolveSender, smtpConfigSchema } from '@/lib/email-senders'
+import { assertEmailContentReady } from '@/lib/email-content'
 
 type DeliveryResult =
   | { success: true; data: { recipientCount: number; sent: number; failed: number; errors: string[] } }
@@ -43,12 +45,22 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
     return { success: false as const, error }
   }
 
+  let deliveryStarted = false
   try {
-    if (!await getSmtpConfig()) return restore('Email is not configured. Go to Settings → Email Setup to configure SMTP.')
+    const smtpConfig = await getSmtpConfig()
+    if (!smtpConfig) return restore('Email is not configured. Go to Settings → Email Setup to configure SMTP.')
     if (!isEmailTrackingConfigured()) return restore('Set NEXT_PUBLIC_SITE_URL and EMAIL_TRACKING_SECRET before sending campaigns so unsubscribe and tracking links work correctly.')
 
     const campaign = await prisma.emailCampaign.findUnique({ where: { id: campaignId } })
     if (!campaign) return restore('Campaign not found')
+    assertEmailContentReady(campaign.subject, campaign.body, campaign.isABTest ? campaign.variantB as { subject?: string; body?: string } | null : null)
+    // Legacy campaigns retain their original mailbox. Resolve BEFORE changing
+    // recipient history; removed aliases must fail, never silently fall back.
+    const sender = resolveSender(smtpConfig, campaign.fromEmail || smtpConfig.smtpUser, campaign.fromName)
+    smtpConfigSchema.parse(smtpConfig)
+    if (await prisma.emailRecipient.count({ where: { campaignId } })) {
+      return restore('This campaign already has delivery history. Review its recipient statuses and duplicate it for a new send; history will not be erased or automatically replayed.')
+    }
     const contacts = await eligibleContacts(campaign.audience)
     if (contacts.length === 0) return restore('No eligible subscribed recipients found.')
 
@@ -63,8 +75,8 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
       status: 'queued',
     }))
 
-    await prisma.emailRecipient.deleteMany({ where: { campaignId } })
     await prisma.emailRecipient.createMany({ data: recipientsToCreate })
+    deliveryStarted = true // From here, preserve history even if SMTP/DB outcome is uncertain.
     const recipients = await prisma.emailRecipient.findMany({ where: { campaignId }, select: { id: true, email: true, name: true, variant: true } })
     const variantB = campaign.variantB as Record<string, string> | null
     const variables = commonVariables(storeSettings)
@@ -75,84 +87,108 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
       return {
         recipientId: recipient.id,
         to: recipient.email,
-        subject: replaceVariables(subject, { ...variables, customerName: recipient.name }),
+        subject: replaceVariables(subject, { ...variables, customerName: recipient.name }, 'text'),
         html: replaceVariables(body, { ...variables, customerName: recipient.name }),
       }
     })
 
-    const delivery = await sendBulkEmails(deliveries)
+    const delivery = await sendBulkEmails(deliveries, { config: smtpConfig, fromEmail: sender.email, fromName: sender.name })
     const sentIds = delivery.results.filter(result => result.success).map(result => result.recipientId)
     const failedIds = delivery.results.filter(result => !result.success).map(result => result.recipientId)
     const now = new Date()
-    if (sentIds.length) await prisma.emailRecipient.updateMany({ where: { id: { in: sentIds } }, data: { status: 'sent', sentAt: now } })
-    if (failedIds.length) await prisma.emailRecipient.updateMany({ where: { id: { in: failedIds } }, data: { status: 'failed' } })
+    if (sentIds.length) {
+      await prisma.emailRecipient.updateMany({ where: { id: { in: sentIds } }, data: { sentAt: now } })
+      await prisma.emailRecipient.updateMany({ where: { id: { in: sentIds }, status: 'queued' }, data: { status: 'sent' } })
+    }
+    if (failedIds.length) await prisma.emailRecipient.updateMany({ where: { id: { in: failedIds }, status: 'queued' }, data: { status: 'failed' } })
 
     await prisma.emailCampaign.update({
       where: { id: campaignId },
       data: {
         status: delivery.sent > 0 ? 'SENT' : 'PAUSED',
+        fromEmail: sender.email,
+        fromName: sender.name,
         sentAt: delivery.sent > 0 ? now : null,
         totalRecipients: recipients.length,
         sent: delivery.sent,
-        opened: 0,
-        clicked: 0,
-        bounced: 0,
-        unsubscribed: 0,
       },
     })
+    if (!delivery.sent) return { success: false, error: `No emails were accepted by SMTP. ${delivery.errors[0] || 'Review SMTP settings and recipient statuses.'} Duplicate the campaign after resolving the error to retry without erasing history.` }
     return { success: true, data: { recipientCount: recipients.length, sent: delivery.sent, failed: delivery.failed, errors: delivery.errors } }
   } catch (error) {
-    await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: current.status } }).catch(() => {})
+    await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: deliveryStarted ? 'PAUSED' : current.status } }).catch(() => {})
     return { success: false, error: error instanceof Error ? error.message : 'Unable to send campaign.' }
   }
 }
 
 async function deliverAutomationToContact(campaignId: number, contactId: number) {
-  if (!await getSmtpConfig() || !isEmailTrackingConfigured()) return
-  const [campaign, contact, existing] = await Promise.all([
-    prisma.emailCampaign.findUnique({ where: { id: campaignId } }),
-    prisma.contact.findUnique({ where: { id: contactId }, select: { id: true, name: true, email: true, emailSubscribed: true } }),
-    prisma.emailRecipient.findFirst({ where: { campaignId, contactId }, select: { id: true } }),
-  ])
-  if (!campaign || !contact?.email || !contact.emailSubscribed || existing) return
-
+  const smtpConfig = await getSmtpConfig()
+  if (!smtpConfig || !isEmailTrackingConfigured()) return null
+  smtpConfigSchema.parse(smtpConfig)
+  // Short database claim, never hold a transaction open during network SMTP.
+  // Lock the campaign so scheduler/cron workers cannot queue the same contact
+  // twice, and pause/edit/delete can use the same serialization boundary.
+  const claimed = await prisma.$transaction(async tx => {
+    await tx.$queryRaw`SELECT id FROM "EmailCampaign" WHERE id = ${campaignId} FOR UPDATE`
+    const campaign = await tx.emailCampaign.findUnique({ where: { id: campaignId } })
+    if (!campaign?.isAutomated || campaign.status !== 'SCHEDULED') return null
+    assertEmailContentReady(campaign.subject, campaign.body, campaign.isABTest ? campaign.variantB as { subject?: string; body?: string } | null : null)
+    const contact = await tx.contact.findUnique({ where: {
+      id: contactId, emailSubscribed: true,
+      ...(campaign.audience === 'leads' ? { leads: { some: {} } } : {}),
+      ...(campaign.audience === 'customers' ? { orders: { some: {} } } : {}),
+    }, select: { id: true, name: true, email: true, emailSubscribed: true } })
+    if (!contact?.email || !contact.emailSubscribed) return null
+    if (await tx.emailRecipient.findFirst({ where: { campaignId, contactId }, select: { id: true } })) return null
+    const sender = resolveSender(smtpConfig, campaign.fromEmail || smtpConfig.smtpUser, campaign.fromName)
+    const variant = campaign.isABTest && contact.id % 100 >= campaign.abSplitPercent ? 'B' : 'A'
+    const recipient = await tx.emailRecipient.create({ data: { campaignId, contactId, email: contact.email, name: contact.name, variant, status: 'queued' } })
+    // Pin before delivery: later edits cannot change this in-flight identity.
+    await tx.emailCampaign.update({ where: { id: campaignId }, data: { fromEmail: sender.email, fromName: sender.name, totalRecipients: { increment: 1 } } })
+    return { campaign, contact, sender, variant, recipient }
+  })
+  if (!claimed) return null
+  const { campaign, contact, sender, variant, recipient } = claimed
   const variantB = campaign.variantB as Record<string, string> | null
-  const variant = campaign.isABTest && contact.id % 100 >= campaign.abSplitPercent ? 'B' : 'A'
-  const recipient = await prisma.emailRecipient.create({
-    data: { campaignId, contactId, email: contact.email, name: contact.name, variant, status: 'queued' },
-  }).catch(() => null)
-  if (!recipient) return
 
   const settings = await prisma.storeSettings.findFirst({ where: { id: 1 }, select: { storeName: true, phone: true, email: true, address: true } })
   const useVariantB = variant === 'B' && variantB
   const result = await sendBulkEmails([{
     recipientId: recipient.id,
-    to: contact.email,
-    subject: replaceVariables(useVariantB ? variantB.subject || campaign.subject : campaign.subject, { ...commonVariables(settings), customerName: contact.name }),
+    to: contact.email!,
+    subject: replaceVariables(useVariantB ? variantB.subject || campaign.subject : campaign.subject, { ...commonVariables(settings), customerName: contact.name }, 'text'),
     html: replaceVariables(useVariantB ? variantB.body || campaign.body : campaign.body, { ...commonVariables(settings), customerName: contact.name }),
-  }])
+  }], { config: smtpConfig, fromEmail: sender.email, fromName: sender.name })
   const now = new Date()
   const delivered = result.sent === 1
   await prisma.$transaction([
-    prisma.emailRecipient.update({ where: { id: recipient.id }, data: delivered ? { status: 'sent', sentAt: now } : { status: 'failed' } }),
-    prisma.emailCampaign.update({ where: { id: campaignId }, data: { totalRecipients: { increment: 1 }, ...(delivered ? { sent: { increment: 1 } } : {}) } }),
+    prisma.emailRecipient.updateMany({ where: { id: recipient.id, status: 'queued' }, data: delivered ? { status: 'sent' } : { status: 'failed' } }),
+    prisma.emailRecipient.update({ where: { id: recipient.id }, data: { sentAt: delivered ? now : null } }),
+    prisma.emailCampaign.update({ where: { id: campaignId }, data: delivered ? { sent: { increment: 1 } } : {} }),
   ])
+  return delivered
 }
 
-async function automationContacts(campaign: { id: number; createdAt: Date; triggerType: string | null; triggerDelay: number | null }) {
+async function automationContacts(campaign: { id: number; createdAt: Date; audience: string; triggerType: string | null; triggerDelay: number | null }, existing: Set<number>) {
   const cutoff = new Date(Date.now() - (campaign.triggerDelay || 0) * 60 * 60 * 1000)
+  // Filter processed contacts before the bounded query to avoid backlog starvation.
+  const pending = { contactId: { notIn: [...existing] }, contact: {
+    emailSubscribed: true, email: { not: null },
+    ...(campaign.audience === 'leads' ? { leads: { some: {} } } : {}),
+    ...(campaign.audience === 'customers' ? { orders: { some: {} } } : {}),
+  } }
   if (campaign.triggerType === 'new_lead') {
-    return (await prisma.lead.findMany({ where: { date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 })).map(row => row.contactId)
+    return (await prisma.lead.findMany({ where: { ...pending, date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 })).map(row => row.contactId)
   }
   if (campaign.triggerType === 'post_visit') {
     const [walkins, appointments] = await Promise.all([
-      prisma.walkin.findMany({ where: { date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 }),
-      prisma.appointment.findMany({ where: { date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 }),
+      prisma.walkin.findMany({ where: { ...pending, date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 }),
+      prisma.appointment.findMany({ where: { ...pending, status: 'Completed', date: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { date: 'desc' }, take: 5000 }),
     ])
     return [...new Set([...walkins, ...appointments].map(row => row.contactId))]
   }
   if (campaign.triggerType === 'post_purchase') {
-    return (await prisma.order.findMany({ where: { status: 'DELIVERED', deliveryDate: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { deliveryDate: 'desc' }, take: 5000 })).map(row => row.contactId)
+    return (await prisma.order.findMany({ where: { ...pending, status: 'DELIVERED', deliveryDate: { gte: campaign.createdAt, lte: cutoff } }, select: { contactId: true }, orderBy: { deliveryDate: 'desc' }, take: 5000 })).map(row => row.contactId)
   }
   return []
 }
@@ -161,19 +197,26 @@ export async function processDueEmailCampaigns() {
   const now = new Date()
   const [scheduled, automated] = await Promise.all([
     prisma.emailCampaign.findMany({ where: { status: 'SCHEDULED', isAutomated: false, scheduledAt: { lte: now } }, select: { id: true }, orderBy: { scheduledAt: 'asc' }, take: 10 }),
-    prisma.emailCampaign.findMany({ where: { status: 'SCHEDULED', isAutomated: true }, select: { id: true, createdAt: true, triggerType: true, triggerDelay: true }, take: 20 }),
+    prisma.emailCampaign.findMany({ where: { status: 'SCHEDULED', isAutomated: true }, select: { id: true, createdAt: true, audience: true, triggerType: true, triggerDelay: true }, take: 20 }),
   ])
 
   const scheduledResults = await Promise.all(scheduled.map(campaign => deliverEmailCampaign(campaign.id)))
   let automationDeliveries = 0
+  let automationFailures = 0
   for (const campaign of automated) {
     const existing = new Set((await prisma.emailRecipient.findMany({ where: { campaignId: campaign.id, contactId: { not: null } }, select: { contactId: true } })).map(row => row.contactId!))
-    const contactIds = await automationContacts(campaign)
+    const contactIds = await automationContacts(campaign, existing)
     for (const contactId of contactIds) {
       if (existing.has(contactId)) continue
-      await deliverAutomationToContact(campaign.id, contactId)
+      try {
+        const delivered = await deliverAutomationToContact(campaign.id, contactId)
+        if (delivered === true) automationDeliveries++
+        if (delivered === false) automationFailures++
+      } catch (error) {
+        automationFailures++
+        console.error('[email-campaign-scheduler] automation delivery failed', { campaignId: campaign.id, error: error instanceof Error ? error.message : 'Delivery failed' })
+      }
       existing.add(contactId)
-      automationDeliveries++
     }
   }
 
@@ -181,6 +224,7 @@ export async function processDueEmailCampaigns() {
     scheduledChecked: scheduled.length,
     scheduledSent: scheduledResults.filter(result => result.success).length,
     automationDeliveries,
+    automationFailures,
   }
 }
 

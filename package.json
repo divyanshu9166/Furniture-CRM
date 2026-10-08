@@ -13,6 +13,7 @@
     "test:manufacturing": "tsx --test lib/manufacturing/*.test.ts",
     "test:operations": "tsx --test lib/commerce/*.test.ts",
     "test:walkins": "tsx --test lib/walkins/*.test.ts",
+    "test:email": "tsx --test lib/email-senders.test.ts lib/email-delivery.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",
