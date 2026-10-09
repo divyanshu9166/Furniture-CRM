@@ -15,6 +15,7 @@ import { runReminderSweep } from './reminder-sweep'
 import { createInvoiceSchema, recordPaymentSchema, validateInvoiceIntent } from '../validations/invoice'
 import { createPurchaseOrderSchema } from '../validations/purchase'
 import { createCustomOrderSchema } from '../validations/custom-order'
+import type { InvoiceSnapshot } from '../billing/invoice-document'
 
 // In-memory transaction fixture only. Never imports lib/db or connects to a
 // DATABASE_URL, Redis, Meta, SMTP or a live customer account.
@@ -26,7 +27,7 @@ function fixture(stock = 10) {
     followUpEntry: [], stockLedger: [], batchMovement: [], productBatch: [],
     product: [{ id: 1, name: 'Chair', sku: 'C1', stock, costPrice: 50, category: { name: 'Furniture' } }],
     godown: [{ id: 1, name: 'Main', isDefault: true }], godownStock: [{ id: 1, productId: 1, godownId: 1, quantity: stock }],
-    staff: [{ id: 1, name: 'Worker', status: 'Active' }], storeSettings: [{ id: 1, gstRate: 0, invoicePrefix: 'INV-', invoicePadding: 4 }],
+    hsnCode: [], staff: [{ id: 1, name: 'Worker', status: 'Active' }], storeSettings: [{ id: 1, gstRate: 0, invoicePrefix: 'INV-', invoicePadding: 4 }],
   }
   let state = tables
   let failTimeline = false
@@ -156,6 +157,57 @@ test('new POS sale persists authoritative item identities and deducts physical s
   assert.equal(f.state().invoice[0].balanceDue, 200)
   assert.equal(f.state().payment.length, 0)
 })
+
+test('new invoice snapshots preserve buyer/seller/units without copying SMTP secrets', async () => {
+  const f = fixture(); Object.assign(f.state().storeSettings[0], { storeName: 'Original Seller', smtpPass: 'secret-not-for-invoices' });
+  f.state().product[0].unitOfMeasure = 'PCS';
+  const inv = await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput({ deliveryAddress: 'Delivery location' }), 'Cashier'));
+  const snapshot = inv.documentSnapshot as unknown as InvoiceSnapshot;
+  assert.equal(snapshot.buyer.customer, 'Buyer');
+  assert.deepEqual(snapshot.units, ['PCS']);
+  assert.equal(snapshot.deliveryAddress, 'Delivery location');
+  assert.ok(!JSON.stringify(inv.documentSnapshot).includes('secret-not-for-invoices'));
+  f.state().storeSettings[0].storeName = 'Changed Seller';
+  await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput({ customer: 'Updated buyer' }), 'Cashier', inv.id));
+  assert.equal(f.state().invoice[0].documentSnapshot.seller.storeName, 'Original Seller');
+  assert.equal(f.state().invoice[0].documentSnapshot.buyer.customer, 'Updated buyer');
+});
+
+test('registered seller supply-state mismatches roll back without touching existing records', async () => {
+  const f = fixture(); f.state().storeSettings[0].gstNumber = '10ABCDE1234F1Z5';
+  await assert.rejects(inventoryTransaction(f.db, tx => saveInvoice(tx, billInput({ supplyType: 'INTRASTATE', placeOfSupply: 'Maharashtra' }), 'Cashier')), /Supply type/);
+  assert.equal(f.state().invoice.length, 0); assert.equal(f.state().contact.length, 0); assert.equal(f.state().product[0].stock, 10);
+  await assert.rejects(inventoryTransaction(f.db, tx => saveInvoice(tx, billInput(), 'Cashier')), /place-of-supply/);
+});
+
+test('missing item HSN/rate uses the product and HSN master without replacing explicit zero GST', async () => {
+  const f = fixture(); f.state().product[0].hsnCode = '9401'; f.state().hsnCode.push({ code: '9401', gstRate: 12 });
+  const inv = await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput(), 'Cashier'));
+  assert.equal(inv.items[0].hsnCode, '9401'); assert.equal(inv.items[0].gstRate, 12); assert.equal(inv.gst, 24);
+  const zero = await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput({ items: [{ productId: 1, name: 'X', sku: 'X', quantity: 1, price: 100, gstRate: 0 }] }), 'Cashier'));
+  assert.equal(zero.gst, 0); assert.equal(zero.items[0].gstRate, 0);
+});
+
+test('cess-bearing HSN cannot silently create an invoice without its tax', async () => {
+  const f = fixture(); f.state().product[0].hsnCode = '9401'; f.state().hsnCode.push({ code: '9401', gstRate: 18, cessRate: 1 });
+  await assert.rejects(inventoryTransaction(f.db, tx => saveInvoice(tx, billInput(), 'Cashier')), /requires cess/);
+  assert.equal(f.state().invoice.length, 0); assert.equal(f.state().product[0].stock, 10);
+});
+
+test('specialised legacy taxes are preserved instead of rewritten through standard POS', async () => {
+  const f = fixture(); const inv = await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput(), 'Cashier'));
+  f.state().invoice[0].isRCM = true;
+  const before = structuredClone(f.state());
+  await assert.rejects(inventoryTransaction(f.db, tx => saveInvoice(tx, billInput(), 'Cashier', inv.id)), /specialised GST invoice/);
+  assert.deepEqual(f.state(), before);
+});
+
+test('registered held bill needs its supply-state details before final stock issue', async () => {
+  const f = fixture(); f.state().storeSettings[0].gstNumber = '10ABCDE1234F1Z5';
+  const inv = await inventoryTransaction(f.db, tx => saveInvoice(tx, billInput({ isHeld: true }), 'Cashier'));
+  await assert.rejects(inventoryTransaction(f.db, tx => finalizeInvoice(tx, inv.id, 'Cashier')), /place of supply/);
+  assert.equal(f.state().product[0].stock, 10); assert.equal(f.state().stockLedger.length, 0);
+});
 
 test('insufficient POS stock rolls back invoice, contacts, payments and ledger', async () => {
   const f = fixture(1)

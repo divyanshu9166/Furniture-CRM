@@ -9,6 +9,7 @@ import { normalizePhoneForMetaIndia } from '@/lib/whatsapp/phone-utils'
 import { revalidatePath } from 'next/cache'
 import { createInvoiceSchema, updateInvoiceSchema, recordPaymentSchema, createCreditNoteSchema } from '@/lib/validations/invoice'
 import type { InvoiceStatus } from '@prisma/client'
+import type { InvoiceSnapshot } from '@/lib/billing/invoice-document'
 
 
 
@@ -19,7 +20,7 @@ export async function getInvoices() {
   const invoices = await prisma.invoice.findMany({
     include: {
       contact: true,
-      items: true,
+      items: { orderBy: { id: 'asc' } },
       salesperson: true,
       payments: { orderBy: { date: 'desc' } },
       creditNotes: { orderBy: { date: 'desc' } },
@@ -32,17 +33,24 @@ export async function getInvoices() {
     data: invoices.map(inv => ({
       id: inv.displayId,
       dbId: inv.id,
-      customer: inv.contact.name,
-      phone: inv.contact.phone,
+      customer: (inv.documentSnapshot as InvoiceSnapshot | null)?.buyer.customer ?? inv.contact.name,
+      phone: (inv.documentSnapshot as InvoiceSnapshot | null)?.buyer.phone ?? inv.contact.phone,
       email: inv.contact.email,
-      address: inv.contact.address,
-      gstNumber: inv.contact.gstNumber,
+      address: inv.documentSnapshot ? (inv.documentSnapshot as InvoiceSnapshot).buyer.address : inv.contact.address,
+      gstNumber: inv.documentSnapshot ? (inv.documentSnapshot as InvoiceSnapshot).buyer.gstNumber : inv.contact.gstNumber,
+      documentSnapshot: inv.documentSnapshot as InvoiceSnapshot | null,
       items: inv.items.map(i => ({
         name: i.name,
         sku: i.sku,
         qty: i.quantity,
         price: i.price,
         hsnCode: i.hsnCode,
+        gstRate: i.gstRate,
+        taxableAmount: i.taxableAmount,
+        cgst: i.cgst,
+        sgst: i.sgst,
+        igst: i.igst,
+        cess: i.cess,
       })),
       subtotal: inv.subtotal,
       discount: inv.discount,
@@ -51,6 +59,8 @@ export async function getInvoices() {
       cgst: inv.cgst,
       sgst: inv.sgst,
       igst: inv.igst,
+      cess: inv.cess,
+      isRCM: inv.isRCM,
       supplyType: inv.supplyType,
       placeOfSupply: inv.placeOfSupply,
       transportCost: inv.transportCost,
@@ -94,7 +104,7 @@ export async function getInvoice(id: number) {
     where: { id },
     include: {
       contact: true,
-      items: { include: { product: true } },
+      items: { include: { product: true }, orderBy: { id: 'asc' } },
       salesperson: true,
       payments: { orderBy: { date: 'desc' } },
       creditNotes: { orderBy: { date: 'desc' } },

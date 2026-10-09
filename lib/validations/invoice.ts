@@ -9,7 +9,7 @@ export const invoiceItemSchema = z.object({
   sku: z.string(),
   quantity: z.number().int().positive().max(1000000),
   price: money,
-  hsnCode: z.string().optional(),
+  hsnCode: z.string().trim().refine(v => !v || /^\d{4}(\d{2})?(\d{2})?$/.test(v), 'HSN must contain 4, 6 or 8 digits').optional(),
   gstRate: z.number().min(0).max(100).optional(),
 })
 
@@ -24,7 +24,8 @@ export const createInvoiceSchema = z.object({
   customer: z.string().trim().min(1).max(160),
   phone: z.string().trim().refine(v => /^\+?[\d\s()-]+$/.test(v) && v.replace(/\D/g, '').length >= 10 && v.replace(/\D/g, '').length <= 15, 'Valid phone required'),
   address: z.string().optional(),
-  gstNumber: z.string().optional(),
+  gstNumber: z.string().trim().toUpperCase().refine(v => !v || /^(0[1-9]|[12]\d|3[0-8])[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(v), 'GSTIN must have a valid 15-character format').optional(),
+  deliveryAddress: z.string().trim().max(1000).optional(),
   items: z.array(invoiceItemSchema).min(1, 'At least one item required'),
   discount: money.default(0),
   discountType: z.enum(['none', 'flat', 'percent']).default('none'),

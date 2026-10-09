@@ -456,6 +456,7 @@ model Invoice {
   salesperson   Staff?        @relation(fields: [salespersonId], references: [id])
   notes         String?
   heldAt        DateTime? // non-null = parked/held bill
+  documentSnapshot Json? // immutable seller/buyer/unit details; null on legacy invoices
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 

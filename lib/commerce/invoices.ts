@@ -4,6 +4,7 @@ import { validateSellableItems } from '../inventory/products'
 import { activeStaff, assertId, billingContact, nextDocumentId } from './documents'
 import { assertPayment, calculateBill, invoiceBalance, settleTender } from './rules'
 import { validateInvoiceIntent, type CreateInvoiceInput, type UpdateInvoiceInput } from '../validations/invoice'
+import { supplyState, validGstin, type InvoiceSnapshot, type InvoiceStore } from '../billing/invoice-document'
 
 export async function lockedInvoice(tx: Prisma.TransactionClient, id: number) {
   assertId(id)
@@ -33,6 +34,7 @@ async function reverseInvoiceStock(tx: Prisma.TransactionClient, id: number, act
 export async function saveInvoice(tx: Prisma.TransactionClient, input: CreateInvoiceInput | UpdateInvoiceInput, actor: string, id?: number) {
   validateInvoiceIntent(input)
   const current = id ? await lockedInvoice(tx, id) : null
+  if (current && (current.isRCM || current.cess > 0 || !['INTRASTATE', 'INTERSTATE'].includes(current.supplyType))) throw new Error('This specialised GST invoice cannot be edited through standard POS. Preserve its tax history and ask your accountant to use the appropriate adjustment workflow')
   if (current?.creditNotes.length) throw new Error('Invoices with credit notes cannot be edited; preserve the adjustment history')
   if (current && input.payments?.length) throw new Error('Use the payment action to record payments; invoice edits preserve payment history')
   if (current && input.isHeld && !current.heldAt) throw new Error('An issued invoice cannot become a held bill')
@@ -41,11 +43,22 @@ export async function saveInvoice(tx: Prisma.TransactionClient, input: CreateInv
   const error = await validateSellableItems(tx, input.items.map(item => item.productId))
   if (error) throw new Error(error)
   const settings = await tx.storeSettings.findUnique({ where: { id: 1 } })
+  const previous = current?.documentSnapshot as InvoiceSnapshot | null | undefined
+  const supplierGstin = previous?.version === 1 ? previous.seller.gstNumber : settings?.gstNumber
   const supplyType = input.supplyType || 'INTRASTATE'
+  const destination = supplyState(input.placeOfSupply)
+  if (validGstin(supplierGstin) && !input.isHeld) {
+    if (!destination) throw new Error('A recognised place-of-supply state is required for a GST invoice')
+    if ((supplierGstin!.slice(0, 2) !== destination.code) !== (supplyType === 'INTERSTATE')) throw new Error('Supply type must match supplier GST state and place of supply')
+  }
   const products = await tx.product.findMany({ where: { id: { in: input.items.map(item => item.productId) } } })
+  const hsnValues = [...new Set(input.items.map(item => item.hsnCode ?? products.find(p => p.id === item.productId)?.hsnCode).filter((code): code is string => !!code))]
+  const hsnCodes = hsnValues.length ? await tx.hsnCode.findMany({ where: { code: { in: hsnValues } } }) : []
+  if (hsnCodes.some(code => code.cessRate > 0)) throw new Error('This HSN requires cess. Standard POS does not yet support cess calculation; do not issue a bill with missing tax')
   const authoritativeItems = input.items.map(item => {
     const product = products.find(row => row.id === item.productId)!
-    return { ...item, name: product.name, sku: product.sku }
+    const hsnCode = item.hsnCode ?? product.hsnCode ?? undefined
+    return { ...item, name: product.name, sku: product.sku, hsnCode, gstRate: item.gstRate ?? hsnCodes.find(h => h.code === hsnCode)?.gstRate ?? settings?.gstRate ?? 18 }
   })
   const bill = calculateBill(authoritativeItems, input.discount, input.discountType, settings?.gstRate ?? 18, supplyType === 'INTERSTATE', input.transportCost)
   const payments = current ? current.payments : settleTender(input.payments || [], bill.total)
@@ -54,12 +67,28 @@ export async function saveInvoice(tx: Prisma.TransactionClient, input: CreateInv
   const contact = await billingContact(tx, input)
   const now = new Date()
   const displayId = current?.displayId ?? await nextDocumentId(tx, 'invoice', (settings?.invoicePrefix || 'INV-').trim() || 'INV-', settings?.invoicePadding ?? 4)
+  if (!current && !/^[A-Za-z0-9/-]{1,16}$/.test(displayId)) throw new Error('Invoice prefix/number must fit the GST 16-character limit (letters, digits, / and - only)')
+  // Whitelist document fields: never copy SMTP credentials or other settings.
+  const seller: InvoiceStore = previous?.version === 1 ? previous.seller : {
+    storeName: settings?.storeName, address: settings?.address, phone: settings?.phone,
+    email: settings?.email, gstNumber: settings?.gstNumber, invoiceTerms: settings?.invoiceTerms,
+    bankName: settings?.bankName, bankAccountName: settings?.bankAccountName,
+    bankAccountNumber: settings?.bankAccountNumber, bankIfsc: settings?.bankIfsc,
+    bankUpiId: settings?.bankUpiId, paymentQr: settings?.paymentQr,
+  }
+  const documentSnapshot = {
+    version: 1, seller,
+    buyer: { customer: contact.name, phone: contact.phone, address: input.address !== undefined ? input.address.trim() || null : contact.address, gstNumber: input.gstNumber !== undefined ? input.gstNumber || null : contact.gstNumber },
+    deliveryAddress: input.deliveryAddress || null,
+    units: input.items.map(item => products.find(product => product.id === item.productId)?.unitOfMeasure || ''),
+  }
   const cashChange = current ? 0 : Math.max(0, (input.payments || []).reduce((sum, p) => sum + p.amount, 0) - bill.total)
   const data = {
     displayId, contactId: contact.id, subtotal: bill.subtotal, discount: bill.discount, discountType: input.discountType,
     gst: bill.gst, cgst: bill.cgst, sgst: bill.sgst, igst: bill.igst, transportCost: input.transportCost,
     total: bill.total, ...invoiceBalance(bill.total, paid), paymentMethod: current?.paymentMethod || payments[0]?.method || 'Cash',
-    supplyType, placeOfSupply: input.placeOfSupply?.trim() || null, dueDate: input.dueDate ? new Date(input.dueDate) : null,
+    supplyType, placeOfSupply: destination?.name || input.placeOfSupply?.trim() || null, dueDate: input.dueDate ? new Date(input.dueDate) : null,
+    documentSnapshot: JSON.parse(JSON.stringify(documentSnapshot)) as Prisma.InputJsonValue,
     salespersonId: input.salespersonId ?? null, notes: [input.notes, cashChange ? `POS cash change returned: ${cashChange}` : ''].filter(Boolean).join('\n') || null,
     items: { ...(current ? { deleteMany: {} } : {}), create: bill.rows.map(({ gstAmount: _gstAmount, ...item }) => item) },
   }
@@ -107,6 +136,11 @@ export async function creditInvoice(tx: Prisma.TransactionClient, data: { invoic
 export async function finalizeInvoice(tx: Prisma.TransactionClient, id: number, actor: string) {
   const invoice = await lockedInvoice(tx, id)
   if (!invoice.heldAt) throw new Error('Invoice is not held')
+  const snapshot = invoice.documentSnapshot as InvoiceSnapshot | null
+  if (validGstin(snapshot?.seller.gstNumber)) {
+    const destination = supplyState(invoice.placeOfSupply)
+    if (!destination || (snapshot!.seller.gstNumber!.slice(0, 2) !== destination.code) !== (invoice.supplyType === 'INTERSTATE')) throw new Error('Edit this held bill and correct its GST place of supply/supply type before finalizing')
+  }
   if (await tx.stockLedger.count({ where: { referenceType: 'Invoice', referenceId: id } })) throw new Error('Held bill has unexpected stock history; review it before finalizing')
   await issueInvoiceStock(tx, invoice, actor)
   return tx.invoice.update({ where: { id }, data: { heldAt: null } })

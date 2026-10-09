@@ -4,6 +4,14 @@ import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
 import { createHsnCodeSchema, createEWayBillSchema } from '@/lib/validations/gst'
+import type { InvoiceSnapshot } from '@/lib/billing/invoice-document'
+
+// Use captured buyer details for new invoices; do not let a later CRM contact
+// edit reclassify an issued B2B invoice or its credit note as B2C.
+function recordedGstContact<T extends { name: string; address?: string | null; gstNumber: string | null }>(contact: T, snapshotValue: unknown): T {
+  const snapshot = snapshotValue as InvoiceSnapshot | null
+  return snapshot?.version === 1 ? { ...contact, name: snapshot.buyer.customer, address: snapshot.buyer.address ?? null, gstNumber: snapshot.buyer.gstNumber ?? null } : contact
+}
 
 // ─── HSN MASTER ──────────────────────────────────────
 
@@ -47,9 +55,9 @@ export async function generateGSTR1(period: string) {
 
   const { from, to } = periodRange(period)
 
-  const [invoices, creditNotes, store] = await Promise.all([
+  const [storedInvoices, storedCreditNotes, store] = await Promise.all([
     prisma.invoice.findMany({
-      where: { date: { gte: from, lt: to }, invoiceStatus: 'ACTIVE' },
+      where: { date: { gte: from, lt: to }, invoiceStatus: 'ACTIVE', heldAt: null },
       include: {
         contact: { select: { name: true, gstNumber: true, state: true, address: true } },
         items: true,
@@ -66,6 +74,9 @@ export async function generateGSTR1(period: string) {
     }),
     prisma.storeSettings.findFirst({ where: { id: 1 } }),
   ])
+
+  const invoices = storedInvoices.map(inv => ({ ...inv, contact: recordedGstContact(inv.contact, inv.documentSnapshot) }))
+  const creditNotes = storedCreditNotes.map(note => ({ ...note, invoice: { ...note.invoice, contact: recordedGstContact(note.invoice.contact, note.invoice.documentSnapshot) } }))
 
   const storeGSTIN = store?.gstNumber || ''
   const storeState = store?.address?.split(',').pop()?.trim() || 'Maharashtra'
@@ -95,17 +106,14 @@ export async function generateGSTR1(period: string) {
     for (const item of inv.items) {
       const hsn = item.hsnCode || 'OTHERS'
       if (!hsnMap[hsn]) hsnMap[hsn] = { description: item.name, uqc: 'NOS', qty: 0, taxableValue: 0, igst: 0, cgst: 0, sgst: 0, cess: 0 }
-      const taxable = item.taxableAmount || item.quantity * item.price
-      const rate = item.gstRate || (store?.gstRate || 18)
-      const itemGST = Math.round(taxable * rate / 100)
+      // Saved tax is authoritative. Zero is a valid taxable value/rate;
+      // regenerating GST here changed fully-discounted and zero-rated bills.
+      const taxable = item.taxableAmount
       hsnMap[hsn].qty += item.quantity
       hsnMap[hsn].taxableValue += taxable
-      if (inv.supplyType === 'INTERSTATE') {
-        hsnMap[hsn].igst += itemGST
-      } else {
-        hsnMap[hsn].cgst += Math.round(itemGST / 2)
-        hsnMap[hsn].sgst += itemGST - Math.round(itemGST / 2)
-      }
+      hsnMap[hsn].igst += item.igst
+      hsnMap[hsn].cgst += item.cgst
+      hsnMap[hsn].sgst += item.sgst
       hsnMap[hsn].cess += item.cess || 0
     }
   }

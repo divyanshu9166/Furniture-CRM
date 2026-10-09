@@ -24,6 +24,8 @@ import {moveInvoiceToDraft as moveInvoiceToDraftAction} from '@/app/actions/draf
 import {getProducts as getProductsAction} from '@/app/actions/products';
 import {getStaff as getStaffAction} from '@/app/actions/staff';
 import {getStoreSettings as getStoreSettingsAction} from '@/app/actions/settings';
+import { invoiceGstWarnings } from '@/lib/billing/invoice-document';
+import { createInvoicePdf, downloadInvoicePdf, printInvoice } from '@/lib/billing/invoice-export';
 
 // ─── CONSTANTS ─────────────────────────────────────────
 
@@ -145,31 +147,6 @@ const buildInvoiceShareMessage = (invoice, storeSettings) => {
 
 const normalizeHsnCode = (value) => String(value || '').replace(/\s+/g, '').toUpperCase();
 
-const buildInvoiceFooterHtml = (store) => {
-  const bankLines = [];
-  if (store?.bankName) bankLines.push(`Bank: ${store.bankName}`);
-  if (store?.bankAccountName) bankLines.push(`A/C Name: ${store.bankAccountName}`);
-  if (store?.bankAccountNumber) bankLines.push(`A/C No: ${store.bankAccountNumber}`);
-  if (store?.bankIfsc) bankLines.push(`IFSC: ${store.bankIfsc}`);
-  if (store?.bankUpiId) bankLines.push(`UPI: ${store.bankUpiId}`);
-
-  const bankBlock = bankLines.length > 0
-    ? `<div class="footer-box"><h4>Bank Details</h4>${bankLines.map(line => `<div class="muted">${line}</div>`).join('')}</div>`
-    : '';
-
-  const termsText = store?.invoiceTerms ? store.invoiceTerms.replace(/\n/g, '<br/>') : '';
-  const termsBlock = termsText
-    ? `<div class="footer-box"><h4>Terms</h4><div class="muted">${termsText}</div></div>`
-    : '';
-
-  const qrBlock = store?.paymentQr
-    ? `<div class="footer-box qr-box"><h4>Pay via QR</h4><img class="qr-img" src="${store.paymentQr}" alt="Payment QR" /></div>`
-    : '';
-
-  if (!bankBlock && !termsBlock && !qrBlock) return '';
-
-  return `<div class="footer-grid">${bankBlock}${termsBlock}${qrBlock}</div>`;
-};
 
 // ─── MAIN COMPONENT ───────────────────────────────────
 
@@ -217,6 +194,8 @@ export default function BillingPage() {
   const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [exportingInvoice, setExportingInvoice] = useState(false);
+  const [preparedInvoiceShare, setPreparedInvoiceShare] = useState(null);
   const { session } = useSession();
   const { notify } = useAlertToast();
   const [invoiceToDraft, setInvoiceToDraft] = useState(null);
@@ -226,6 +205,7 @@ export default function BillingPage() {
   // POS state
   const [posItems, setPosItems] = useState([]);
   const [posCustomer, setPosCustomer] = useState({ name: '', phone: '', address: '', gstNumber: '' });
+  const [posDeliveryAddress, setPosDeliveryAddress] = useState('');
   const [posDiscount, setPosDiscount] = useState(0);
   const [posDiscountType, setPosDiscountType] = useState('flat');
   const [posTransportCost, setPosTransportCost] = useState(0);
@@ -326,7 +306,7 @@ export default function BillingPage() {
 
   // ─── COMPUTED VALUES ───────────────────────────────────
 
-  const gstRate = storeSettings?.gstRate || 18;
+  const gstRate = storeSettings?.gstRate ?? 18;
 
   const filtered = useMemo(() => {
     let result = invoices.filter(inv => {
@@ -436,6 +416,7 @@ export default function BillingPage() {
 
   const paymentAutoFillRef = useRef(true);
   const clearPOS = () => {
+    setPosDeliveryAddress('');
     setPosItems([]);
     setEditingInvoiceId(null);
     paymentAutoFillRef.current = true;
@@ -497,8 +478,9 @@ export default function BillingPage() {
       const payload = {
         customer: posCustomer.name,
         phone: posCustomer.phone,
-        address: posCustomer.address || undefined,
-        gstNumber: posCustomer.gstNumber || undefined,
+        address: posCustomer.address,
+        gstNumber: posCustomer.gstNumber,
+        deliveryAddress: posDeliveryAddress || undefined,
         items: posItems.map(i => ({
           productId: i.id,
           name: i.name,
@@ -555,16 +537,18 @@ export default function BillingPage() {
 
       const invoice = res.data;
       const contact = invoice.contact || {};
+      const recordedBuyer = invoice.documentSnapshot?.buyer;
+      setPosDeliveryAddress(invoice.documentSnapshot?.deliveryAddress || '');
       const placeValue = (invoice.placeOfSupply || '').trim();
       const dueDateValue = invoice.dueDate
         ? new Date(invoice.dueDate).toISOString().split('T')[0]
         : '';
 
       setPosCustomer({
-        name: contact.name || inv.customer || '',
-        phone: contact.phone || inv.phone || '',
-        address: contact.address || inv.address || '',
-        gstNumber: contact.gstNumber || inv.gstNumber || '',
+        name: recordedBuyer?.customer ?? contact.name ?? inv.customer ?? '',
+        phone: recordedBuyer?.phone ?? contact.phone ?? inv.phone ?? '',
+        address: recordedBuyer?.address ?? contact.address ?? inv.address ?? '',
+        gstNumber: recordedBuyer ? recordedBuyer.gstNumber || '' : contact.gstNumber || inv.gstNumber || '',
       });
       setPosItems(invoice.items.map(item => {
         const stock = (item.product?.stock ?? 0) + (invoice.heldAt ? 0 : item.quantity);
@@ -752,339 +736,70 @@ export default function BillingPage() {
 
   // ─── html2pdf LOADER (loads once into main document — works on iOS/Android) ─
 
-  const loadHtml2Pdf = () => new Promise((resolve, reject) => {
-    if (window.html2pdf) { resolve(window.html2pdf); return; }
-    const existing = document.querySelector('script[data-html2pdf]');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.html2pdf));
-      existing.addEventListener('error', reject);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.setAttribute('data-html2pdf', '1');
-    script.onload = () => resolve(window.html2pdf);
-    script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
-    document.head.appendChild(script);
-  });
-
-  // ─── PRINT INVOICE ─────────────────────────────────────
-
-  const handlePrintInvoice = (inv) => {
-
-    const store = storeSettings || {};
-    const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
-    const invoiceFooter = buildInvoiceFooterHtml(store);
-    const printContent = `
-      <html><head><title>Invoice ${inv.id}</title>
-      <style>
-        * { box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
-        @page { size: A4; margin: 12mm; }
-        .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
-        .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
-        .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
-        .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
-        .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
-        th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
-        .totals { margin-left: auto; width: 300px; }
-        .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
-        .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
-        .totals .paid { color: #15803d; }
-        .totals .due { color: #b91c1c; font-weight: 600; }
-        .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
-        .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
-        .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
-        .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
-        .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
-        .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
-        .footer-box .muted { color: #555; margin-top: 2px; }
-        .qr-box { text-align: center; }
-        .qr-img { width: 110px; height: 110px; object-fit: contain; }
-        .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
-        @media print { body { padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-      </style></head><body>
-      <div class="invoice-container">
-      <div class="header">
-        <div><div class="store-name">${store.storeName || 'Furniture Store'}</div>
-        <div style="font-size:12px;color:#888;margin-top:4px">${store.address || ''}</div>
-        <div style="font-size:12px;color:#888">${store.phone || ''} ${store.email ? '· ' + store.email : ''}</div>
-        ${store.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${store.gstNumber}</div>` : ''}</div>
-        <div><div class="invoice-id">${inv.id}</div>
-        <div style="font-size:12px;color:#888;text-align:right;margin-top:4px">${inv.date}${inv.time ? ' · ' + inv.time : ''}</div>
-        ${inv.invoiceStatus !== 'ACTIVE' ? `<div style="font-size:12px;color:#b91c1c;text-align:right;font-weight:600;margin-top:4px">${inv.invoiceStatus}</div>` : ''}</div>
-      </div>
-      <div class="meta">
-        <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}${inv.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${inv.gstNumber}</div>` : ''}</div>
-        <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
-        ${inv.placeOfSupply ? `<div style="font-size:12px;color:#888;margin-top:2px">Place of Supply: ${inv.placeOfSupply}</div>` : ''}
-        ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
-      </div>
-      <table><thead><tr><th>#</th><th>Item</th><th>SKU</th><th>HSN</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead><tbody>
-      ${inv.items.map((item, i) => `<tr><td>${i + 1}</td><td>${item.name}</td><td style="font-family:monospace;font-size:11px;color:#888">${item.sku || '-'}</td><td style="font-size:11px;color:#888">${item.hsnCode || '-'}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right">₹${item.price.toLocaleString('en-IN')}</td><td style="text-align:right;font-weight:500">₹${(item.price * item.qty).toLocaleString('en-IN')}</td></tr>`).join('')}
-      </tbody></table>
-      <div class="totals">
-        <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
-        ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
-        ${isInterstate
-        ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-        : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-             <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
-        ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
-        <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
-        <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
-        ${inv.balanceDue > 0 ? `<div class="row due"><span>Balance Due</span><span>₹${inv.balanceDue.toLocaleString('en-IN')}</span></div>` : ''}
-      </div>
-      ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
-      ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
-      ${invoiceFooter}
-      <div class="footer">Thank you for your purchase!</div>
-      </div>
-      </body></html>`;
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'fixed';
-    printFrame.style.right = '0';
-    printFrame.style.bottom = '0';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = '0';
-    printFrame.onload = () => {
-      const win = printFrame.contentWindow;
-      if (!win) return;
-      win.document.title = `Invoice ${inv.id}`;
-      win.focus();
-      win.print();
-      setTimeout(() => {
-        printFrame.remove();
-      }, 500);
-    };
-    printFrame.srcdoc = printContent;
-    document.body.appendChild(printFrame);
+  const reportInvoiceWarnings = (inv) => {
+    const warnings = invoiceGstWarnings(inv, storeSettings || {});
+    if (warnings.length) notify('GST review needed: ' + warnings[0], { variant: 'warning' });
   };
 
-  const handleDownloadInvoice = (inv) => {
-    const store = storeSettings || {};
-    const isInterstate = inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0);
-    const invoiceFooter = buildInvoiceFooterHtml(store);
-    const printContent = `
-      <html><head><title>Invoice ${inv.id}</title>
-      <style>
-        * { box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
-        @page { size: A4; margin: 12mm; }
-        .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
-        .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
-        .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
-        .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
-        .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
-        th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-        td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
-        .totals { margin-left: auto; width: 300px; }
-        .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
-        .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
-        .totals .paid { color: #15803d; }
-        .totals .due { color: #b91c1c; font-weight: 600; }
-        .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
-        .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
-        .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
-        .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
-        .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
-        .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
-        .footer-box .muted { color: #555; margin-top: 2px; }
-        .qr-box { text-align: center; }
-        .qr-img { width: 110px; height: 110px; object-fit: contain; }
-        .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
-      </style></head><body>
-      <div class="invoice-container">
-        <div class="header">
-          <div><div class="store-name">${store.storeName || 'Furniture Store'}</div>
-          <div style="font-size:12px;color:#888;margin-top:4px">${store.address || ''}</div>
-          <div style="font-size:12px;color:#888">${store.phone || ''} ${store.email ? '· ' + store.email : ''}</div>
-          ${store.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${store.gstNumber}</div>` : ''}</div>
-          <div><div class="invoice-id">${inv.id}</div>
-          <div style="font-size:12px;color:#888;text-align:right;margin-top:4px">${inv.date}${inv.time ? ' · ' + inv.time : ''}</div>
-          ${inv.invoiceStatus !== 'ACTIVE' ? `<div style="font-size:12px;color:#b91c1c;text-align:right;font-weight:600;margin-top:4px">${inv.invoiceStatus}</div>` : ''}</div>
-        </div>
-        <div class="meta">
-          <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}${inv.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${inv.gstNumber}</div>` : ''}</div>
-          <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
-          ${inv.placeOfSupply ? `<div style="font-size:12px;color:#888;margin-top:2px">Place of Supply: ${inv.placeOfSupply}</div>` : ''}
-          ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
-        </div>
-        <table><thead><tr><th>#</th><th>Item</th><th>SKU</th><th>HSN</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead><tbody>
-        ${inv.items.map((item, i) => `<tr><td>${i + 1}</td><td>${item.name}</td><td style="font-family:monospace;font-size:11px;color:#888">${item.sku || '-'}</td><td style="font-size:11px;color:#888">${item.hsnCode || '-'}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right">₹${item.price.toLocaleString('en-IN')}</td><td style="text-align:right;font-weight:500">₹${(item.price * item.qty).toLocaleString('en-IN')}</td></tr>`).join('')}
-        </tbody></table>
-        <div class="totals">
-          <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
-          ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
-          ${isInterstate
-        ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-        : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-               <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
-          ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
-          <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
-          <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
-          ${inv.balanceDue > 0 ? `<div class="row due"><span>Balance Due</span><span>₹${inv.balanceDue.toLocaleString('en-IN')}</span></div>` : ''}
-        </div>
-        ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
-        ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
-        ${invoiceFooter}
-        <div class="footer">Thank you for your purchase!</div>
-      </div>
-      </body></html>`;
-
-    // Use div in main document (not iframe) — works on iOS Safari & Android Chrome
-    loadHtml2Pdf().then(html2pdf => {
-      const container = document.createElement('div');
-      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:#fff;z-index:-1;';
-      container.innerHTML = printContent;
-      document.body.appendChild(container);
-
-      const element = container.querySelector('.invoice-container') || container;
-      const opt = {
-        margin: 0.2,
-        filename: `Invoice_${inv.id}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      };
-
-      html2pdf().set(opt).from(element).save().then(() => {
-        document.body.removeChild(container);
-      }).catch(() => {
-        document.body.removeChild(container);
-      });
-    }).catch(() => {
-      // Fallback: open print dialog
-      handlePrintInvoice(inv);
-    });
+  const handlePrintInvoice = async (inv) => {
+    if (exportingInvoice) return;
+    setExportingInvoice(true);
+    try {
+      reportInvoiceWarnings(inv);
+      await printInvoice(inv, storeSettings || {});
+    } catch (err) {
+      notify(err.message || 'Unable to print invoice. Try downloading the PDF.', { variant: 'danger' });
+    } finally { setExportingInvoice(false); }
   };
 
-
-  const handleShareInvoiceWhatsApp = (inv) => {
-    if (!inv?.phone) {
-      notify('Customer phone number is missing', { variant: 'danger' });
-      return;
-    }
-
-    const message = buildInvoiceShareMessage(inv, storeSettings) + '\n\n*(Invoice PDF is attached)*';
-    const invoiceFooter = buildInvoiceFooterHtml(storeSettings || {});
-
-    if (navigator.share && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-      notify('Preparing PDF for sharing...', { variant: 'info' });
-      const element = document.createElement('div');
-      element.style.cssText = 'width:794px;background:#fff;';
-      element.innerHTML = `
-        <html><head><title>Invoice ${inv.id}</title>
-        <style>
-          * { box-sizing: border-box; }
-          body { font-family: 'Segoe UI', sans-serif; margin: 0; padding: 0; color: #1a1a1a; }
-          @page { size: A4; margin: 12mm; }
-          .invoice-container { width: 100%; max-width: 186mm; margin: 0 auto; }
-          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #e5e5e5; padding-bottom: 20px; margin-bottom: 20px; }
-          .store-name { font-size: 22px; font-weight: 700; color: #b45309; }
-          .invoice-id { font-size: 18px; font-weight: 700; text-align: right; }
-          .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
-          .meta-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 16px; table-layout: fixed; }
-          th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #e5e5e5; font-size: 11px; text-transform: uppercase; color: #888; }
-          td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 13px; word-break: break-word; }
-          .totals { margin-left: auto; width: 300px; }
-          .totals .row { display: flex; justify-content: space-between; padding: 5px 0; font-size: 13px; }
-          .totals .grand { border-top: 2px solid #1a1a1a; padding-top: 10px; font-size: 16px; font-weight: 700; }
-          .totals .paid { color: #15803d; }
-          .totals .due { color: #b91c1c; font-weight: 600; }
-          .payments { margin-top: 16px; padding: 12px; background: #f9fafb; border-radius: 8px; }
-          .payments h4 { font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 8px; letter-spacing: 0.5px; }
-          .payments .entry { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
-          .footer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
-          .footer-box { border: 1px solid #e5e5e5; border-radius: 8px; padding: 10px; font-size: 11px; }
-          .footer-box h4 { margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
-          .footer-box .muted { color: #555; margin-top: 2px; }
-          .qr-box { text-align: center; }
-          .qr-img { width: 110px; height: 110px; object-fit: contain; }
-          .footer { border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 24px; font-size: 11px; color: #888; text-align: center; }
-        </style></head><body>
-        <div class="invoice-container">
-          <div class="header">
-            <div><div class="store-name">${storeSettings?.storeName || 'Furniture Store'}</div>
-            <div style="font-size:12px;color:#888;margin-top:4px">${storeSettings?.address || ''}</div>
-            <div style="font-size:12px;color:#888">${storeSettings?.phone || ''} ${storeSettings?.email ? '· ' + storeSettings?.email : ''}</div>
-            ${storeSettings?.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${storeSettings.gstNumber}</div>` : ''}</div>
-            <div><div class="invoice-id">${inv.id}</div>
-            <div style="font-size:12px;color:#888;text-align:right;margin-top:4px">${inv.date}${inv.time ? ' · ' + inv.time : ''}</div>
-            ${inv.invoiceStatus !== 'ACTIVE' ? `<div style="font-size:12px;color:#b91c1c;text-align:right;font-weight:600;margin-top:4px">${inv.invoiceStatus}</div>` : ''}</div>
-          </div>
-          <div class="meta">
-            <div><div class="meta-label">Bill To</div><div style="font-weight:600;margin-top:4px">${inv.customer}</div><div style="font-size:12px;color:#888">${inv.phone || ''}</div>${inv.address ? `<div style="font-size:12px;color:#888;margin-top:2px">${inv.address}</div>` : ''}${inv.gstNumber ? `<div style="font-size:12px;color:#888;margin-top:2px">GSTIN: ${inv.gstNumber}</div>` : ''}</div>
-            <div style="text-align:right"><div class="meta-label">Payment</div><div style="margin-top:4px">${inv.paymentMethod} · <strong>${inv.paymentStatus}</strong></div>
-            ${inv.placeOfSupply ? `<div style="font-size:12px;color:#888;margin-top:2px">Place of Supply: ${inv.placeOfSupply}</div>` : ''}
-            ${inv.dueDate ? `<div style="font-size:12px;color:#888;margin-top:2px">Due: ${inv.dueDate}</div>` : ''}</div>
-          </div>
-          <table><thead><tr><th>#</th><th>Item</th><th>SKU</th><th>HSN</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead><tbody>
-          ${inv.items.map((item, i) => `<tr><td>${i + 1}</td><td>${item.name}</td><td style="font-family:monospace;font-size:11px;color:#888">${item.sku || '-'}</td><td style="font-size:11px;color:#888">${item.hsnCode || '-'}</td><td style="text-align:center">${item.qty}</td><td style="text-align:right">₹${item.price.toLocaleString('en-IN')}</td><td style="text-align:right;font-weight:500">₹${(item.price * item.qty).toLocaleString('en-IN')}</td></tr>`).join('')}
-          </tbody></table>
-          <div class="totals">
-            <div class="row"><span>Subtotal</span><span>₹${inv.subtotal.toLocaleString('en-IN')}</span></div>
-            ${inv.discount > 0 ? `<div class="row"><span>Discount</span><span style="color:#16a34a">-₹${inv.discount.toLocaleString('en-IN')}</span></div>` : ''}
-            ${(inv.supplyType === 'INTERSTATE' || (inv.igst && inv.igst > 0))
-          ? `<div class="row"><span>IGST</span><span>₹${(inv.igst || 0).toLocaleString('en-IN')}</span></div>`
-          : `<div class="row"><span>CGST</span><span>₹${inv.cgst.toLocaleString('en-IN')}</span></div>
-                 <div class="row"><span>SGST</span><span>₹${inv.sgst.toLocaleString('en-IN')}</span></div>`}
-            ${inv.transportCost > 0 ? `<div class="row"><span>Transport Cost</span><span>₹${inv.transportCost.toLocaleString('en-IN')}</span></div>` : ''}
-            <div class="row grand"><span>Total</span><span>₹${inv.total.toLocaleString('en-IN')}</span></div>
-            <div class="row paid"><span>Amount Paid</span><span>₹${inv.amountPaid.toLocaleString('en-IN')}</span></div>
-            ${inv.balanceDue > 0 ? `<div class="row due"><span>Balance Due</span><span>₹${inv.balanceDue.toLocaleString('en-IN')}</span></div>` : ''}
-          </div>
-          ${inv.payments && inv.payments.length > 0 ? `<div class="payments"><h4>Payment History</h4>${inv.payments.map(p => `<div class="entry"><span>${p.method}${p.reference ? ' · ' + p.reference : ''} — ${p.date}</span><span>₹${p.amount.toLocaleString('en-IN')}</span></div>`).join('')}</div>` : ''}
-          ${inv.notes ? `<div style="margin-top:16px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px;color:#666">Notes: ${inv.notes}</div>` : ''}
-          ${invoiceFooter}
-          <div class="footer">Thank you for your purchase!</div>
-        </div>
-        </body></html>
-      `;
-
-      const opt = {
-        margin: 0.2,
-        filename: 'Invoice_${inv.id}.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-      };
-
-      html2pdf().set(opt).from(element).outputPdf('blob').then(async (pdfBlob) => {
-        const file = new File([pdfBlob], 'Invoice_${inv.id}.pdf', { type: 'application/pdf' });
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'Invoice ${inv.id}',
-              text: buildInvoiceShareMessage(inv, storeSettings)
-            });
-            return;
-          } catch (err) {
-            console.warn('Share failed', err);
-          }
-        }
-        fallbackShareInvoice(inv, message);
-      });
-    } else {
-      fallbackShareInvoice(inv, message);
-    }
+  const handleDownloadInvoice = async (inv) => {
+    if (exportingInvoice) return;
+    setExportingInvoice(true);
+    try {
+      reportInvoiceWarnings(inv);
+      const file = await createInvoicePdf(inv, storeSettings || {});
+      downloadInvoicePdf(file);
+      notify('Invoice PDF downloaded', { variant: 'success' });
+    } catch (err) {
+      notify(err.message || 'Invoice PDF could not be generated. Please retry.', { variant: 'danger' });
+    } finally { setExportingInvoice(false); }
   };
 
-  const fallbackShareInvoice = (inv, message) => {
-    handleDownloadInvoice(inv);
-    notify('PDF downloaded! Please attach it to the WhatsApp chat.', { variant: 'success' });
+  const handleShareInvoiceWhatsApp = async (inv) => {
+    if (exportingInvoice) return;
+    if (!inv?.phone) { notify('Customer phone is missing', { variant: 'danger' }); return; }
+    const message = buildInvoiceShareMessage(inv, storeSettings);
     const url = buildWhatsAppUrl(inv.phone, message);
-    setTimeout(() => {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }, 600);
+    if (!url) { notify('Customer phone is invalid', { variant: 'danger' }); return; }
+    setExportingInvoice(true);
+    // Reserve a fallback tab during the user's click; async PDF generation
+    // otherwise loses browser activation and gets blocked on mobile.
+    const nativeShare = typeof navigator.share === 'function' && typeof navigator.canShare === 'function';
+    const fallbackTab = nativeShare ? null : window.open('about:blank', '_blank');
+    if (fallbackTab) fallbackTab.opener = null;
+    try {
+      reportInvoiceWarnings(inv);
+      const generated = await createInvoicePdf(inv, storeSettings || {});
+      const file = new File([generated.blob], generated.filename, { type: 'application/pdf' });
+      if (nativeShare && navigator.canShare({ files: [file] })) {
+        // Native sharing requires a fresh user gesture. Rendering a large PDF
+        // can expire the original click's activation, so offer an explicit tap.
+        setSelectedInvoice(null);
+        setPreparedInvoiceShare({ generated, file, message, url, id: inv.id });
+        return;
+      }
+      downloadInvoicePdf(generated);
+      // Opening WhatsApp shares text only, not the downloaded file.
+      if (fallbackTab) fallbackTab.location.replace(url);
+      notify('PDF downloaded. Open WhatsApp and attach the file manually.', { variant: 'success' });
+      if (!fallbackTab) {
+        setSelectedInvoice(null);
+        setPreparedInvoiceShare({ generated, file, message, url, id: inv.id });
+      }
+    } catch (err) {
+      fallbackTab?.close();
+      notify(err.message || 'Unable to prepare invoice PDF for sharing.', { variant: 'danger' });
+    } finally { setExportingInvoice(false); }
   };
 
   const handleShareInvoiceEmail = (inv) => {
@@ -1116,6 +831,7 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-6 animate-[fade-in_0.3s_ease]">
+      {exportingInvoice && <div role="status" className="glass-card px-4 py-3 text-sm text-accent">Preparing invoice document… Please wait.</div>}
       {/* Header */}
       <div className="ui-page-header flex items-center justify-between flex-wrap gap-4">
         <div>
@@ -1304,7 +1020,7 @@ export default function BillingPage() {
                         <td className="text-muted whitespace-nowrap">{inv.date}</td>
                         <td>
                           <div className="ui-actions flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                            <button onClick={() => handleShareInvoiceWhatsApp(inv)}
+                            <button disabled={exportingInvoice} onClick={() => handleShareInvoiceWhatsApp(inv)}
                               className="p-1.5 rounded-lg hover:bg-emerald-500/10 text-muted hover:text-emerald-700 transition-colors" title="Share on WhatsApp">
                               <MessageSquare className="w-4 h-4" />
                             </button>
@@ -1312,11 +1028,11 @@ export default function BillingPage() {
                               className="p-1.5 rounded-lg hover:bg-blue-500/10 text-muted hover:text-blue-700 transition-colors" title="Share by Email">
                               <Mail className="w-4 h-4" />
                             </button>
-                            <button onClick={() => handlePrintInvoice(inv)}
+                            <button disabled={exportingInvoice} onClick={() => handlePrintInvoice(inv)}
                               className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors" title="Print">
                               <Printer className="w-4 h-4" />
                             </button>
-                            <button onClick={() => handleDownloadInvoice(inv)}
+                            <button disabled={exportingInvoice} onClick={() => handleDownloadInvoice(inv)}
                               className="p-1.5 rounded-lg hover:bg-accent/10 text-muted hover:text-accent transition-colors" title="Download PDF">
                               <Download className="w-4 h-4" />
                             </button>
@@ -1671,7 +1387,7 @@ export default function BillingPage() {
                       }}
                       className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm focus:outline-none focus:border-accent/50"
                     >
-                      <option value="">Select state (optional)</option>
+                      <option value="">Select place-of-supply state</option>
                       {indiaStates.map(state => (
                         <option key={state} value={state}>{state}</option>
                       ))}
@@ -1687,6 +1403,12 @@ export default function BillingPage() {
                       />
                     )}
                   </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted mb-1.5">Delivery address (if different from billing address)</label>
+                  <textarea value={posDeliveryAddress} onChange={e => setPosDeliveryAddress(e.target.value)} maxLength={1000} rows={2}
+                    placeholder="Leave blank if delivery is to the billing address"
+                    className="w-full px-4 py-3 bg-surface border border-border rounded-xl text-sm resize-none focus:outline-none focus:border-accent/50" />
                 </div>
                 {/* Customer suggestions dropdown */}
                 {showCustomerDropdown && customerSuggestions.length > 0 && (
@@ -2020,6 +1742,13 @@ export default function BillingPage() {
               </div>
 
               {/* Customer & Salesperson */}
+              {invoiceGstWarnings(selectedInvoice, storeSettings || {}).length > 0 && (
+                <div role="alert" className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-foreground">
+                  <p className="font-semibold">GST details need review</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5">{invoiceGstWarnings(selectedInvoice, storeSettings || {}).map(warning => <li key={warning}>{warning}</li>)}</ul>
+                  <p className="mt-2 text-xs text-muted">Export preserves recorded amounts. A payment QR is not a government e-invoice QR.</p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-muted font-semibold mb-1">Bill To</p>
@@ -2152,7 +1881,7 @@ export default function BillingPage() {
 
             {/* Action Buttons */}
             <div className="ui-actions flex flex-wrap gap-2">
-              <button onClick={() => handleShareInvoiceWhatsApp(selectedInvoice)}
+                            <button disabled={exportingInvoice} onClick={() => handleShareInvoiceWhatsApp(selectedInvoice)}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-xl text-sm font-medium hover:bg-emerald-500/20 transition-colors">
                 <MessageSquare className="w-4 h-4" /> WhatsApp
               </button>
@@ -2160,11 +1889,11 @@ export default function BillingPage() {
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-500/10 text-blue-700 border border-blue-500/20 rounded-xl text-sm font-medium hover:bg-blue-500/20 transition-colors">
                 <Mail className="w-4 h-4" /> Email
               </button>
-              <button onClick={() => handlePrintInvoice(selectedInvoice)}
+                            <button disabled={exportingInvoice} onClick={() => handlePrintInvoice(selectedInvoice)}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-accent text-white rounded-xl text-sm font-medium hover:bg-accent-hover transition-colors">
                 <Printer className="w-4 h-4" /> Print
               </button>
-              <button onClick={() => handleDownloadInvoice(selectedInvoice)}
+                            <button disabled={exportingInvoice} onClick={() => handleDownloadInvoice(selectedInvoice)}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-surface border border-border text-muted rounded-xl text-sm font-medium hover:text-accent hover:border-accent/40 transition-colors">
                 <Download className="w-4 h-4" /> Download
               </button>
@@ -2196,6 +1925,21 @@ export default function BillingPage() {
       </Modal>
 
       {/* ─── RECORD PAYMENT MODAL ─── */}
+      <Modal isOpen={!!preparedInvoiceShare} onClose={() => setPreparedInvoiceShare(null)} title="Invoice PDF ready" size="sm">
+        {preparedInvoiceShare && <div className="p-5 space-y-4">
+          <p className="text-sm text-muted">Your PDF is ready. Share the file, or download it and attach it manually in WhatsApp.</p>
+          {typeof navigator !== 'undefined' && navigator.canShare?.({ files: [preparedInvoiceShare.file] }) && <button
+            onClick={async () => {
+              try {
+                await navigator.share({ files: [preparedInvoiceShare.file], title: `Invoice ${preparedInvoiceShare.id}`, text: preparedInvoiceShare.message });
+                setPreparedInvoiceShare(null);
+              } catch (err) { if (err.name !== 'AbortError') notify('File sharing is unavailable here. Download the PDF and attach it manually.', { variant: 'danger' }); }
+            }} className="w-full px-4 py-3 rounded-xl bg-accent text-white font-semibold">Share PDF</button>}
+          <button onClick={() => downloadInvoicePdf(preparedInvoiceShare.generated)} className="w-full px-4 py-3 rounded-xl border border-border text-foreground">Download PDF</button>
+          <a href={preparedInvoiceShare.url} target="_blank" rel="noopener noreferrer" className="block text-center px-4 py-3 rounded-xl border border-border text-accent">Open WhatsApp (attach PDF manually)</a>
+        </div>}
+      </Modal>
+
       <Modal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} title="Record Payment" size="sm">
         {selectedInvoice && (
           <div className="space-y-4">
