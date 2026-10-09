@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { getStaff } from '@/app/actions/staff';
+import { loadStaffLoginOptions } from '@/lib/auth/load-staff-login-options';
 import { getStoreSettings } from '@/app/actions/settings';
 import Image from 'next/image';
 import MagicCard from '@/components/MagicCard';
@@ -20,6 +19,18 @@ export default function LoginPage() {
   );
 }
 
+function Logo({ logo, size = 56 }) {
+  return (
+    <div className="rounded-2xl flex items-center justify-center overflow-hidden bg-accent/10 ring-1 ring-accent/20" style={{ width: size, height: size }}>
+      {logo ? (
+        <Image src={logo} alt="Store Logo" width={size} height={size} unoptimized className="w-full h-full object-contain bg-white" />
+      ) : (
+        <span className="text-2xl">🪑</span>
+      )}
+    </div>
+  );
+}
+
 function LoginContent() {
   const [mode, setMode] = useState(null); // null = chooser, 'admin', 'staff'
   const [email, setEmail] = useState('');
@@ -28,25 +39,46 @@ function LoginContent() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [storeProfile, setStoreProfile] = useState({ name: 'Furniture CRM', logo: '' });
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/';
 
   // Staff login state
   const [staffList, setStaffList] = useState([]);
-  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffLoading, setStaffLoading] = useState(true);
+  const [staffLoadError, setStaffLoadError] = useState('');
+  const [staffLoadAttempt, setStaffLoadAttempt] = useState(0);
   const [selectedStaffId, setSelectedStaffId] = useState('');
   const [staffPassword, setStaffPassword] = useState('');
 
   useEffect(() => {
-    if (mode === 'staff' && staffList.length === 0) {
-      setStaffLoading(true);
-      getStaff().then(res => {
-        if (res.success) setStaffList(res.data);
-        setStaffLoading(false);
+    if (mode !== 'staff') return;
+    const controller = new AbortController();
+    let active = true;
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    loadStaffLoginOptions(controller.signal)
+      .then(data => {
+        if (!active || controller.signal.aborted) return;
+        setStaffList(data);
+        setSelectedStaffId(current => data.some(staff => String(staff.id) === current) ? current : '');
+      })
+      .catch(() => {
+        if (!active) return;
+        setStaffList([]);
+        setStaffLoadError('Unable to load staff names. Please retry or contact your admin.');
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        if (active) setStaffLoading(false);
       });
-    }
-  }, [mode, staffList.length]);
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [mode, staffLoadAttempt]);
+
+  const reloadStaff = () => {
+    setStaffLoading(true);
+    setStaffLoadError('');
+    setError('');
+    setSelectedStaffId('');
+    setStaffList([]);
+    setStaffLoadAttempt(attempt => attempt + 1);
+  };
 
   useEffect(() => {
     let active = true;
@@ -86,6 +118,7 @@ function LoginContent() {
   const handleStaffSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (staffLoading || staffLoadError || staffList.length === 0) return;
     if (!selectedStaffId) { setError('Please select a staff member'); return; }
     if (!staffPassword) { setError('Please enter your login password'); return; }
     setLoading(true);
@@ -108,16 +141,6 @@ function LoginContent() {
     }
   };
 
-  const Logo = ({ size = 56 }) => (
-    <div className="rounded-2xl flex items-center justify-center overflow-hidden bg-accent/10 ring-1 ring-accent/20" style={{ width: size, height: size }}>
-      {storeProfile.logo ? (
-        <Image src={storeProfile.logo} alt="Store Logo" width={size} height={size} unoptimized className="w-full h-full object-contain bg-white" />
-      ) : (
-        <span className="text-2xl">🪑</span>
-      )}
-    </div>
-  );
-
   return (
     <div className="relative min-h-screen flex items-center justify-center overflow-hidden bg-background px-4 py-10">
       {/* Ambient background */}
@@ -127,7 +150,7 @@ function LoginContent() {
       <MagicCard className="glass-card relative z-10 w-full max-w-md p-8 md:p-9 rounded-3xl" gradientSize={300}>
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-7">
-          <Logo />
+          <Logo logo={storeProfile.logo} />
           <h1 className="mt-4 text-xl md:text-2xl font-bold text-foreground tracking-tight">
             {mode === null ? storeProfile.name : mode === 'admin' ? 'Admin sign in' : 'Staff sign in'}
           </h1>
@@ -165,7 +188,7 @@ function LoginContent() {
 
             <button
               type="button"
-              onClick={() => { setMode('staff'); setError(''); }}
+              onClick={() => { reloadStaff(); setStaffPassword(''); setMode('staff'); }}
               aria-label="Sign in as staff"
               className="tap-press group flex min-h-28 cursor-pointer select-none touch-manipulation flex-col items-center gap-3 p-5 rounded-2xl border border-border hover:border-teal/50 hover:bg-teal-light transition-all"
             >
@@ -212,17 +235,27 @@ function LoginContent() {
         {mode === 'staff' && (
           <form onSubmit={handleStaffSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-medium text-muted mb-1.5">Select Staff Member</label>
+              <label htmlFor="staff-member" className="block text-xs font-medium text-muted mb-1.5">Select Staff Member</label>
               {staffLoading ? (
-                <div className="w-full px-4 py-2.5 rounded-xl bg-surface border border-border text-muted text-sm animate-pulse">Loading staff...</div>
+                <div role="status" className="w-full px-4 py-2.5 rounded-xl bg-surface border border-border text-muted text-sm animate-pulse">Loading staff...</div>
               ) : (
-                <select value={selectedStaffId} onChange={(e) => setSelectedStaffId(e.target.value)} required
+                <select id="staff-member" value={selectedStaffId} onChange={(e) => { setSelectedStaffId(e.target.value); setError(''); }} required disabled={loading || !!staffLoadError || staffList.length === 0}
                   className="w-full px-4 py-2.5 rounded-xl bg-surface border border-border text-foreground focus:border-accent focus:ring-2 focus:ring-accent/20 outline-none transition-all">
-                  <option value="">Choose your name</option>
-                  {staffList.filter(s => s.status === 'Active' && s.hasLogin && s.loginActive).map(s => (
+                  <option value="">{staffLoadError ? 'Staff names unavailable' : staffList.length === 0 ? 'No enabled staff logins' : 'Choose your name'}</option>
+                  {staffList.map(s => (
                     <option key={s.id} value={s.id}>{s.name} — {s.role}</option>
                   ))}
                 </select>
+              )}
+              {!staffLoading && (staffLoadError || staffList.length === 0) && (
+                <p role={staffLoadError ? 'alert' : 'status'} className={`mt-2 text-xs ${staffLoadError ? 'text-danger' : 'text-muted'}`}>
+                  {staffLoadError || 'No active staff with an enabled login were found. Ask your admin to check Settings / Team and assign or enable your login.'}
+                </p>
+              )}
+              {!staffLoading && (
+                <button type="button" onClick={reloadStaff} disabled={loading} className="mt-2 min-h-10 text-xs text-accent underline underline-offset-4 disabled:opacity-60">
+                  {staffLoadError ? 'Retry loading staff' : 'Refresh staff names'}
+                </button>
               )}
             </div>
             <div>
@@ -237,7 +270,7 @@ function LoginContent() {
                 </button>
               </div>
             </div>
-            <button type="submit" disabled={loading}
+            <button type="submit" disabled={loading || staffLoading || !!staffLoadError || staffList.length === 0}
               className="tap-press-sm w-full py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-60 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
               {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in...</> : <>Enter Staff Portal <ArrowRight className="w-4 h-4" /></>}
             </button>
