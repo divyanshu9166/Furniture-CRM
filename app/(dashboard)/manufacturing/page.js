@@ -47,7 +47,9 @@ import {
   updateScrapDisposition as updateScrapDispositionAction,
 } from '@/app/actions/manufacturing'
 import { getManufacturingPermissions } from '@/app/actions/settings'
-import { getProducts as getProductsAction, createProduct as createProductAction, deleteRawMaterial as deleteRawMaterialAction, updateRawMaterialInventory as updateRawMaterialInventoryAction, bulkImportRawMaterials as bulkImportRawMaterialsAction } from '@/app/actions/products'
+import { getProducts as getProductsAction, createRawMaterial as createProductAction, deleteRawMaterial as deleteRawMaterialAction, updateRawMaterialInventory as updateRawMaterialInventoryAction, bulkImportRawMaterials as bulkImportRawMaterialsAction, bulkAssignRawMaterialGodown } from '@/app/actions/products'
+import { getGodowns as getGodownsAction, getGodownStock as getGodownStockAction } from '@/app/actions/godowns'
+import { moveProductsToDraft } from '@/app/actions/drafts'
 import { useSession } from '@/components/AuthProvider'
 import Modal from '@/components/Modal'
 import * as XLSX from 'xlsx'
@@ -56,6 +58,9 @@ const createProduct = safeAction(createProductAction)
 const deleteRawMaterial = safeAction(deleteRawMaterialAction)
 const updateRawMaterialInventory = safeAction(updateRawMaterialInventoryAction)
 const bulkImportRawMaterials = safeAction(bulkImportRawMaterialsAction)
+const getGodowns = safeAction(getGodownsAction)
+const getGodownStock = safeAction(getGodownStockAction)
+const isRawMaterialProduct = product => product.isRawMaterial || ['raw material', 'raw materials'].includes(String(product.category).trim().toLowerCase())
 
 function safeAction(action) {
   return async (...args) => {
@@ -131,7 +136,8 @@ const RM_COLUMN_ALIASES = {
   sku: ['sku', 'sku code', 'material code'],
   costPrice: ['cost price', 'cost', 'cost price per unit', 'purchase price'],
   instock: ['in stock', 'instock', 'stock quantity', 'current stock quantity', 'opening stock quantity', 'quantity', 'stock'],
-  size: ['size', 'measure per quantity', 'unit size', 'uom conversion', 'conversion factor', 'size per qty'],
+  size: ['size', 'dimensions', 'dimension'],
+  unitSize: ['measure per quantity', 'unit size', 'uom conversion', 'conversion factor', 'size per qty'],
   unitOfMeasure: ['unit of measure', 'uom', 'unit'],
   reorderLevel: ['min stock alert', 'reorder level', 'minimum stock', 'min stock'],
   description: ['description', 'notes', 'remarks'],
@@ -228,6 +234,14 @@ export default function ManufacturingPage() {
   const [selectedRmIds, setSelectedRmIds] = useState(new Set())
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [rmGodownId, setRmGodownId] = useState('')
+  const [rmImportGodownId, setRmImportGodownId] = useState('')
+  const [godowns, setGodowns] = useState([])
+  const [godownStocks, setGodownStocks] = useState([])
+  const [showAssignGodownModal, setShowAssignGodownModal] = useState(false)
+  const [assignGodownId, setAssignGodownId] = useState('')
+  const [assigningGodown, setAssigningGodown] = useState(false)
+  const [assignGodownError, setAssignGodownError] = useState('')
 
   // BOM form
   const [bomForm, setBomForm] = useState({
@@ -281,7 +295,7 @@ export default function ManufacturingPage() {
   }, [finishedProducts, finishedProductSearch])
 
   const rawMaterialOptions = useMemo(() => {
-    return products.filter(p => p.category === 'Raw Material')
+    return products.filter(isRawMaterialProduct)
   }, [products])
 
   const getPrimaryImage = useCallback((image) => {
@@ -294,10 +308,11 @@ export default function ManufacturingPage() {
     setLoading(true)
     setLoadError('')
     try {
-    const [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes] = await Promise.all([
+    const [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes, godownRes, godownStockRes] = await Promise.all([
       getBOMs(), getProductionOrders(), getProducts(),
       getWorkCenters(), getManufacturingStats(), getBomTemplates(), getAssignableStaff(),
       getManufacturingCustomOrders(), getScrapInventory(), getCustomOrderInventory(),
+      getGodowns(), getGodownStock(),
     ])
     if (bomRes.success) setBoms(bomRes.data)
     if (ordRes.success) setOrders(ordRes.data)
@@ -310,7 +325,9 @@ export default function ManufacturingPage() {
     if (customRes.success) setCustomOrders(customRes.data)
     if (scrapRes.success) setScrapInventory(scrapRes.data)
     if (customInvRes.success) setCustomInventory(customInvRes.data)
-    const failures = [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes].filter(result => !result.success)
+    if (godownRes.success) setGodowns(godownRes.data)
+    if (godownStockRes.success) setGodownStocks(godownStockRes.data)
+    const failures = [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes, godownRes, godownStockRes].filter(result => !result.success)
     if (failures.length) setLoadError(failures.map(result => result.error || 'Unable to load a manufacturing panel').join(' · '))
     } catch (error) { setLoadError(error?.message || 'Unable to load manufacturing. Please retry.') }
     finally { setLoading(false) }
@@ -318,6 +335,9 @@ export default function ManufacturingPage() {
 
   useEffect(() => {
     // Initial manufacturing dashboard bootstrap fetch.
+    // Open the single raw-material creation entry point from Inventory's link.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (new URLSearchParams(window.location.search).get('tab') === 'materials') setTab('materials')
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData()
   }, [loadData])
@@ -640,8 +660,8 @@ export default function ManufacturingPage() {
   }
 
   const downloadRawMaterialTemplate = () => {
-    const headers = ['PRODUCT NAME', 'SIZE', 'brand', 'SKU', 'Instock', 'Cost price']
-    const example = ['OTTER', '1 inch (square)', '', 'RM-001', '1', '']
+    const headers = ['PRODUCT NAME', 'SIZE', 'brand', 'SKU', 'Instock', 'Cost price', 'Unit Size', 'UOM', 'Reorder Level']
+    const example = ['OTTER', '1 inch (square)', '', 'RM-001', '1', '', '1', 'PCS', '5']
     const csv = [headers.join(','), example.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -704,6 +724,7 @@ export default function ManufacturingPage() {
 
   const handleRmImportSubmit = async () => {
     if (rmImportRows.length === 0) return
+    if (!rmImportGodownId) { setRmImportError('Choose the receiving godown first'); return }
     setRmImportLoading(true)
     setRmImportError('')
 
@@ -719,7 +740,7 @@ export default function ManufacturingPage() {
         const text = String(value ?? '').trim()
         if (!text) return defaultValue
         const parsed = Number(text)
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.NaN
       }
 
       const parsed = rmImportRows
@@ -730,7 +751,7 @@ export default function ManufacturingPage() {
           costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
           instock: rmImportColMap.instock !== undefined ? parseRequiredNumber(row[rmImportColMap.instock]) : Number.NaN,
           size: rmImportColMap.size !== undefined ? String(row[rmImportColMap.size] ?? '').trim() : '',
-          unitSize: rmImportColMap.size !== undefined ? parseNumberWithDefault(row[rmImportColMap.size], 1) : 1,
+          unitSize: rmImportColMap.unitSize !== undefined ? parseNumberWithDefault(row[rmImportColMap.unitSize], 1) : 1,
           unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
           reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
           description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
@@ -742,14 +763,19 @@ export default function ManufacturingPage() {
       parsed.forEach((row, idx) => {
         const reasons = []
         if (!row.name) reasons.push('missing name')
-        if (!Number.isFinite(row.instock)) reasons.push(`invalid instock: "${rmImportRows[idx][rmImportColMap.instock]}"`)
+        if (!Number.isFinite(row.instock) || row.instock < 0) reasons.push('opening quantity must be non-negative')
+        if (!Number.isFinite(row.unitSize) || row.unitSize <= 0) reasons.push('Unit Size must be a positive number')
+        if (!Number.isInteger(row.costPrice) || row.costPrice < 0) reasons.push('Cost price must be non-negative whole rupees')
+        if (!Number.isInteger(row.reorderLevel) || row.reorderLevel < 0) reasons.push('Reorder Level must be a non-negative whole number')
         if (reasons.length > 0) {
           failures.push(`Row ${idx + 1} (${row.name || 'unnamed'}): ${reasons.join(', ')}`)
         }
       })
 
       if (failures.length > 0) {
-        console.warn('Skipped rows:', failures)
+        setRmImportError(`Fix invalid rows before importing:\n${failures.slice(0, 10).join('\n')}`)
+        setRmImportLoading(false)
+        return
       }
 
       const payload = parsed
@@ -761,7 +787,7 @@ export default function ManufacturingPage() {
         return
       }
 
-      const res = await bulkImportRawMaterials(payload)
+      const res = await bulkImportRawMaterials(payload, Number(rmImportGodownId))
       if (res.success) {
         setRmImportResult(res.data)
         setRmImportRows([])
@@ -779,6 +805,10 @@ export default function ManufacturingPage() {
 
   const handleCreateRawMaterial = async () => {
     if (!rmForm.name) return alert('Name is required')
+    if (!rmGodownId) return alert('Choose the receiving godown first')
+    if (rmForm.instock === '' || !Number.isFinite(Number(rmForm.instock)) || Number(rmForm.instock) < 0) return alert('Enter a valid opening quantity (zero is allowed)')
+    if (!Number.isFinite(Number(rmForm.unitSize)) || Number(rmForm.unitSize) <= 0) return alert('Base units per quantity must be positive')
+    if (!Number.isInteger(Number(rmForm.costPrice || 0)) || Number(rmForm.costPrice || 0) < 0 || !Number.isInteger(Number(rmForm.reorderLevel)) || Number(rmForm.reorderLevel) < 0) return alert('Cost and minimum stock alert must be non-negative whole numbers')
     setSubmitting(true)
 
     let imageUrl = ''
@@ -809,13 +839,14 @@ export default function ManufacturingPage() {
       sku,
       category: 'Raw Material',
       price: 0,
-      costPrice: Number(rmForm.costPrice) || 0,
-      stock: Number(rmForm.instock) || 0,
-      unitSize: 1,
+      costPrice: Number(rmForm.costPrice || 0),
+      stock: Number(rmForm.instock),
+      unitSize: Number(rmForm.unitSize),
       unitOfMeasure: rmForm.unitOfMeasure || 'PCS',
-      reorderLevel: 5,
+      reorderLevel: Number(rmForm.reorderLevel),
       description: rmForm.size ? String(rmForm.size).trim() : undefined,
       image: imageUrl || undefined,
+      godownId: Number(rmGodownId),
     })
     if (res.success) {
       setRmForm({ name: '', size: '', brand: '', sku: '', instock: '', costPrice: '', stockQuantity: 0, unitSize: 1, unitOfMeasure: 'PCS', reorderLevel: 5, description: '' })
@@ -829,7 +860,7 @@ export default function ManufacturingPage() {
 
   const handleDeleteRawMaterial = async (id, name) => {
     if (submitting || bulkDeleting) return
-    if (!confirm(`Move raw material "${name}" to Drafts? You can restore it for 30 days. Only zero-stock materials without linked history can be removed.`)) return
+    if (!confirm(`Delete raw material "${name}" and its stock ledger/depleted batch history? The item and history are saved in Drafts for 30 days. Stock must be zero; linked business documents are protected.`)) return
     setSubmitting(true)
     try {
       const res = await deleteRawMaterial(id)
@@ -886,19 +917,13 @@ export default function ManufacturingPage() {
     const failedIds = new Set()
     const errors = []
     try {
-      for (const id of selectedRmIds) {
-        const material = rawMaterials.find(rm => rm.id === id)
-        try {
-          const res = await deleteRawMaterial(id)
-          if (res?.success) deleted++
-          else {
-            failedIds.add(id)
-            errors.push(`${material?.name || `Item ${id}`}: ${res?.error || 'Unable to remove material'}`)
-          }
-        } catch (error) {
-          failedIds.add(id)
-          errors.push(`${material?.name || `Item ${id}`}: ${error?.message || 'Unable to remove material'}`)
-        }
+      const res = await moveProductsToDraft([...selectedRmIds], 'Raw Material')
+      if (!res.success) { alert(res.error); return }
+      deleted = res.data.movedIds.length
+      for (const failure of res.data.errors) {
+        failedIds.add(failure.id)
+        const material = products.find(product => product.id === failure.id)
+        errors.push(`${material?.name || `Item ${failure.id}`}: ${failure.error}`)
       }
       setShowBulkDeleteModal(false)
       setSelectedRmIds(failedIds)
@@ -910,12 +935,25 @@ export default function ManufacturingPage() {
         if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
       }
       alert(message)
-    } finally { setBulkDeleting(false) }
+    } catch (error) { alert(error?.message || 'Unable to remove materials. Refresh and retry.') }
+    finally { setBulkDeleting(false) }
+  }
+
+  const handleAssignGodown = async () => {
+    if (assigningGodown) return
+    setAssigningGodown(true); setAssignGodownError('')
+    try {
+      const result = await bulkAssignRawMaterialGodown({ productIds: [...selectedRmIds], godownId: Number(assignGodownId) })
+      if (!result.success) { setAssignGodownError(result.error); return }
+      setShowAssignGodownModal(false); setSelectedRmIds(new Set()); await loadData()
+      alert(`Assigned ${result.data.assigned} material(s) to ${result.data.godownName}. Total stock was preserved.`)
+    } catch (error) { setAssignGodownError(error?.message || 'Assignment failed; refresh and retry') }
+    finally { setAssigningGodown(false) }
   }
 
   // Filter raw materials (products with category "Raw Material")
   const rawMaterials = products.filter(p =>
-      p.category === 'Raw Material' &&
+      isRawMaterialProduct(p) &&
       (!rmSearch || p.name.toLowerCase().includes(rmSearch.toLowerCase()) || p.sku.toLowerCase().includes(rmSearch.toLowerCase()))
     )
 
@@ -2036,7 +2074,7 @@ export default function ManufacturingPage() {
                   className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <div>
-                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">SIZE *</label>
+                <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">SIZE / Dimensions (optional)</label>
                 <input
                   value={rmForm.size}
                   onChange={e => setRmForm(f => ({ ...f, size: e.target.value }))}
@@ -2079,7 +2117,7 @@ export default function ManufacturingPage() {
               <div>
                 <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Instock *</label>
                 <input
-                  type="number" min="0"
+                  type="number" min="0" step="any"
                   value={rmForm.instock}
                   onChange={e => setRmForm(f => ({ ...f, instock: e.target.value }))}
                   placeholder="1"
@@ -2108,10 +2146,29 @@ export default function ManufacturingPage() {
                 {rmImages.length > 0 && <p className="text-[10px] text-muted mt-1 truncate">{rmImages[0].name}</p>}
               </div>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              <div>
+                <label htmlFor="rm-godown" className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Receiving Godown *</label>
+                <select id="rm-godown" value={rmGodownId} onChange={e => setRmGodownId(e.target.value)} className={SEL}>
+                  <option value="">Choose a godown</option>
+                  {godowns.map(godown => <option key={godown.id} value={godown.id}>{godown.name}</option>)}
+                </select>
+                {!godowns.length && <p className="text-xs text-danger mt-1">Create a godown in Godowns, then refresh this page.</p>}
+              </div>
+              <div>
+                <label htmlFor="rm-unit-size" className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Base units per quantity</label>
+                <input id="rm-unit-size" type="number" min="0.000001" step="any" value={rmForm.unitSize} onChange={e => setRmForm(form => ({ ...form, unitSize: e.target.value }))} className={INP} />
+                <p className="text-[10px] text-muted mt-1">Opening quantity × this factor = physical UOM stock. SIZE is descriptive only.</p>
+              </div>
+              <div>
+                <label htmlFor="rm-reorder" className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Minimum stock alert</label>
+                <input id="rm-reorder" type="number" min="0" step="1" value={rmForm.reorderLevel} onChange={e => setRmForm(form => ({ ...form, reorderLevel: e.target.value }))} className={INP} />
+              </div>
+            </div>
             <div className="ui-actions flex items-center gap-3">
               <button
                 onClick={handleCreateRawMaterial}
-                disabled={submitting || !rmForm.name}
+                disabled={submitting || !rmForm.name || !rmGodownId}
                 className="px-5 py-2.5 bg-accent text-white rounded-lg text-sm font-semibold hover:bg-accent/90 disabled:opacity-50 flex items-center gap-2 transition-colors">
                 <Plus className="w-4 h-4" />
                 {submitting ? 'Adding...' : 'Add Raw Material'}
@@ -2138,8 +2195,12 @@ export default function ManufacturingPage() {
                   className="w-full pl-9 pr-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
               </div>
               <span className="text-xs text-muted">{rawMaterials.length} material{rawMaterials.length !== 1 ? 's' : ''}</span>
+              <button onClick={() => setSelectedRmIds(new Set(rawMaterials.slice(0, 200).map(material => material.id)))} disabled={bulkDeleting || assigningGodown} className="text-xs text-accent whitespace-nowrap">Select visible (up to 200)</button>
+              {selectedRmIds.size > 0 && <button onClick={() => setSelectedRmIds(new Set())} disabled={bulkDeleting || assigningGodown} className="text-xs text-muted">Clear selection</button>}
             </div>
             {selectedRmIds.size > 0 && (
+              <div className="ui-actions flex flex-wrap gap-2">
+              <button onClick={() => { setAssignGodownError(''); setAssignGodownId(''); setShowAssignGodownModal(true) }} disabled={bulkDeleting || assigningGodown || submitting} className="px-4 py-2 bg-accent/10 text-accent border border-accent/30 rounded-lg text-sm disabled:opacity-50">Assign Godown ({selectedRmIds.size})</button>
               <button
                 onClick={() => setShowBulkDeleteModal(true)}
                 disabled={bulkDeleting}
@@ -2147,6 +2208,7 @@ export default function ManufacturingPage() {
                 <Trash2 className="w-4 h-4" />
                 Delete {selectedRmIds.size} Item{selectedRmIds.size !== 1 ? 's' : ''}
               </button>
+              </div>
             )}
           </div>
 
@@ -2247,6 +2309,7 @@ export default function ManufacturingPage() {
                         {rm.description ? ` · ${rm.description}` : ''}
                         {rm.brand ? ` · ${rm.brand}` : ''}
                       </p>
+                      <p className="text-[10px] text-muted">{godownStocks.filter(stock => stock.productId === rm.id).map(stock => `${stock.godown?.name || 'Godown'}: ${stock.quantity}`).join(' · ') || 'No physical godown assigned'}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/50 text-xs">
@@ -2441,6 +2504,7 @@ export default function ManufacturingPage() {
                               <>
                                 <td className="px-4 py-3 text-foreground font-medium">
                                   <div>{rm.name}</div>
+                                  <p className="text-[10px] text-muted mt-1">{godownStocks.filter(stock => stock.productId === rm.id).map(stock => `${stock.godown?.name || 'Godown'}: ${stock.quantity}`).join(' · ') || 'No physical godown assigned'}</p>
                                   {rm.brand && <p className="text-[10px] text-muted mt-0.5">Brand: {rm.brand}</p>}
                                 </td>
                                 <td className="px-4 py-3">
@@ -2515,10 +2579,17 @@ export default function ManufacturingPage() {
 
       <Modal isOpen={showRmImportModal} onClose={() => !rmImportLoading && setShowRmImportModal(false)} title="Import Raw Materials" size="lg">
         <div className="space-y-4">
+          <div>
+            <label htmlFor="rm-import-godown" className="text-xs text-muted block mb-1">Receiving godown for all new rows *</label>
+            <select id="rm-import-godown" value={rmImportGodownId} onChange={e => setRmImportGodownId(e.target.value)} disabled={rmImportLoading} className={SEL}>
+              <option value="">Choose a godown</option>{godowns.map(godown => <option key={godown.id} value={godown.id}>{godown.name}</option>)}
+            </select>
+            <p className="text-xs text-muted mt-1">SIZE describes dimensions. Unit Size is the numeric stock-conversion factor (default 1). Duplicate SKUs are skipped, not overwritten.</p>
+          </div>
           <div className="p-3 rounded-lg border border-border bg-surface-hover text-xs text-muted space-y-1">
             <p>Supported files: .xlsx, .xls, .csv</p>
             <p>Required columns: PRODUCT NAME, Instock</p>
-            <p>Optional columns: SIZE, brand, SKU, Cost price</p>
+            <p>Optional columns: SIZE, brand, SKU, Cost price, Unit Size, UOM, Reorder Level</p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -2548,6 +2619,7 @@ export default function ManufacturingPage() {
           {rmImportResult && (
             <div className="p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-xs text-emerald-300">
               Imported {rmImportResult.created} of {rmImportResult.total} rows. Skipped: {rmImportResult.skipped}
+              {rmImportResult.errors?.length > 0 && <ul className="mt-2 text-xs text-muted space-y-1">{rmImportResult.errors.slice(0, 10).map((error, index) => <li key={index}>{error.name}: {error.error}</li>)}</ul>}
             </div>
           )}
 
@@ -2559,7 +2631,7 @@ export default function ManufacturingPage() {
             </button>
             <button
               onClick={handleRmImportSubmit}
-              disabled={rmImportLoading || rmImportRows.length === 0}
+              disabled={rmImportLoading || rmImportRows.length === 0 || !rmImportGodownId}
               className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium disabled:opacity-50">
               {rmImportLoading ? 'Importing...' : 'Import Now'}
             </button>
@@ -2573,7 +2645,7 @@ export default function ManufacturingPage() {
             <p className="text-sm text-red-400">
               Are you sure you want to delete <span className="font-semibold">{selectedRmIds.size}</span> raw material{selectedRmIds.size !== 1 ? 's' : ''}?
             </p>
-            <p className="text-xs text-red-400/70 mt-2">Removed materials go to Drafts and can be restored for 30 days. Only zero-stock materials without BOM, document, production, batch or stock-ledger history can be removed. Linked records are preserved.</p>
+            <p className="text-xs text-red-400/70 mt-2">This removes each zero-stock material AND its ledger, depleted batches and allocations. A complete snapshot is retained in Drafts for 30 days, then permanently purged. Items linked to business documents/BOMs/production remain protected.</p>
           </div>
           <div className="ui-actions flex justify-end gap-2">
             <button
@@ -2590,6 +2662,22 @@ export default function ManufacturingPage() {
               {bulkDeleting ? 'Deleting...' : 'Delete All'}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={showAssignGodownModal} onClose={() => !assigningGodown && setShowAssignGodownModal(false)} title="Assign Raw Materials to Godown" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Move all current stock of the {selectedRmIds.size} selected material(s) to the chosen godown. Existing stock at other godowns is transferred, not duplicated. Zero-stock items get an empty assignment. This operation is atomic (up to 200 materials per request).</p>
+          <label htmlFor="rm-assign-godown" className="block text-xs text-muted">Destination godown</label>
+          <select id="rm-assign-godown" value={assignGodownId} disabled={assigningGodown} onChange={e => setAssignGodownId(e.target.value)} className={SEL}>
+            <option value="">Choose a godown</option>{godowns.map(godown => <option key={godown.id} value={godown.id}>{godown.name}</option>)}
+          </select>
+          {assignGodownError && <p role="alert" className="text-xs text-danger">{assignGodownError}</p>}
+          <div className="ui-actions flex justify-end gap-2">
+            <button disabled={assigningGodown} onClick={() => setShowAssignGodownModal(false)} className="px-4 py-2 rounded-lg border border-border">Cancel</button>
+            <button disabled={assigningGodown || !assignGodownId || selectedRmIds.size > 200} onClick={handleAssignGodown} className="px-4 py-2 rounded-lg bg-accent text-white disabled:opacity-50">{assigningGodown ? 'Assigning...' : 'Move Stock & Assign'}</button>
+          </div>
+          {selectedRmIds.size > 200 && <p className="text-xs text-danger">Select 200 or fewer materials per assignment.</p>}
         </div>
       </Modal>
 

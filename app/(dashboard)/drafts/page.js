@@ -58,6 +58,7 @@ export default function DraftsPage() {
 
   useEffect(() => {
     // Initial draft load is intentionally kicked off on mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     reload().finally(() => setLoading(false));
   }, []);
 
@@ -491,6 +492,13 @@ export default function DraftsPage() {
               )}
 
               {/* Deletion Info */}
+              {selectedDraft.sourceType === 'Product' && data.inventoryHistory && (
+                <div className="bg-surface rounded-xl p-3 border border-border space-y-1">
+                  <p className="text-xs font-semibold text-foreground">Inventory history saved for recovery</p>
+                  <p className="text-xs text-muted">{data.inventoryHistory.ledger?.length || 0} ledger entries · {data.inventoryHistory.batches?.length || 0} depleted batches · {data.inventoryHistory.movements?.length || 0} allocations</p>
+                  <p className="text-[11px] text-muted">Restore brings back the item and its original history. Permanently deleting or expiring this draft also removes this recovery snapshot.</p>
+                </div>
+              )}
               <div className="bg-surface rounded-xl p-3">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted">Deleted by <span className="text-foreground font-medium">{selectedDraft.deletedBy}</span> on {deletedDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span>

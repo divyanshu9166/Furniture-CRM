@@ -8,10 +8,12 @@ import { assertBatchCoverage, batchSchema } from '../validations/batch'
 import { ageInDays, agingBracket } from './aging'
 import { createInventoryProduct, updateInventoryMetadata } from './products'
 import { planBatchIssue } from './batches'
+import { assignRawMaterialsToGodown, assignRawMaterialGodownSchema } from './godown-assignment'
+import { inventoryCreationError } from './creation-rules'
 
 // An isolated transactional fixture: never loads lib/db or a DATABASE_URL.
 type State = {
-  products: { id: number; sku?: string; name: string; stock: number; lastRestocked: Date | null }[]
+  products: { id: number; sku?: string; name: string; stock: number; lastRestocked: Date | null; categoryId?: number }[]
   categories: { id: number; name: string }[]
   warehouses: { id: number; name: string }[]
   locations: { id: number; name: string; isDefault: boolean }[]
@@ -35,7 +37,10 @@ function fixture(stock = 10, allocated = true, failLedgerAt?: number) {
     const tx = {
       $queryRaw: async () => [],
       product: {
-        findUnique: async ({ where }: { where: { id?: number; sku?: string } }) => structuredClone(s.products.find(p => where.id ? p.id === where.id : p.sku === where.sku) ?? null),
+        findUnique: async ({ where, include }: { where: { id?: number; sku?: string }; include?: { category?: boolean } }) => {
+          const product = structuredClone(s.products.find(p => where.id ? p.id === where.id : p.sku === where.sku) ?? null)
+          return product && include?.category ? { ...product, category: { name: s.categories.find(category => category.id === product.categoryId)?.name ?? 'Raw Material' } } : product
+        },
         create: async ({ data }: { data: { name: string; sku: string; stock: number } }) => {
           const p = { id: s.products.length + 1, lastRestocked: null, ...data }; s.products.push(p); return structuredClone(p)
         },
@@ -75,6 +80,11 @@ function fixture(stock = 10, allocated = true, failLedgerAt?: number) {
         create: async ({ data }: { data: Omit<State['locations'][0], 'id'> }) => { const g = { id: s.locations.length + 1, ...data }; s.locations.push(g); return g },
       },
       godownStock: {
+        deleteMany: async ({ where }: { where: { productId: number; godownId: { not: number }; quantity: number } }) => {
+          const before = s.stocks.length
+          s.stocks = s.stocks.filter(row => !(row.productId === where.productId && row.godownId !== where.godownId.not && row.quantity === where.quantity))
+          return { count: before - s.stocks.length }
+        },
         findMany: async ({ where }: { where: { productId: number; quantity?: { gt: number } } }) => s.stocks.filter(row => row.productId === where.productId && (!where.quantity || row.quantity > where.quantity.gt)).sort((a, b) => a.godownId - b.godownId),
         findUnique: async ({ where }: { where: { productId_godownId: { productId: number; godownId: number } } }) => {
           const key = where.productId_godownId
@@ -366,4 +376,93 @@ test('raw-material metadata and stock failure roll back together; recorded units
   assert.deepEqual(f.holder.state, before)
   await assert.rejects(f.run(tx => updateInventoryMetadata(tx, 1, { unitOfMeasure: 'KG' })), /cannot change/)
   assert.deepEqual(f.holder.state, before)
+})
+
+test('bulk godown assignment transfers split stock once and leaves receipt lots unchanged', async () => {
+  const f = fixture(10)
+  f.holder.state.stocks[0].quantity = 6
+  f.holder.state.stocks.push({ id: 2, productId: 1, godownId: 2, quantity: 4 })
+  f.holder.state.batches.push({ id: 1, productId: 1, batchNumber: 'LOT', quantity: 10, remainingQty: 10, costPrice: 10, purchaseDate: new Date('2026-01-01'), expiryDate: null })
+  const batches = structuredClone(f.holder.state.batches)
+  const result = await f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1, 1], godownId: 2 }, 'Manager'))
+  assert.equal(result.assigned, 1); assert.equal(result.items[0].moved, 6)
+  assert.equal(f.holder.state.products[0].stock, 10)
+  assert.deepEqual(f.holder.state.stocks.map(row => [row.godownId, row.quantity]), [[2, 10]])
+  assert.deepEqual(f.holder.state.batches, batches)
+  assert.equal(f.holder.state.batchMovements.length, 0)
+  assert.deepEqual(f.holder.state.ledger.map(row => row.entryType), ['TRANSFER_OUT', 'TRANSFER_IN'])
+  const before = structuredClone(f.holder.state)
+  await f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager'))
+  assert.deepEqual(f.holder.state, before, 'repeat assignment must be idempotent')
+})
+
+test('zero-stock assignment is explicit and idempotent without receiving or duplicating inventory', async () => {
+  const f = fixture(0)
+  await f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager'))
+  assert.deepEqual(f.holder.state.stocks.map(row => [row.godownId, row.quantity]), [[2, 0]])
+  assert.equal(f.holder.state.ledger[0].quantity, 0)
+  assert.equal(f.holder.state.ledger[0].referenceType, 'GodownAssignment')
+  const before = structuredClone(f.holder.state)
+  await f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager'))
+  assert.deepEqual(f.holder.state, before)
+})
+
+test('legacy unallocated stock is assigned directly to chosen godown with no duplicate lot', async () => {
+  const f = fixture(7, false)
+  await f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager'))
+  assert.equal(f.holder.state.products[0].stock, 7)
+  assert.deepEqual(f.holder.state.stocks.map(row => [row.godownId, row.quantity]), [[2, 7]])
+  assert.equal(f.holder.state.ledger.length, 1)
+  assert.equal(f.holder.state.batches.length, 0)
+})
+
+test('assignment mismatch/missing location/missing item cannot change any balances', async () => {
+  for (const input of [{ productIds: [1], godownId: 999 }, { productIds: [999], godownId: 2 }]) {
+    const f = fixture(); const before = structuredClone(f.holder.state)
+    await assert.rejects(f.run(tx => assignRawMaterialsToGodown(tx, input, 'Manager')))
+    assert.deepEqual(f.holder.state, before)
+  }
+  const f = fixture(); f.holder.state.stocks[0].quantity = 5; const before = structuredClone(f.holder.state)
+  await assert.rejects(f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager')), /Stock mismatch/)
+  assert.deepEqual(f.holder.state, before)
+})
+
+test('assignment receipt ledger failure rolls back both directions of transfer', async () => {
+  const f = fixture(10, true, 2); const before = structuredClone(f.holder.state)
+  await assert.rejects(f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager')), /ledger failure/)
+  assert.deepEqual(f.holder.state, before)
+})
+
+test('a later selected missing item rolls back earlier assignments in the same bulk operation', async () => {
+  const f = fixture(10); const before = structuredClone(f.holder.state)
+  await assert.rejects(f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1, 999], godownId: 2 }, 'Manager')), /not raw materials/)
+  assert.deepEqual(f.holder.state, before)
+})
+
+test('assignment input requires a valid godown and bounded positive IDs', () => {
+  for (const input of [{ productIds: [], godownId: 1 }, { productIds: [-1], godownId: 1 }, { productIds: [1], godownId: 0 }, { productIds: [1.5], godownId: 1 }, { productIds: Array.from({ length: 201 }, (_, i) => i + 1), godownId: 1 }]) assert.equal(assignRawMaterialGodownSchema.safeParse(input).success, false)
+})
+
+test('bulk raw-material assignment rejects consumables without changing their balances', async () => {
+  const f = fixture(); f.holder.state.categories.push({ id: 1, name: 'Consumable' }); f.holder.state.products[0].categoryId = 1
+  const before = structuredClone(f.holder.state)
+  await assert.rejects(f.run(tx => assignRawMaterialsToGodown(tx, { productIds: [1], godownId: 2 }, 'Manager')), /not raw materials/)
+  assert.deepEqual(f.holder.state, before)
+})
+
+test('creation boundary rejects raw-material aliases from Inventory but permits finished items/consumables', () => {
+  for (const category of ['Raw Material', 'Raw Materials', ' raw material ']) assert.match(inventoryCreationError(category)!, /Manufacturing/)
+  assert.equal(inventoryCreationError('Consumable'), null)
+  assert.equal(inventoryCreationError('Furniture'), null)
+})
+
+test('selected godown survives zero-stock creation and opening conversion is applied exactly once', async () => {
+  const f = fixture()
+  const empty = await f.run(tx => createInventoryProduct(tx, createProductSchema.parse({ name: 'Empty', sku: 'EMPTY', category: 'Raw Material', price: 0, stock: 0, godownId: 2 }), 'Manager'))
+  assert.equal(f.holder.state.stocks.find(row => row.productId === empty.id)?.godownId, 2)
+  assert.equal(f.holder.state.stocks.find(row => row.productId === empty.id)?.quantity, 0)
+  const converted = await f.run(tx => createInventoryProduct(tx, createProductSchema.parse({ name: 'Pack', sku: 'PACK', category: 'Raw Material', price: 0, stock: 4, unitSize: 2.5, description: '25 inch dimensions only', godownId: 2 }), 'Manager'))
+  assert.equal(converted.stock, 10)
+  assert.equal(f.holder.state.stocks.find(row => row.productId === converted.id)?.quantity, 10)
+  assert.equal(f.holder.state.stocks.find(row => row.productId === converted.id)?.godownId, 2)
 })

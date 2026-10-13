@@ -47,6 +47,8 @@ export async function createInventoryProduct(tx: Prisma.TransactionClient, data:
     await moveStock(tx, created.id, target, initialStock, 'IN', {
       referenceType: 'Manual', notes: 'Initial stock on product creation', createdBy: actor,
     })
+  } else if (godownId) {
+    await tx.godownStock.create({ data: { productId: created.id, godownId, quantity: 0 } })
   }
   return tx.product.findUniqueOrThrow({ where: { id: created.id } })
 }

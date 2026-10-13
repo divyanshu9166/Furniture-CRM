@@ -8,8 +8,9 @@ import {
   CheckCircle2, XCircle, Clock, Layers, Boxes, Timer, MapPin, FileText, Trash2,
   Upload, Download, X, CheckCircle, Pencil, Image as ImageIcon, Save
 } from 'lucide-react';
-import { getProducts, getCategories, getWarehouses, createProduct, updateStock, bulkImportProducts, reconcileInventoryStock } from '@/app/actions/products';
-import { moveProductToDraft } from '@/app/actions/drafts';
+import { getProducts, getCategories, getWarehouses, createInventoryItem as createProduct, updateStock, bulkImportProducts, reconcileInventoryStock } from '@/app/actions/products';
+import { moveProductToDraft, moveProductsToDraft } from '@/app/actions/drafts';
+import { inventoryCreationError } from '@/lib/inventory/creation-rules';
 import { getStockGroups, createStockGroup, updateStockGroup, deleteStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, updateBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
@@ -91,6 +92,23 @@ export default function InventoryPage() {
 
   const [productToDelete, setProductToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [selectedProductIds, setSelectedProductIds] = useState(new Set());
+  const [showBulkProductDelete, setShowBulkProductDelete] = useState(false);
+  const [bulkProductDeleting, setBulkProductDeleting] = useState(false);
+  const toggleProductSelection = (id, checked) => setSelectedProductIds(current => {
+    const next = new Set(current); if (checked) next.add(id); else next.delete(id); return next;
+  });
+  const confirmBulkProductDelete = async () => {
+    setBulkProductDeleting(true);
+    try {
+      const result = await moveProductsToDraft([...selectedProductIds]);
+      if (!result.success) { notify(result.error, { variant: 'danger' }); return; }
+      setSelectedProductIds(new Set(result.data.errors.map(item => item.id)));
+      setShowBulkProductDelete(false); await refreshProducts();
+      notify(`Removed ${result.data.movedIds.length} item(s) and their ledger histories to Drafts.${result.data.errors.length ? ` Kept ${result.data.errors.length}: ${result.data.errors.slice(0, 3).map(item => item.error).join(' · ')}` : ''}`, { variant: result.data.errors.length ? 'warning' : 'success' });
+    } catch (error) { notify(error?.message || 'Deletion failed; refresh and retry', { variant: 'danger' }); }
+    finally { setBulkProductDeleting(false); }
+  };
 
   const handleMoveProductToDraft = (productId) => {
     const product = products.find(p => p.id === productId) || { id: productId, name: 'this product' };
@@ -107,6 +125,7 @@ export default function InventoryPage() {
         return;
       }
       await refreshProducts();
+      toggleProductSelection(productToDelete.id, false);
       notify('Product moved to drafts', { variant: 'success' });
     } catch (err) {
       notify(err?.message || 'Failed to move product to drafts', { variant: 'danger' });
@@ -666,7 +685,7 @@ export default function InventoryPage() {
               <Upload className="w-4 h-4" /> Bulk Import
             </button>
           )}
-          {tab === 'products' && (
+          {tab === 'products' && productType !== 'rawMaterial' && (
             <button
               onClick={() => setShowAddModal(true)}
               className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-3 md:py-2.5 bg-accent hover:bg-accent-hover text-white rounded-xl text-sm font-semibold transition-all tap-press-sm"
@@ -675,6 +694,7 @@ export default function InventoryPage() {
               {isManualInventoryMode ? `Add ${typeCopy.title}` : 'Add Product'}
             </button>
           )}
+          {tab === 'products' && productType === 'rawMaterial' && <a href="/manufacturing?tab=materials" className="flex-1 md:flex-none text-center px-4 py-3 rounded-xl border border-border text-sm text-accent">Manage Raw Materials in Manufacturing</a>}
         </div>
       </div>
 
@@ -715,7 +735,7 @@ export default function InventoryPage() {
           <div className="ui-tabs w-full min-w-0 overflow-x-auto overscroll-x-contain hide-scrollbar pb-1">
             <div className="flex shrink-0 w-max min-w-full md:w-fit md:min-w-0 bg-surface border border-border rounded-xl p-1 gap-0.5">
               <button
-                onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); }}
+                onClick={() => { setProductType('finished'); setCategory('All'); setSearch(''); setSelectedProductIds(new Set()); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'finished'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
@@ -727,7 +747,7 @@ export default function InventoryPage() {
                   }`}>{finishedGoods.length}</span>
               </button>
               <button
-                onClick={() => { setProductType('rawMaterial'); setCategory('All'); setSearch(''); }}
+                onClick={() => { setProductType('rawMaterial'); setCategory('All'); setSearch(''); setSelectedProductIds(new Set()); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'rawMaterial'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
@@ -739,7 +759,7 @@ export default function InventoryPage() {
                 }`}>{rawMaterials.length}</span>
               </button>
               <button
-                onClick={() => { setProductType('consumable'); setCategory('All'); setSearch(''); }}
+                onClick={() => { setProductType('consumable'); setCategory('All'); setSearch(''); setSelectedProductIds(new Set()); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all flex-shrink-0 whitespace-nowrap ${productType === 'consumable'
                   ? 'bg-accent text-white shadow-sm'
                   : 'text-muted hover:text-foreground hover:bg-surface-hover'
@@ -802,6 +822,13 @@ export default function InventoryPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-2 text-xs text-muted px-3 py-2">
+              <input type="checkbox" checked={filtered.length > 0 && filtered.every(product => selectedProductIds.has(product.id))} disabled={bulkProductDeleting} onChange={e => {
+                const checked = e.target.checked;
+                setSelectedProductIds(current => { const next = new Set(current); filtered.forEach(product => checked ? next.add(product.id) : next.delete(product.id)); return next; });
+              }} /> Select visible
+            </label>
+            {selectedProductIds.size > 0 && <button disabled={bulkProductDeleting} onClick={() => setShowBulkProductDelete(true)} className="px-3 py-2 rounded-lg bg-danger-light text-danger text-xs">Delete selected ({selectedProductIds.size})</button>}
             <select aria-label="Filter by stock group" value={groupFilter} onChange={e => setGroupFilter(e.target.value)} className="min-w-0 max-w-full px-3 py-2 bg-surface rounded-lg border border-border text-xs">
               <option value="">All stock groups</option><option value="none">Ungrouped</option>
               {stockGroups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
@@ -839,6 +866,7 @@ export default function InventoryPage() {
                         <span className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-emerald-600/90 text-white">CONSUMABLE</span>
                       )}
                       <span className="absolute top-2 right-12 text-[10px] font-mono text-muted bg-surface-hover px-1.5 py-0.5 rounded">{product.sku}</span>
+                      <label onClick={e => e.stopPropagation()} className="absolute bottom-2 left-2 bg-surface rounded px-2 py-1 flex gap-2 items-center text-xs"><input type="checkbox" aria-label={`Select ${product.name}`} checked={selectedProductIds.has(product.id)} disabled={bulkProductDeleting} onChange={e => toggleProductSelection(product.id, e.target.checked)} /> Select</label>
                       {product.isConsumable && (
                         <button
                           onClick={(e) => { e.stopPropagation(); openEditModal(product, e); }}
@@ -940,6 +968,7 @@ export default function InventoryPage() {
                       className="m-card tap-press animate-list-in flex items-center gap-3"
                       style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
                     >
+                      <input type="checkbox" aria-label={`Select ${product.name}`} checked={selectedProductIds.has(product.id)} disabled={bulkProductDeleting} onClick={e => e.stopPropagation()} onChange={e => toggleProductSelection(product.id, e.target.checked)} />
                       <div className="w-11 h-11 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
                         {product.image && !product.image.includes('/') ? (
                           <span className="text-xl">{product.image}</span>
@@ -991,6 +1020,7 @@ export default function InventoryPage() {
                   <table className="crm-table">
                     <thead>
                       <tr>
+                        <th>Select</th>
                         <th>{isManualInventoryMode ? 'Item' : 'Product'}</th>
                         <th>SKU</th>
                         <th>Category</th>
@@ -1009,6 +1039,7 @@ export default function InventoryPage() {
                         const godownDist = godownStocks.filter(gs => gs.productId === product.id);
                         return (
                           <tr key={product.id} className="cursor-pointer" onClick={() => openStock(product)}>
+                            <td onClick={e => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${product.name}`} checked={selectedProductIds.has(product.id)} disabled={bulkProductDeleting} onChange={e => toggleProductSelection(product.id, e.target.checked)} /></td>
                             <td>
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -1780,9 +1811,12 @@ export default function InventoryPage() {
           setAddingProduct(true);
           const f = e.target;
           try {
+          if (productType === 'rawMaterial') throw new Error('Add raw materials from Manufacturing / Raw Materials.');
           const isRawMode = tab === 'products' && productType === 'rawMaterial';
           const isConsumableMode = tab === 'products' && productType === 'consumable';
           const isManualMode = isRawMode || isConsumableMode;
+          const categoryError = inventoryCreationError(isManualMode ? getTypeCopy(productType).category : f.category.value);
+          if (categoryError) throw new Error(categoryError);
           // Upload images first
           let imageUrl = '';
           if (productImages.length > 0) {
@@ -2024,7 +2058,7 @@ export default function InventoryPage() {
         {productToDelete && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Are you sure you want to move <strong className="text-foreground">{productToDelete.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
-            <p className="text-xs text-muted">Only zero-stock items without linked documents, BOMs, production, batch or ledger history can be removed. Empty godown assignments alone do not block removal.</p>
+            <p className="text-xs text-muted">Deletion also removes this item&apos;s stock ledger, depleted batches and allocations. The full snapshot is restorable from Drafts for 30 days. Stock must be zero; linked business documents remain protected.</p>
             <div className="ui-actions flex gap-3 justify-end">
               <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveToDraft} disabled={deleting} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">
@@ -2033,6 +2067,13 @@ export default function InventoryPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal isOpen={showBulkProductDelete} onClose={() => !bulkProductDeleting && setShowBulkProductDelete(false)} title="Delete Selected Items & Ledger History" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Remove {selectedProductIds.size} selected item(s), their stock ledger, depleted batches and allocations. Full snapshots can be restored in Drafts for 30 days, after which they are permanently purged. Only zero-stock items without linked business documents/BOMs/production can be removed. Protected items will remain unchanged.</p>
+          <div className="ui-actions flex justify-end gap-2"><button disabled={bulkProductDeleting} onClick={() => setShowBulkProductDelete(false)} className="px-4 py-2 rounded-lg border border-border">Cancel</button><button disabled={bulkProductDeleting} onClick={confirmBulkProductDelete} className="px-4 py-2 rounded-lg bg-danger text-white disabled:opacity-50">{bulkProductDeleting ? 'Deleting...' : 'Delete Items & History'}</button></div>
+        </div>
       </Modal>
 
       {/* Stock Update Modal */}

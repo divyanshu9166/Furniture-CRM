@@ -17,7 +17,9 @@ import {
 } from '@prisma/client'
 
 import { activeStaff, nextDocumentId } from '@/lib/commerce/documents'
-import { moveInventoryProductToDraft, restoreEmptyGodownStocks } from '@/lib/inventory/product-drafts'
+import { moveInventoryProductToDraft, moveInventoryProductsToDraft, restoreEmptyGodownStocks } from '@/lib/inventory/product-drafts'
+import { restoreProductHistory } from '@/lib/inventory/product-history'
+import { z } from 'zod'
 
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -833,9 +835,22 @@ export async function moveProductToDraft(productId: number, expectedCategory?: '
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
+export async function moveProductsToDraft(productIds: unknown, expectedCategory?: 'Raw Material') {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
+  const parsed = z.array(z.number().int().positive()).min(1).max(1000).safeParse(productIds)
+  if (!parsed.success) return { success: false, error: 'Select between 1 and 1,000 valid items' }
+  // One request, independent item transactions: protected items remain untouched
+  // and every successful deletion has its own recoverable history snapshot.
+  const data = await moveInventoryProductsToDraft(prisma, parsed.data, actor, expectedCategory)
+  revalidatePath('/inventory'); revalidatePath('/manufacturing'); revalidatePath('/godowns'); revalidatePath('/drafts')
+  return { success: true, data }
+}
+
 // ─── GET ALL DRAFTS ────────────────────────────────────
 
 export async function getDrafts() {
+  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: [] } }
   // Auto-purge expired drafts first
   await prisma.draft.deleteMany({
     where: { expiresAt: { lt: new Date() } },
@@ -1713,6 +1728,7 @@ export async function restoreFromDraft(draftId: number) {
     })
     if ((data.stock as number) > 0) await moveTotalStock(tx, restored.id, data.stock as number, 'IN', { referenceType: 'Manual', notes: 'Product restored from draft', createdBy: 'Manager' })
     await restoreEmptyGodownStocks(tx, restored.id, data.emptyGodownIds)
+    await restoreProductHistory(tx, restored.id, data.inventoryHistory)
     await tx.product.update({ where: { id: restored.id }, data: { lastRestocked: data.lastRestocked ? new Date(data.lastRestocked as string) : null } })
     await tx.draft.delete({ where: { id: draftId } })
     return restored

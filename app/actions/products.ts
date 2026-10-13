@@ -8,6 +8,8 @@ import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import { inventoryError, inventoryTransaction, moveStock, moveTotalStock, prepareStock, reconcileStock } from '@/lib/inventory/stock'
 import { createInventoryProduct, updateInventoryMetadata } from '@/lib/inventory/products'
 import { canonicalInventoryCategory } from '@/lib/inventory/category'
+import { assignRawMaterialsToGodown, assignRawMaterialGodownSchema } from '@/lib/inventory/godown-assignment'
+import { inventoryCreationError } from '@/lib/inventory/creation-rules'
 
 export interface BulkRawMaterialRow {
   name: string
@@ -22,6 +24,7 @@ export interface BulkRawMaterialRow {
   reorderLevel?: number | string
   description?: string
   image?: string
+  godownId?: number
 }
 
 const toRequiredNumber = (value: unknown) => {
@@ -108,10 +111,28 @@ export async function createProduct(data: unknown) {
   }
 }
 
-export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
+export async function createInventoryItem(data: unknown) {
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  const parsed = createProductSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  const error = inventoryCreationError(parsed.data.category)
+  if (error) return { success: false, error }
+  return createProduct(parsed.data)
+}
+
+export async function createRawMaterial(data: unknown) {
+  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  const parsed = createProductSchema.safeParse(data)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  if (parsed.data.category !== 'Raw Material' || !parsed.data.godownId) return { success: false, error: 'Choose a receiving godown for this raw material' }
+  return createProduct(parsed.data)
+}
+
+export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownId?: number) {
   try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No raw materials to import' }
   if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
+  if (!Number.isSafeInteger(godownId) || !godownId || godownId <= 0 || !await prisma.godown.findUnique({ where: { id: godownId } })) return { success: false, error: 'Choose a valid receiving godown before importing raw materials' }
 
   const validRows = rows
     .map(r => ({
@@ -157,7 +178,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       continue
     }
 
-    const res = await createProduct({
+    const res = await createRawMaterial({
       name: row.name,
       brand: row.brand || undefined,
       sku,
@@ -170,6 +191,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[]) {
       reorderLevel: row.reorderLevel,
       description: row.description || row.sizeLabel || undefined,
       image: row.image || undefined,
+      godownId,
     })
 
     if (res.success) {
@@ -214,6 +236,7 @@ export async function bulkImportProducts(rows: BulkProductRow[]) {
   try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No products to import' }
   if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
+  if (rows.some(row => canonicalInventoryCategory(String(row.category || '')) === 'Raw Material')) return { success: false, error: 'Import raw materials from Manufacturing / Raw Materials, where you can choose the receiving godown.' }
 
   const validRows = rows
     .map(r => ({
@@ -416,4 +439,16 @@ export async function deleteRawMaterial(id: number) {
   // Permission and canonical-category checks run inside the shared deletion
   // workflow, with the category checked after locking the product.
   return moveProductToDraft(id, 'Raw Material')
+}
+
+export async function bulkAssignRawMaterialGodown(input: unknown) {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
+  const parsed = assignRawMaterialGodownSchema.safeParse(input)
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+  try {
+    const data = await inventoryTransaction(prisma, tx => assignRawMaterialsToGodown(tx, parsed.data, actor))
+    revalidatePath('/manufacturing'); revalidatePath('/inventory'); revalidatePath('/godowns')
+    return { success: true, data }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
