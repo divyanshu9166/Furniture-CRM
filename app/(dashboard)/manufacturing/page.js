@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { removeInChunks } from '@/lib/inventory/bulk-removal'
 import {
   Plus, Factory, Layers, PlayCircle, CheckCircle, Package,
   Eye, AlertTriangle, Pause, XCircle, Wrench,
@@ -233,6 +234,9 @@ export default function ManufacturingPage() {
   const [rmImportResult, setRmImportResult] = useState(null)
   const [selectedRmIds, setSelectedRmIds] = useState(new Set())
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
+  const [archiveStockedRm, setArchiveStockedRm] = useState(false)
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState({ done: 0, total: 0 })
+  const [bulkDeleteResult, setBulkDeleteResult] = useState(null)
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const [rmGodownId, setRmGodownId] = useState('')
   const [rmImportGodownId, setRmImportGodownId] = useState('')
@@ -860,6 +864,11 @@ export default function ManufacturingPage() {
 
   const handleDeleteRawMaterial = async (id, name) => {
     if (submitting || bulkDeleting) return
+    // Stocked single-item deletion uses the same explicit archive confirmation.
+    if (products.find(product => product.id === id)?.stock !== 0 || godownStocks.some(row => row.productId === id && row.quantity !== 0)) {
+      setSelectedRmIds(new Set([id])); setArchiveStockedRm(false); setShowBulkDeleteModal(true)
+      return
+    }
     if (!confirm(`Delete raw material "${name}" and its stock ledger/depleted batch history? The item and history are saved in Drafts for 30 days. Stock must be zero; linked business documents are protected.`)) return
     setSubmitting(true)
     try {
@@ -913,28 +922,17 @@ export default function ManufacturingPage() {
   const handleBulkDelete = async () => {
     if (bulkDeleting || submitting || selectedRmIds.size === 0) return
     setBulkDeleting(true)
-    let deleted = 0
-    const failedIds = new Set()
-    const errors = []
+    setBulkDeleteProgress({ done: 0, total: selectedRmIds.size })
     try {
-      const res = await moveProductsToDraft([...selectedRmIds], 'Raw Material')
-      if (!res.success) { alert(res.error); return }
-      deleted = res.data.movedIds.length
-      for (const failure of res.data.errors) {
-        failedIds.add(failure.id)
+      const result = await removeInChunks([...selectedRmIds], ids => moveProductsToDraft(ids, 'Raw Material', { archiveStocked: archiveStockedRm }), (done, total) => setBulkDeleteProgress({ done, total }))
+      const errors = result.errors.map(failure => {
         const material = products.find(product => product.id === failure.id)
-        errors.push(`${material?.name || `Item ${failure.id}`}: ${failure.error}`)
-      }
+        return { ...failure, name: material?.name || `Item ${failure.id}`, sku: material?.sku || '' }
+      })
       setShowBulkDeleteModal(false)
-      setSelectedRmIds(failedIds)
+      setSelectedRmIds(new Set(result.errors.map(row => row.id)))
+      setBulkDeleteResult({ moved: result.movedIds.length, errors })
       await loadData()
-      let message = `Moved ${deleted} raw material${deleted !== 1 ? 's' : ''} to Drafts (restorable for 30 days).`
-      if (failedIds.size > 0) {
-        message += `\n\nKept ${failedIds.size} item${failedIds.size !== 1 ? 's' : ''} unchanged:`
-        message += '\n' + errors.slice(0, 5).join('\n')
-        if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
-      }
-      alert(message)
     } catch (error) { alert(error?.message || 'Unable to remove materials. Refresh and retry.') }
     finally { setBulkDeleting(false) }
   }
@@ -2202,7 +2200,7 @@ export default function ManufacturingPage() {
               <div className="ui-actions flex flex-wrap gap-2">
               <button onClick={() => { setAssignGodownError(''); setAssignGodownId(''); setShowAssignGodownModal(true) }} disabled={bulkDeleting || assigningGodown || submitting} className="px-4 py-2 bg-accent/10 text-accent border border-accent/30 rounded-lg text-sm disabled:opacity-50">Assign Godown ({selectedRmIds.size})</button>
               <button
-                onClick={() => setShowBulkDeleteModal(true)}
+                onClick={() => { setArchiveStockedRm(false); setShowBulkDeleteModal(true) }}
                 disabled={bulkDeleting}
                 className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 text-sm font-medium rounded-lg flex items-center gap-2 transition-colors disabled:opacity-50">
                 <Trash2 className="w-4 h-4" />
@@ -2647,6 +2645,11 @@ export default function ManufacturingPage() {
             </p>
             <p className="text-xs text-red-400/70 mt-2">This removes each zero-stock material AND its ledger, depleted batches and allocations. A complete snapshot is retained in Drafts for 30 days, then permanently purged. Items linked to business documents/BOMs/production remain protected.</p>
           </div>
+          <label className="flex items-start gap-3 text-sm text-foreground">
+            <input type="checkbox" checked={archiveStockedRm} disabled={bulkDeleting} onChange={event => setArchiveStockedRm(event.target.checked)} className="mt-1" />
+            <span>Also move stocked materials to Drafts. I understand their recorded quantities will be removed from active inventory, not marked as sold or consumed. Original godown balances, batches and ledger are saved for exact restoration within 30 days. This does not correct incorrect physical counts. Business-linked or mismatched items are kept.</span>
+          </label>
+          {bulkDeleting && <p role="status" className="text-sm text-muted">Processed {bulkDeleteProgress.done} of {bulkDeleteProgress.total}. Please keep this page open.</p>}
           <div className="ui-actions flex justify-end gap-2">
             <button
               onClick={() => setShowBulkDeleteModal(false)}
@@ -2659,10 +2662,21 @@ export default function ManufacturingPage() {
               disabled={bulkDeleting}
               className="px-4 py-2 bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center gap-2">
               <Trash2 className="w-4 h-4" />
-              {bulkDeleting ? 'Deleting...' : 'Delete All'}
+              {bulkDeleting ? 'Moving...' : archiveStockedRm ? 'Move Including Stock' : 'Move Zero-Stock Items'}
             </button>
           </div>
         </div>
+      </Modal>
+
+      <Modal isOpen={!!bulkDeleteResult} onClose={() => setBulkDeleteResult(null)} title="Raw Material Deletion Results" size="lg">
+        {bulkDeleteResult && <div className="space-y-4">
+          <p>{bulkDeleteResult.moved} materials moved to Drafts; {bulkDeleteResult.errors.length} blocked or unconfirmed. Saved materials can be restored within 30 days with their recorded stock/history.</p>
+          {bulkDeleteResult.errors.length > 0 && <div className="space-y-3 max-h-[50dvh] overflow-y-auto">
+            {bulkDeleteResult.errors.map(row => <div key={row.id} className="rounded-lg border border-border p-3 break-words"><p className="font-medium">{row.name} <span className="text-muted text-xs">{row.sku}</span></p><p className="text-sm text-muted mt-1">{row.error}</p></div>)}
+          </div>}
+          <p className="text-sm text-muted">For stock mismatches, use Inventory → Locations to review/reconcile verified balances. For business links, resolve the specific referenced record; no linked documents were deleted.</p>
+          <button onClick={() => setBulkDeleteResult(null)} className="px-4 py-2 border border-border rounded-lg">Close</button>
+        </div>}
       </Modal>
 
       <Modal isOpen={showAssignGodownModal} onClose={() => !assigningGodown && setShowAssignGodownModal(false)} title="Assign Raw Materials to Godown" size="sm">

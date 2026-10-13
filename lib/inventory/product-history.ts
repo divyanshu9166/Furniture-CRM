@@ -7,21 +7,23 @@ const timestamp = z.string().datetime()
 export const productHistorySchema = z.object({
   version: z.literal(1),
   ledger: z.array(z.object({ id, godownId: id, entryType: z.string().min(1), quantity: z.number(), balanceAfter: z.number(), referenceType: z.string().nullable(), referenceId: id.nullable(), notes: z.string().nullable(), createdBy: z.string().nullable(), createdAt: timestamp })).max(10000),
-  batches: z.array(z.object({ id, batchNumber: z.string().min(1), purchaseDate: timestamp, expiryDate: timestamp.nullable(), quantity: z.number().nonnegative(), remainingQty: z.literal(0), costPrice: z.number().int().nonnegative(), supplierId: id.nullable(), poId: id.nullable(), createdAt: timestamp })).max(10000),
+  batches: z.array(z.object({ id, batchNumber: z.string().min(1), purchaseDate: timestamp, expiryDate: timestamp.nullable(), quantity: z.number().nonnegative(), remainingQty: z.number().nonnegative(), costPrice: z.number().int().nonnegative(), supplierId: id.nullable(), poId: id.nullable(), createdAt: timestamp })).max(10000),
   movements: z.array(z.object({ id, batchId: id.nullable(), stockLedgerId: id, quantity: z.number(), createdAt: timestamp })).max(20000),
 }).superRefine((data, context) => {
   for (const key of ['ledger', 'batches', 'movements'] as const) if (new Set(data[key].map(row => row.id)).size !== data[key].length) context.addIssue({ code: 'custom', message: 'Duplicate history IDs' })
   const ledgerIds = new Set(data.ledger.map(row => row.id)); const batchIds = new Set(data.batches.map(row => row.id))
   if (data.movements.some(row => !ledgerIds.has(row.stockLedgerId) || (row.batchId !== null && !batchIds.has(row.batchId)))) context.addIssue({ code: 'custom', message: 'Invalid history references' })
+  if (data.batches.some(row => row.remainingQty > row.quantity)) context.addIssue({ code: 'custom', message: 'Invalid batch balances' })
 })
 
-export async function snapshotProductHistory(tx: Tx, productId: number) {
+export async function snapshotProductHistory(tx: Tx, productId: number, stockedArchiveBalance?: number) {
   const [ledger, batches, movements] = await Promise.all([
     tx.stockLedger.findMany({ where: { productId }, orderBy: { id: 'asc' }, take: 10001 }),
     tx.productBatch.findMany({ where: { productId }, orderBy: { id: 'asc' }, take: 10001 }),
     tx.batchMovement.findMany({ where: { OR: [{ stockLedger: { productId } }, { batch: { productId } }] }, include: { stockLedger: { select: { productId: true } }, batch: { select: { productId: true } } }, orderBy: { id: 'asc' }, take: 20001 }),
   ])
-  if (batches.some(row => row.remainingQty !== 0)) throw new Error('Cannot delete: batch stock remains. Reconcile batch and physical stock before deleting.')
+  if (stockedArchiveBalance === undefined && batches.some(row => row.remainingQty !== 0)) throw new Error('Cannot delete: batch stock remains. Reconcile batch and physical stock before deleting.')
+  if (stockedArchiveBalance !== undefined && batches.reduce((total, row) => total + row.remainingQty, 0) > stockedArchiveBalance + 0.000001) throw new Error('Cannot archive: batch balances exceed physical stock. Reconcile the mismatch first; history was preserved.')
   if (movements.some(row => row.stockLedger.productId !== productId || (row.batch && row.batch.productId !== productId))) throw new Error('Cannot delete: batch allocations cross product boundaries; linked records were preserved.')
   // Empty invoice/production tables do not block orphaned old ledger history.
   // Only LIVE document references are protected, including items whose FK was
@@ -63,6 +65,11 @@ export async function restoreProductHistory(tx: Tx, productId: number, saved: un
   if (!parsed.success) throw new Error('Invalid inventory history snapshot; draft was preserved')
   const data = parsed.data
   if (!data.ledger.length && !data.batches.length && !data.movements.length) return
+  const remaining = data.batches.reduce((total, row) => total + row.remainingQty, 0)
+  if (remaining > 0) {
+    const product = await tx.product.findUnique({ where: { id: productId }, select: { stock: true } })
+    if (!product || !Number.isFinite(remaining) || !Number.isFinite(product.stock) || remaining > product.stock + 0.000001) throw new Error('Saved batch balances exceed restored physical stock; draft was preserved')
+  }
   const requiredLocations = [...new Set(data.ledger.map(row => row.godownId))]
   const locations = await tx.godown.findMany({ where: { id: { in: requiredLocations } }, select: { id: true } })
   if (locations.length !== requiredLocations.length) throw new Error('A godown referenced by saved ledger history is missing. Restore that godown before restoring this draft.')

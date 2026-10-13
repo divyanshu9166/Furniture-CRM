@@ -2,28 +2,35 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { lockProducts, inventoryTransaction, inventoryError } from './stock'
 import { canonicalInventoryCategory } from './category'
 import { snapshotProductHistory, removeProductHistory } from './product-history'
+import { productStockSnapshotSchema } from './product-stock-snapshot'
 
 type Tx = Prisma.TransactionClient
 
 // Both Inventory and Manufacturing remove the same product through this engine.
 // The caller supplies a serializable transaction. Item ledger/batch history is
 // explicitly removed with the item, but first saved in its recoverable draft.
-export async function moveInventoryProductToDraft(tx: Tx, productId: number, actor: string, expectedCategory?: 'Raw Material', now = new Date()) {
+// Stocked raw-material archive is opt-in only; balances are snapshotted rather
+// than zeroed or rewritten as consumption/sales.
+export async function moveInventoryProductToDraft(tx: Tx, productId: number, actor: string, expectedCategory?: 'Raw Material', now = new Date(), archiveStocked = false) {
   await lockProducts(tx, [productId])
   const product = await tx.product.findUnique({
     where: { id: productId }, include: { category: true, warehouse: true, stockGroup: true },
   })
   if (!product) throw new Error('Product not found. Refresh the list before trying again.')
   if (expectedCategory && canonicalInventoryCategory(product.category.name) !== expectedCategory) throw new Error('Raw material not found')
+  if (archiveStocked && expectedCategory !== 'Raw Material') throw new Error('Stocked archive is available only for explicitly selected raw materials')
   const locations = await tx.godownStock.findMany({ where: { productId }, orderBy: { godownId: 'asc' } })
   if (!Number.isFinite(product.stock) || product.stock < 0 || locations.some(row => !Number.isFinite(row.quantity) || row.quantity < 0)) {
     throw new Error('Cannot delete: invalid stock balances. Review and reconcile stock first; no records were changed.')
   }
   // Never infer emptiness from a sum: nonzero individual rows or a stale product
   // total must block removal even if the UI displays a rounded zero.
-  if (product.stock !== 0 || locations.some(row => row.quantity !== 0)) {
-    throw new Error('Cannot delete: stock remains on the product or in a godown. Verify Inventory / Locations and reconcile any mismatch first.')
+  if (!archiveStocked && (product.stock !== 0 || locations.some(row => row.quantity !== 0))) {
+    const physical = locations.reduce((sum, row) => sum + row.quantity, 0)
+    throw new Error(`Cannot delete: stock remains. Product ${product.stock} ${product.unitOfMeasure}, godowns ${physical} ${product.unitOfMeasure}. Use the explicit stocked-material archive option, or verify/reconcile balances first.`)
   }
+  const stockSnapshot = archiveStocked ? productStockSnapshotSchema.safeParse({ version: 1, productStock: product.stock, locations: locations.map(row => ({ godownId: row.godownId, quantity: row.quantity })) }) : null
+  if (stockSnapshot && !stockSnapshot.success) throw new Error(`Cannot archive: product/location stock mismatch or invalid balances for ${product.name}. Reconcile first; data was preserved.`)
 
   const usage = await Promise.all([
     tx.bomItem.count({ where: { rawMaterialId: productId } }),
@@ -49,7 +56,7 @@ export async function moveInventoryProductToDraft(tx: Tx, productId: number, act
   ]
   const used = usage.findIndex(count => count > 0)
   if (used !== -1) throw new Error(`Cannot delete: ${product.name} ${messages[used]}. Zero stock does not remove linked history; existing records were preserved.`)
-  const inventoryHistory = await snapshotProductHistory(tx, productId)
+  const inventoryHistory = await snapshotProductHistory(tx, productId, archiveStocked ? product.stock : undefined)
 
   const snapshot = {
     originalProductId: product.id,
@@ -63,7 +70,8 @@ export async function moveInventoryProductToDraft(tx: Tx, productId: number, act
     lastRestocked: product.lastRestocked?.toISOString() ?? null,
     hsnCode: product.hsnCode, unitOfMeasure: product.unitOfMeasure, costPrice: product.costPrice,
     stockGroupId: product.stockGroupId, stockGroupName: product.stockGroup?.name ?? null,
-    emptyGodownIds: locations.map(row => row.godownId),
+    emptyGodownIds: archiveStocked ? [] : locations.map(row => row.godownId),
+    ...(stockSnapshot?.success ? { stockSnapshot: stockSnapshot.data } : {}),
     inventoryHistory,
     title: product.name, subtitle: `Product · ${product.sku}`,
   }
@@ -72,9 +80,10 @@ export async function moveInventoryProductToDraft(tx: Tx, productId: number, act
     deletedBy: actor, deletedAt: now, expiresAt: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
   } })
   await removeProductHistory(tx, productId)
-  // Only this product's empty balances are removable, after every usage guard.
+  // Only this product's balances are removable, after every usage guard and
+  // (for stocked archive) the validated full stock snapshot.
   // Any later failure rolls back this cleanup and the draft together.
-  const cleaned = await tx.godownStock.deleteMany({ where: { productId, quantity: 0 } })
+  const cleaned = await tx.godownStock.deleteMany({ where: archiveStocked ? { productId } : { productId, quantity: 0 } })
   if (cleaned.count !== locations.length) throw new Error('Stock changed during deletion. Refresh and retry; no records were changed.')
   await tx.product.delete({ where: { id: productId } })
   return { success: true }
@@ -96,10 +105,10 @@ export async function restoreEmptyGodownStocks(tx: Tx, productId: number, savedI
   })
 }
 
-export async function moveInventoryProductsToDraft(db: PrismaClient, productIds: number[], actor: string, expectedCategory?: 'Raw Material') {
+export async function moveInventoryProductsToDraft(db: PrismaClient, productIds: number[], actor: string, expectedCategory?: 'Raw Material', archiveStocked = false) {
   const movedIds: number[] = []; const errors: { id: number; error: string }[] = []
   for (const id of [...new Set(productIds)].sort((a, b) => a - b)) {
-    try { await inventoryTransaction(db, tx => moveInventoryProductToDraft(tx, id, actor, expectedCategory)); movedIds.push(id) }
+    try { await inventoryTransaction(db, tx => moveInventoryProductToDraft(tx, id, actor, expectedCategory, new Date(), archiveStocked)); movedIds.push(id) }
     catch (error) { errors.push({ id, error: inventoryError(error) }) }
   }
   return { movedIds, errors }

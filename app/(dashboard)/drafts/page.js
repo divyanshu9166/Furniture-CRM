@@ -72,11 +72,14 @@ export default function DraftsPage() {
   const handleRestore = (draftId) => {
     const draft = drafts.find(d => d.id === draftId);
     const label = draft ? (draft.sourceType === 'FieldVisit' ? 'visit' : getDraftActionLabel(draft.sourceType).toLowerCase()) : 'item';
-    openConfirm('restore', draftId, `Restore this ${label}? It will be re-created.`);
+    const stockInfo = draft?.data?.stockSnapshot ? ` Its saved ${draft.data.stockSnapshot.productStock} ${draft.data.unitOfMeasure || 'PCS'} and original godown/batch balances will be restored, not received again.` : '';
+    openConfirm('restore', draftId, `Restore this ${label}? It will be re-created.${stockInfo}`);
   };
 
   const handlePermanentDelete = (draftId) => {
-    openConfirm('delete', draftId, 'Permanently delete this draft? This cannot be undone.');
+    const draft = drafts.find(row => row.id === draftId);
+    const stockInfo = draft?.data?.stockSnapshot ? ' This discards the only saved stock/ledger/batch recovery snapshot for this archived material.' : '';
+    openConfirm('delete', draftId, `Permanently delete this draft? This cannot be undone.${stockInfo}`);
   };
 
   const runConfirmed = async () => {
@@ -495,7 +498,8 @@ export default function DraftsPage() {
               {selectedDraft.sourceType === 'Product' && data.inventoryHistory && (
                 <div className="bg-surface rounded-xl p-3 border border-border space-y-1">
                   <p className="text-xs font-semibold text-foreground">Inventory history saved for recovery</p>
-                  <p className="text-xs text-muted">{data.inventoryHistory.ledger?.length || 0} ledger entries · {data.inventoryHistory.batches?.length || 0} depleted batches · {data.inventoryHistory.movements?.length || 0} allocations</p>
+                  <p className="text-xs text-muted">{data.inventoryHistory.ledger?.length || 0} ledger entries · {data.inventoryHistory.batches?.length || 0} batches · {data.inventoryHistory.movements?.length || 0} allocations</p>
+                  {data.stockSnapshot && <div className="text-xs text-muted space-y-1"><p>Recorded stock saved: {data.stockSnapshot.productStock} {data.unitOfMeasure || 'PCS'} (base units).</p>{data.stockSnapshot.locations?.map(row => <p key={row.godownId}>Godown #{row.godownId}: {row.quantity} {data.unitOfMeasure || 'PCS'}</p>)}{data.stockSnapshot.locations?.length === 0 && <p>Original stock was unallocated; restore keeps it unallocated.</p>}</div>}
                   <p className="text-[11px] text-muted">Restore brings back the item and its original history. Permanently deleting or expiring this draft also removes this recovery snapshot.</p>
                 </div>
               )}

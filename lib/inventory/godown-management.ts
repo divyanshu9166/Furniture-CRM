@@ -51,7 +51,8 @@ export async function chooseDefaultGodown(tx: Tx, id: number) {
 
 export function draftNeedsGodown(data: unknown, godownId: number) {
   const history = (data as { inventoryHistory?: { ledger?: { godownId: number }[] } } | null)?.inventoryHistory
-  return Array.isArray(history?.ledger) && history.ledger.some(row => row?.godownId === godownId)
+  const balances = (data as { stockSnapshot?: { locations?: { godownId: number }[] } } | null)?.stockSnapshot?.locations
+  return (Array.isArray(history?.ledger) && history.ledger.some(row => row?.godownId === godownId)) || (Array.isArray(balances) && balances.some(row => row?.godownId === godownId))
 }
 
 export async function removeGodown(tx: Tx, id: number, now = new Date()) {
@@ -62,7 +63,7 @@ export async function removeGodown(tx: Tx, id: number, now = new Date()) {
   if (Object.values(location._count).some(count => count > 0)) throw new Error('Cannot delete a location with ledger, transfer or order history')
   if (location.isDefault && await tx.godown.count() > 1) throw new Error('Select another default location before deleting this one')
   const drafts = await tx.draft.findMany({ where: { sourceType: 'Product', expiresAt: { gte: now } }, select: { data: true } })
-  if (drafts.some(draft => draftNeedsGodown(draft.data, id))) throw new Error('This godown is needed to restore product ledger history in Drafts. Restore or explicitly purge those drafts first.')
+  if (drafts.some(draft => draftNeedsGodown(draft.data, id))) throw new Error('This godown is needed to restore saved product stock or ledger history in Drafts. Restore or explicitly purge those drafts first.')
   const rows = await tx.godownStock.findMany({ where: { godownId: id }, include: { product: { select: { stock: true, name: true } } } })
   if (rows.some(row => !Number.isFinite(row.quantity) || row.quantity !== 0)) throw new Error('Cannot delete a godown with nonzero or invalid stock. Transfer/reconcile stock first.')
   await lockProducts(tx, rows.map(row => row.productId))

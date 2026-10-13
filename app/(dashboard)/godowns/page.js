@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSession } from '@/components/AuthProvider'
-import { godownUnitValue } from '@/lib/inventory/godown-values'
+import { godownUnitValue, quantitiesByUnit, stockedProductCount } from '@/lib/inventory/godown-values'
 import { createTransferSchema } from '@/lib/validations/godown'
 import { cancelTransfer as cancelTransferAction } from '@/app/actions/godowns'
+import { getGodownStockAudit as getGodownStockAuditAction } from '@/app/actions/godowns'
 import {
   Search, Plus, Warehouse, Building2, ArrowRightLeft, Package,
   MapPin, Phone, Mail, CheckCircle, Trash2, Edit2, Star, 
@@ -29,6 +30,7 @@ const getTransfers = safeAction(getTransfersAction);
 const createTransfer = safeAction(createTransferAction);
 const completeTransfer = safeAction(completeTransferAction);
 const cancelTransfer = safeAction(cancelTransferAction);
+const getGodownStockAudit = safeAction(getGodownStockAuditAction);
 const getGodownStockSummary = safeAction(getGodownStockSummaryAction);
 const getStockLedger = safeAction(getStockLedgerAction);
 const assignStockToGodown = safeAction(assignStockToGodownAction);
@@ -69,6 +71,11 @@ export default function GodownsPage() {
   const [showGodownModal, setShowGodownModal] = useState(false)
   const [showTransferModal, setShowTransferModal] = useState(false)
   const [showAssignModal, setShowAssignModal] = useState(false)
+  const [showStockAudit, setShowStockAudit] = useState(false)
+  const [stockAudit, setStockAudit] = useState(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState('')
+  const [auditSearch, setAuditSearch] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false })
@@ -235,6 +242,15 @@ export default function GodownsPage() {
     setMigrating(false)
   }
 
+  const handleStockAudit = async () => {
+    setShowStockAudit(true); setAuditLoading(true); setAuditError(''); setStockAudit(null); setAuditSearch('')
+    try {
+      const result = await getGodownStockAudit()
+      if (result.success) setStockAudit(result.data)
+      else setAuditError(result.error || 'Could not check stock balances')
+    } finally { setAuditLoading(false) }
+  }
+
   const tabs = [
     { id: 'branches', label: 'Branches', icon: Building2 },
     { id: 'godowns', label: 'Godowns', icon: Warehouse },
@@ -249,7 +265,9 @@ export default function GodownsPage() {
   if (loadError && !loading) return <div role="alert" className="glass-card p-6 text-center"><p>{loadError}</p><button onClick={loadData} className="mt-3 px-4 py-2 bg-accent text-white rounded-lg">Retry</button></div>
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
 
-  const totalStockItems = godownSummary.reduce((s, g) => s + (g.totalItems || 0), 0)
+  const stockRows = godownSummary.flatMap(g => g.stocks)
+  const totalStockProducts = stockedProductCount(stockRows)
+  const unitQuantities = quantitiesByUnit(stockRows)
   const totalStockValue = godownSummary.reduce((s, g) => s + (g.totalValue || 0), 0)
 
   return (
@@ -260,6 +278,7 @@ export default function GodownsPage() {
           <p className="text-muted text-sm mt-1">{branches.length} branches · {godowns.length} godowns · ₹{(totalStockValue / 100000).toFixed(1)}L inventory value</p>
         </div>
         <div className="ui-actions flex gap-2 flex-wrap">
+          {canManage && <button disabled={auditLoading} onClick={handleStockAudit} className="px-3 py-2 border border-border rounded-lg text-sm text-foreground disabled:opacity-50">Check stock balances</button>}
           {isAdmin && tab === 'branches' && <button onClick={() => { setEditingBranchId(null); setBranchForm({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false }); setShowBranchModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Branch</button>}
           {canManage && tab === 'godowns' && <button onClick={() => { setEditingGodownId(null); setGodownForm({ name: '', address: '', branchId: '', type: 'Warehouse', capacity: '', isDefault: false }); setShowGodownModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Godown</button>}
           {canManage && tab === 'stock' && <button onClick={() => setShowAssignModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Receive/Add Stock</button>}
@@ -275,7 +294,7 @@ export default function GodownsPage() {
         {[
           { label: 'Branches', value: branches.length, icon: Building2, color: 'text-blue-400' },
           { label: 'Godowns', value: godowns.length, icon: Warehouse, color: 'text-emerald-400' },
-          { label: 'Stock Qty (all UOMs)', value: Number(totalStockItems.toFixed(6)), icon: Package, color: 'text-amber-400' },
+          { label: 'Stocked Products (unique)', value: totalStockProducts, icon: Package, color: 'text-amber-400' },
           { label: 'Inventory Value', value: `₹${(totalStockValue / 100000).toFixed(1)}L`, icon: BarChart3, color: 'text-purple-400' },
           { label: 'Pending Transfers', value: transfers.filter(t => t.status === 'Pending').length, icon: ArrowRightLeft, color: 'text-orange-400' },
         ].map((s, i) => (
@@ -289,6 +308,12 @@ export default function GodownsPage() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="glass-card p-4 space-y-2">
+        <p className="text-sm font-medium">Recorded quantities by base unit</p>
+        <div className="flex flex-wrap gap-2">{unitQuantities.map(row => <span key={row.unit} className="px-3 py-1 rounded-lg bg-surface-hover text-sm">{row.quantity.toLocaleString('en-IN', { maximumFractionDigits: 6 })} {row.unit}</span>)}{unitQuantities.length === 0 && <span className="text-sm text-muted">No allocated stock</span>}</div>
+        <p className="text-xs text-muted">Different units are not added together. These are recorded godown balances, not verified physical counts. Raw-material entry/pack quantity may differ by its base-unit factor.</p>
       </div>
 
       {/* Tabs */}
@@ -373,8 +398,8 @@ export default function GodownsPage() {
                 {/* Stats */}
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="bg-surface rounded-lg p-2 text-center">
-                    <p className="text-sm font-bold text-foreground">{g.totalItems}</p>
-                    <p className="text-[9px] text-muted">{g.mixedUnits ? 'Qty (mixed UOMs)' : g.stockUnitTypes?.[0] || 'Qty'}</p>
+                    <p className="text-sm font-bold text-foreground">{g.stockedProducts}</p>
+                    <p className="text-[9px] text-muted">Stocked products</p>
                   </div>
                   <div className="bg-surface rounded-lg p-2 text-center">
                     <p className="text-sm font-bold text-foreground">₹{(g.totalValue / 1000).toFixed(0)}k</p>
@@ -382,9 +407,10 @@ export default function GodownsPage() {
                   </div>
                   <div className="bg-surface rounded-lg p-2 text-center">
                     <p className="text-sm font-bold text-foreground">{g._count?.stocks || 0}</p>
-                    <p className="text-[9px] text-muted">Products</p>
+                    <p className="text-[9px] text-muted">Assigned products</p>
                   </div>
                 </div>
+                <div className="flex flex-wrap gap-2 mb-3">{g.quantitiesByUnit?.map(row => <span key={row.unit} className="text-xs text-muted bg-surface-hover px-2 py-1 rounded-lg">{row.quantity.toLocaleString('en-IN', { maximumFractionDigits: 6 })} {row.unit}</span>)}</div>
 
                 {/* Capacity bar */}
                 {g.capacity && g.utilization !== null && (
@@ -551,6 +577,28 @@ export default function GodownsPage() {
       )}
 
       {/* ═══════ MODALS ═══════ */}
+
+      <Modal isOpen={showStockAudit} onClose={() => setShowStockAudit(false)} title="Recorded Stock Balance Check" size="xl">
+        <div className="space-y-4">
+          <p className="text-sm text-muted">Read-only check: product totals versus godowns/batches and entry-to-base-unit factors. This does not verify physical stock or change any balance. For incorrect records, reconcile only against a verified count in Inventory → Locations.</p>
+          {auditLoading && <p role="status">Checking balances...</p>}
+          {auditError && <p role="alert" className="text-danger">{auditError}</p>}
+          {stockAudit && <>
+            <p>{stockAudit.productCount} products checked · {stockAudit.issueCount} products need review</p>
+            <input aria-label="Search stock balance report" value={auditSearch} onChange={event => setAuditSearch(event.target.value)} placeholder="Search product or SKU..." className={INP} />
+            <div className="ui-table-scroll overflow-x-auto max-h-[50dvh]">
+              <table className="w-full text-sm"><thead><tr>{['Product / SKU', 'Product qty', 'Godown qty', 'Batch qty', 'Entry qty × factor', 'Review'].map(label => <th key={label} className="p-2 text-left whitespace-nowrap">{label}</th>)}</tr></thead><tbody>
+                {stockAudit.rows.filter(row => `${row.name} ${row.sku}`.toLowerCase().includes(auditSearch.toLowerCase())).map(row => <tr key={row.id} className="border-t border-border">
+                  <td className="p-2 min-w-[160px]">{row.name}<p className="text-xs text-muted">{row.sku}</p></td>
+                  <td className="p-2 whitespace-nowrap">{row.productQuantity} {row.unit}</td><td className="p-2 whitespace-nowrap">{row.godownQuantity} {row.unit}</td><td className="p-2 whitespace-nowrap">{row.batchQuantity} {row.unit}</td>
+                  <td className="p-2 whitespace-nowrap">{row.entryQuantity?.toLocaleString('en-IN', { maximumFractionDigits: 6 }) ?? 'Invalid'} × {row.unitSize}</td>
+                  <td className="p-2 min-w-[180px]">{row.issues.length ? row.issues.join('; ') : 'Recorded totals match (physical count unverified)'}</td>
+                </tr>)}
+              </tbody></table>
+            </div>
+          </>}
+        </div>
+      </Modal>
 
       {/* Create Branch Modal */}
       <Modal isOpen={showBranchModal} onClose={() => { if (!submitting) setShowBranchModal(false) }} title={editingBranchId ? "Edit Branch" : "Add Branch"}>

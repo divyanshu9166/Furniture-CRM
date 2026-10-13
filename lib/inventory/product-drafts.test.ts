@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 import { inventoryTransaction } from './stock'
 import { moveInventoryProductToDraft, moveInventoryProductsToDraft, restoreEmptyGodownStocks } from './product-drafts'
 import { restoreProductHistory } from './product-history'
+import { restoreProductStockSnapshot } from './product-stock-snapshot'
 
 // No lib/db, environment variables or external services: all tests run against
 // a copy-on-commit fixture, including failures after a draft/cleanup is written.
@@ -40,6 +41,7 @@ function fixture() {
       product: {
         findUnique: async ({ where }: any) => structuredClone(copy.product.find(row => row.id === where.id) ?? null),
         create: async ({ data }: any) => { const row = { ...structuredClone(item), ...data, id: Math.max(...copy.product.map(row => row.id)) + 1 }; copy.product.push(row); return row },
+        update: async ({ where, data }: any) => Object.assign(copy.product.find(row => row.id === where.id), data),
         delete: async ({ where }: any) => {
           calls.push('delete'); if (failAt === 'delete') throw new Error('Injected product delete failure')
           assert.equal(copy.godownStock.some(row => row.productId === where.id), false, 'FK must have no remaining balance rows')
@@ -51,7 +53,9 @@ function fixture() {
       godownStock: {
         findMany: async ({ where }: any) => structuredClone(copy.godownStock.filter(row => row.productId === where.productId)),
         deleteMany: async ({ where }: any) => {
-          calls.push('cleanup'); assert.deepEqual(where, { productId: 1, quantity: 0 })
+          calls.push('cleanup'); assert.ok(Number.isInteger(where.productId) && where.productId > 0)
+          assert.ok(Object.keys(where).every(key => ['productId', 'quantity'].includes(key)))
+          if ('quantity' in where) assert.equal(where.quantity, 0)
           if (failAt === 'cleanup') throw new Error('Injected cleanup failure')
           const before = copy.godownStock.length
           copy.godownStock = copy.godownStock.filter(row => !match(row, where))
@@ -65,6 +69,10 @@ function fixture() {
           if (found) return found
           const row = { id: Math.max(0, ...copy.godownStock.map(row => row.id)) + 1, ...create }; copy.godownStock.push(row); return row
         },
+        create: async ({ data }: any) => {
+          if (failAt === 'restore-stock') throw new Error('Injected stock restore failure')
+          const row = { id: Math.max(0, ...copy.godownStock.map(row => row.id)) + 1, ...data }; copy.godownStock.push(row); return row
+        },
       },
       godown: { findMany: async ({ where }: any) => copy.godown.filter(row => where.id.in.includes(row.id)) },
       draft: {
@@ -74,7 +82,7 @@ function fixture() {
     }
     for (const [model, field] of Object.entries(links)) tx[model] = { count: async ({ where }: any) => {
       if ('id' in where) return copy[model].filter(row => row.id === where.id).length
-      assert.deepEqual(where, { [field]: 1 }); return copy[model].filter(row => row[field] === 1).length
+      assert.ok(Number.isInteger(where[field]) && where[field] > 0); assert.deepEqual(Object.keys(where), [field]); return copy[model].filter(row => row[field] === where[field]).length
     } }
     for (const model of ['invoice', 'purchaseOrder', 'purchaseReturn', 'godownTransfer']) tx[model] = { count: async ({ where }: any) => copy[model].filter(row => row.id === where.id).length }
     for (const model of ['stockLedger', 'productBatch']) tx[model] = {
@@ -332,4 +340,112 @@ test('empty invoice/production tables do not block old orphaned ledger reference
     assert.equal(f.state().stockLedger.length, 0)
     assert.equal(f.state().draft[0].data.inventoryHistory.ledger[0].referenceId, 42)
   }
+})
+
+test('explicit stocked raw-material archive saves split balances and non-depleted history for exact restoration', async () => {
+  const f = fixture(); seedHistory(f)
+  f.state().product[0].stock = 2.5; f.state().product[0].unitSize = 5
+  f.state().godownStock[0].quantity = 1.75; f.state().godownStock[1].quantity = 0.75
+  f.state().productBatch[0].remainingQty = 2.5
+  const before = structuredClone(f.state())
+  await f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date('2026-10-13'), true))
+  assert.deepEqual(f.state().product, [before.product[1]])
+  assert.deepEqual(f.state().godownStock, [before.godownStock[2]])
+  const data = f.state().draft[0].data
+  assert.deepEqual(data.stockSnapshot, { version: 1, productStock: 2.5, locations: [{ godownId: 1, quantity: 1.75 }, { godownId: 2, quantity: 0.75 }] })
+  assert.equal(data.inventoryHistory.batches[0].remainingQty, 2.5)
+  await f.run(async tx => {
+    const created = await tx.product.create({ data: { ...data, stock: 0 } })
+    await restoreProductStockSnapshot(tx, created.id, data.stockSnapshot)
+    await restoreProductHistory(tx, created.id, data.inventoryHistory)
+    await tx.draft.delete({ where: { id: 1 } })
+  })
+  const restored = f.state().product.find(row => row.sku === 'RM-010')!
+  assert.equal(restored.stock, 2.5) // Never multiplied by pack size again.
+  assert.equal(restored.unitSize, 5)
+  assert.deepEqual(f.state().godownStock.filter(row => row.productId === restored.id).map(row => row.quantity), [1.75, 0.75])
+  assert.equal(f.state().stockLedger.length, before.stockLedger.length) // No fake receipt.
+  assert.equal(f.state().productBatch[0].remainingQty, 2.5)
+  assert.equal(f.state().draft.length, 0)
+  assert.deepEqual(f.state().product.find(row => row.id === 2), before.product[1])
+})
+
+test('legacy unallocated nonzero stock archives/restores without inventing a godown or ledger', async () => {
+  const f = fixture(); f.state().product[0].stock = 7.25
+  f.state().godownStock = f.state().godownStock.filter(row => row.productId !== 1)
+  await f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date(), true))
+  const data = f.state().draft[0].data
+  await f.run(async tx => {
+    const created = await tx.product.create({ data: { ...data, stock: 0 } })
+    await restoreProductStockSnapshot(tx, created.id, data.stockSnapshot)
+  })
+  const restored = f.state().product.find(row => row.sku === 'RM-010')!
+  assert.equal(restored.stock, 7.25)
+  assert.equal(f.state().godownStock.some(row => row.productId === restored.id), false)
+  assert.equal(f.state().stockLedger.length, 0)
+})
+
+test('stocked archive never bypasses mismatches, batch over-allocation or business/document links', async () => {
+  for (const change of [
+    (s: any) => { s.godownStock[0].quantity = 2 },
+    (s: any) => { s.productBatch[0].remainingQty = 4 },
+    (s: any) => { s.invoiceItem.push({ id: 1, productId: 1 }) },
+    (s: any) => { s.bomItem.push({ id: 1, rawMaterialId: 1 }) },
+    (s: any) => { s.stockLedger[0].referenceType = 'Invoice'; s.stockLedger[0].referenceId = 42; s.invoice.push({ id: 42 }) },
+    (s: any) => { s.product[0].stock = NaN },
+  ]) {
+    const f = fixture(); seedHistory(f); f.state().product[0].stock = 2.5; f.state().godownStock[0].quantity = 2.5
+    change(f.state()); const before = structuredClone(f.state())
+    await assert.rejects(f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date(), true)))
+    assert.deepEqual(f.state(), before)
+  }
+})
+
+test('stocked archive is explicit and raw-material-only', async () => {
+  const f = fixture(); f.state().product[0].stock = 2; f.state().godownStock[0].quantity = 2
+  const before = structuredClone(f.state())
+  await assert.rejects(f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material')), /stock remains/)
+  await assert.rejects(f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', undefined, new Date(), true)), /only for explicitly/)
+  assert.deepEqual(f.state(), before)
+  f.state().product[0].category.name = 'Consumable'
+  await assert.rejects(f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date(), true)), /Raw material not found/)
+})
+
+for (const failure of ['draft', 'cleanup', 'delete', 'changed', 'stockLedger', 'productBatch', 'batchMovement']) test(`stocked archive ${failure} failure preserves every original balance/history`, async () => {
+  const f = fixture(); seedHistory(f); f.state().product[0].stock = 2.5; f.state().godownStock[0].quantity = 2.5
+  f.state().productBatch[0].remainingQty = 2.5
+  f.fail(failure); const before = structuredClone(f.state())
+  await assert.rejects(f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date(), true)))
+  assert.deepEqual(f.state(), before)
+})
+
+test('malformed/missing-godown stock restore and write failure cannot consume saved draft', async () => {
+  for (const failure of ['missing', 'invalid', 'restore-stock', 'restore-stockLedger']) {
+    const f = fixture(); seedHistory(f); f.state().product[0].stock = 2.5; f.state().godownStock[0].quantity = 2.5
+    f.state().productBatch[0].remainingQty = 2.5
+    await f.run(tx => moveInventoryProductToDraft(tx, 1, 'Manager', 'Raw Material', new Date(), true))
+    if (failure === 'missing') f.state().godown = []
+    if (failure === 'invalid') f.state().draft[0].data.stockSnapshot.locations[0].quantity = 99
+    f.fail(failure); const before = structuredClone(f.state()); const data = f.state().draft[0].data
+    await assert.rejects(f.run(async tx => {
+      const created = await tx.product.create({ data: { ...data, stock: 0 } })
+      await restoreProductStockSnapshot(tx, created.id, data.stockSnapshot)
+      await restoreProductHistory(tx, created.id, data.inventoryHistory)
+      await tx.draft.delete({ where: { id: 1 } })
+    }))
+    assert.deepEqual(f.state(), before)
+  }
+})
+
+test('bulk stocked archive removes zero and nonzero unused raw materials independently', async () => {
+  const f = fixture(); const result = await moveInventoryProductsToDraft(f.db, [1, 2, 2], 'Manager', 'Raw Material', true)
+  assert.deepEqual(result.movedIds, [1, 2]); assert.deepEqual(result.errors, [])
+  assert.equal(f.state().product.length, 0); assert.equal(f.state().godownStock.length, 0)
+  assert.equal(f.state().draft[1].data.stockSnapshot.productStock, 9)
+})
+
+test('stock restore rejects conflicting saved product quantity before any balance write', async () => {
+  const f = fixture(); const before = structuredClone(f.state())
+  await assert.rejects(f.run(tx => restoreProductStockSnapshot(tx, 1, { version: 1, productStock: 3, locations: [{ godownId: 1, quantity: 3 }] }, 2)), /disagree/)
+  assert.deepEqual(f.state(), before)
 })

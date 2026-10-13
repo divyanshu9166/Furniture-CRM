@@ -19,6 +19,7 @@ import {
 import { activeStaff, nextDocumentId } from '@/lib/commerce/documents'
 import { moveInventoryProductToDraft, moveInventoryProductsToDraft, restoreEmptyGodownStocks } from '@/lib/inventory/product-drafts'
 import { restoreProductHistory } from '@/lib/inventory/product-history'
+import { restoreProductStockSnapshot } from '@/lib/inventory/product-stock-snapshot'
 import { z } from 'zod'
 
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -835,14 +836,16 @@ export async function moveProductToDraft(productId: number, expectedCategory?: '
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
-export async function moveProductsToDraft(productIds: unknown, expectedCategory?: 'Raw Material') {
+export async function moveProductsToDraft(productIds: unknown, expectedCategory?: 'Raw Material', options?: { archiveStocked?: boolean }) {
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   const parsed = z.array(z.number().int().positive()).min(1).max(1000).safeParse(productIds)
   if (!parsed.success) return { success: false, error: 'Select between 1 and 1,000 valid items' }
+  const policy = z.object({ archiveStocked: z.boolean().optional() }).strict().safeParse(options || {})
+  if (!policy.success || (policy.data.archiveStocked && expectedCategory !== 'Raw Material')) return { success: false, error: 'Invalid raw-material archive option' }
   // One request, independent item transactions: protected items remain untouched
   // and every successful deletion has its own recoverable history snapshot.
-  const data = await moveInventoryProductsToDraft(prisma, parsed.data, actor, expectedCategory)
+  const data = await moveInventoryProductsToDraft(prisma, parsed.data, actor, expectedCategory, policy.data.archiveStocked === true)
   revalidatePath('/inventory'); revalidatePath('/manufacturing'); revalidatePath('/godowns'); revalidatePath('/drafts')
   return { success: true, data }
 }
@@ -1726,8 +1729,11 @@ export async function restoreFromDraft(draftId: number) {
         stockGroupId: stockGroupId || null,
       },
     })
-    if ((data.stock as number) > 0) await moveTotalStock(tx, restored.id, data.stock as number, 'IN', { referenceType: 'Manual', notes: 'Product restored from draft', createdBy: 'Manager' })
-    await restoreEmptyGodownStocks(tx, restored.id, data.emptyGodownIds)
+    if (data.stockSnapshot !== undefined) await restoreProductStockSnapshot(tx, restored.id, data.stockSnapshot, data.stock as number)
+    else {
+      if ((data.stock as number) > 0) await moveTotalStock(tx, restored.id, data.stock as number, 'IN', { referenceType: 'Manual', notes: 'Product restored from draft', createdBy: 'Manager' })
+      await restoreEmptyGodownStocks(tx, restored.id, data.emptyGodownIds)
+    }
     await restoreProductHistory(tx, restored.id, data.inventoryHistory)
     await tx.product.update({ where: { id: restored.id }, data: { lastRestocked: data.lastRestocked ? new Date(data.lastRestocked as string) : null } })
     await tx.draft.delete({ where: { id: draftId } })

@@ -7,7 +7,8 @@ import { createBranchSchema, updateBranchSchema, createGodownSchema, updateGodow
 import { completeStockTransfer, defaultGodown, inventoryError, inventoryTransaction, lockProducts, moveStock, prepareStock } from '@/lib/inventory/stock'
 import { assertId } from '@/lib/commerce/documents'
 import { z } from 'zod'
-import { godownTotals } from '@/lib/inventory/godown-values'
+import { godownTotals, stockedProductCount } from '@/lib/inventory/godown-values'
+import { buildStockAudit } from '@/lib/inventory/stock-audit'
 import { saveBranch, removeBranch, saveGodown, removeGodown, chooseDefaultGodown, requestStockTransfer, cancelPendingTransfer } from '@/lib/inventory/godown-management'
 
 function refreshGodownConsumers() {
@@ -102,9 +103,22 @@ export async function getGodownStockSummary() {
       return {
         ...g,
         ...godownTotals(g.stocks, g.capacity),
+        stockedProducts: stockedProductCount(g.stocks),
       }
     }),
   }
+}
+
+// Diagnostic read only: matching recorded totals does not prove physical stock.
+export async function getGodownStockAudit() {
+  try {
+    await requireRole('ADMIN', 'MANAGER')
+    const data = await inventoryTransaction(prisma, async tx => buildStockAudit(await tx.product.findMany({
+      select: { id: true, name: true, sku: true, stock: true, unitSize: true, unitOfMeasure: true, godownStocks: { select: { godownId: true, quantity: true } }, batches: { select: { remainingQty: true } } },
+      orderBy: { id: 'asc' },
+    })))
+    return { success: true, data }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
 // ─── BRANCHES ────────────────────────────────────────
