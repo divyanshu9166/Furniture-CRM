@@ -1,6 +1,10 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useSession } from '@/components/AuthProvider'
+import { godownUnitValue } from '@/lib/inventory/godown-values'
+import { createTransferSchema } from '@/lib/validations/godown'
+import { cancelTransfer as cancelTransferAction } from '@/app/actions/godowns'
 import {
   Search, Plus, Warehouse, Building2, ArrowRightLeft, Package,
   MapPin, Phone, Mail, CheckCircle, Trash2, Edit2, Star, 
@@ -24,6 +28,7 @@ const getGodownStock = safeAction(getGodownStockAction);
 const getTransfers = safeAction(getTransfersAction);
 const createTransfer = safeAction(createTransferAction);
 const completeTransfer = safeAction(completeTransferAction);
+const cancelTransfer = safeAction(cancelTransferAction);
 const getGodownStockSummary = safeAction(getGodownStockSummaryAction);
 const getStockLedger = safeAction(getStockLedgerAction);
 const assignStockToGodown = safeAction(assignStockToGodownAction);
@@ -31,6 +36,16 @@ const migrateExistingStockToGodowns = safeAction(migrateExistingStockToGodownsAc
 const getProducts = safeAction(getProductsAction);
 
 export default function GodownsPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === 'ADMIN'
+  const canManage = isAdmin || session?.user?.role === 'MANAGER'
+  const loadVersion = useRef(0)
+  const ledgerVersion = useRef(0)
+  const ledgerViewed = useRef(false)
+  const ledgerBusy = useRef(false)
+  const nextLedgerCursor = useRef(null)
+  const transferBusy = useRef(false)
+  const [busyTransferId, setBusyTransferId] = useState(null)
   const [tab, setTab] = useState('branches')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -61,44 +76,64 @@ export default function GodownsPage() {
   const [transferForm, setTransferForm] = useState({ fromGodownId: '', toGodownId: '', notes: '', requestedBy: '', items: [{ productId: '', name: '', sku: '', quantity: 1 }] })
   const [assignForm, setAssignForm] = useState({ productId: '', godownId: '', quantity: 1, notes: '' })
 
-  const loadData = () => {
+  const loadLedger = useCallback(async (append = false) => {
+    if (append && (ledgerBusy.current || !nextLedgerCursor.current)) return
+    const version = ++ledgerVersion.current
+    ledgerViewed.current = true; ledgerBusy.current = true
+    setLedgerLoading(true); setLedgerError('')
+    try {
+      const res = await getStockLedger({ limit: 200, ...(append ? { cursor: nextLedgerCursor.current } : {}) })
+      if (version !== ledgerVersion.current) return
+      if (res.success) {
+        setLedgerEntries(previous => append ? [...previous, ...res.data.filter(row => !previous.some(old => old.id === row.id))] : res.data)
+        setLedgerCursor(res.nextCursor); nextLedgerCursor.current = res.nextCursor
+      } else setLedgerError(res.error || 'Could not load ledger')
+    } catch {
+      if (version === ledgerVersion.current) setLedgerError('Could not load ledger. Please retry.')
+    } finally {
+      if (version === ledgerVersion.current) { ledgerBusy.current = false; setLedgerLoading(false) }
+    }
+  }, [])
+
+  const loadData = useCallback(async () => {
+    const version = ++loadVersion.current
     setLoading(true)
     setLoadError('')
-    Promise.all([getBranches(), getGodowns(), getGodownStock(), getTransfers(), getProducts(), getGodownStockSummary()])
-      .then(([brRes, gdRes, stRes, trRes, prRes, smRes]) => {
+    try {
+        const [brRes, gdRes, stRes, trRes, prRes, smRes] = await Promise.all([getBranches(), getGodowns(), getGodownStock(), getTransfers(), getProducts(), getGodownStockSummary()])
+        if (version !== loadVersion.current) return
         const failed = [brRes, gdRes, stRes, trRes, prRes, smRes].find(res => !res.success)
         if (failed) setLoadError(failed.error || 'Could not load warehouse data')
         if (brRes.success) setBranches(brRes.data)
-        if (gdRes.success) setGodowns(gdRes.data)
+        if (gdRes.success) {
+          setGodowns(gdRes.data)
+          setSelectedGodown(previous => previous && !gdRes.data.some(g => g.id === Number(previous)) ? '' : previous)
+        }
         if (stRes.success) setStocks(stRes.data)
         if (trRes.success) setTransfers(trRes.data)
         if (prRes.success) setProducts(prRes.data)
         if (smRes.success) setGodownSummary(smRes.data)
-        setLoading(false)
-      })
-  }
+        if (ledgerViewed.current) await loadLedger()
+    } catch {
+      if (version === loadVersion.current) setLoadError('Could not load warehouse data. Please retry.')
+    } finally {
+      if (version === loadVersion.current) setLoading(false)
+    }
+  }, [loadLedger])
 
   useEffect(() => {
+    const dataGeneration = loadVersion
+    const ledgerGeneration = ledgerVersion
     // Initial warehouse bootstrap fetch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData()
-  }, [])
-
-  const loadLedger = async (append = false) => {
-    if (ledgerLoading) return
-    setLedgerLoading(true); setLedgerError('')
-    const res = await getStockLedger({ limit: 200, ...(append && ledgerCursor ? { cursor: ledgerCursor } : {}) })
-    if (res.success) {
-      setLedgerEntries(previous => append ? [...previous, ...res.data.filter(row => !previous.some(old => old.id === row.id))] : res.data)
-      setLedgerCursor(res.nextCursor)
-    } else setLedgerError(res.error || 'Could not load ledger')
-    setLedgerLoading(false)
-  }
+    return () => { dataGeneration.current++; ledgerGeneration.current++ }
+  }, [loadData])
   useEffect(() => {
     if (tab !== 'ledger') return
     const timer = setTimeout(() => { loadLedger() }, 0)
     return () => clearTimeout(timer)
-  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab, loadLedger])
 
   const filteredStocks = useMemo(() => stocks.filter(s =>
     (!selectedGodown || s.godownId === Number(selectedGodown)) &&
@@ -106,6 +141,7 @@ export default function GodownsPage() {
   ), [stocks, search, selectedGodown])
 
   const handleCreateBranch = async () => {
+    if (submitting) return
     setSubmitting(true)
     const res = editingBranchId ? await updateBranch(editingBranchId, branchForm) : await createBranch(branchForm)
     if (res.success) {
@@ -118,11 +154,12 @@ export default function GodownsPage() {
   }
 
   const handleCreateGodown = async () => {
+    if (submitting) return
     setSubmitting(true)
     const data = {
       ...godownForm,
-      branchId: godownForm.branchId ? Number(godownForm.branchId) : undefined,
-      capacity: godownForm.capacity ? Number(godownForm.capacity) : undefined,
+      branchId: godownForm.branchId ? Number(godownForm.branchId) : null,
+      capacity: godownForm.capacity !== '' ? Number(godownForm.capacity) : null,
     }
     const res = editingGodownId ? await updateGodown(editingGodownId, data) : await createGodown(data)
     if (res.success) {
@@ -135,16 +172,17 @@ export default function GodownsPage() {
   }
 
   const handleCreateTransfer = async () => {
+    if (submitting) return
     setSubmitting(true)
-    const items = transferForm.items.filter(i => i.productId).map(i => {
-      const prod = products.find(p => p.id === Number(i.productId))
-      return { productId: Number(i.productId), name: prod?.name || '', sku: prod?.sku || '', quantity: Number(i.quantity) }
-    })
-    const res = await createTransfer({
+    if (transferForm.items.some(item => !item.productId)) { alert('Select a product for every transfer line, or remove the unused line.'); setSubmitting(false); return }
+    const items = transferForm.items.map(i => ({ productId: Number(i.productId), quantity: Number(i.quantity) }))
+    const parsed = createTransferSchema.safeParse({
       fromGodownId: Number(transferForm.fromGodownId),
       toGodownId: Number(transferForm.toGodownId),
-      notes: transferForm.notes, requestedBy: transferForm.requestedBy, items
+      notes: transferForm.notes, items
     })
+    if (!parsed.success) { alert(parsed.error.issues[0].message); setSubmitting(false); return }
+    const res = await createTransfer(parsed.data)
     if (res.success) {
       setShowTransferModal(false)
       setTransferForm({ fromGodownId: '', toGodownId: '', notes: '', requestedBy: '', items: [{ productId: '', name: '', sku: '', quantity: 1 }] })
@@ -154,12 +192,28 @@ export default function GodownsPage() {
   }
 
   const handleCompleteTransfer = async (id) => {
-    const res = await completeTransfer(id)
-    if (res.success) loadData()
-    else alert(res.error)
+    if (transferBusy.current) return
+    transferBusy.current = true; setBusyTransferId(id)
+    try {
+      const res = await completeTransfer(id)
+      if (res.success) await loadData()
+      else alert(res.error)
+    } finally { transferBusy.current = false; setBusyTransferId(null) }
+  }
+
+  const handleCancelTransfer = async (id) => {
+    if (transferBusy.current || !confirm('Cancel this pending transfer? No stock will be moved or reversed.')) return
+    transferBusy.current = true; setBusyTransferId(id)
+    try {
+      const res = await cancelTransfer(id)
+      if (res.success) await loadData()
+      else alert(res.error)
+    } finally { transferBusy.current = false; setBusyTransferId(null) }
   }
 
   const handleAssignStock = async () => {
+    if (submitting) return
+    if (!Number.isFinite(Number(assignForm.quantity)) || Number(assignForm.quantity) <= 0) { alert('Enter a positive quantity'); return }
     setSubmitting(true)
     const res = await assignStockToGodown(Number(assignForm.productId), Number(assignForm.godownId), Number(assignForm.quantity), assignForm.notes)
     if (res.success) {
@@ -171,7 +225,7 @@ export default function GodownsPage() {
   }
 
   const handleMigrate = async () => {
-    if (!confirm('This will allocate all existing product stock to the default godown. Continue?')) return
+    if (!confirm('Allocate only legacy stock with no godown assignments to the default godown? Existing allocations and quantities will not be overwritten.')) return
     setMigrating(true)
     const res = await migrateExistingStockToGodowns()
     if (res.success) {
@@ -206,13 +260,13 @@ export default function GodownsPage() {
           <p className="text-muted text-sm mt-1">{branches.length} branches · {godowns.length} godowns · ₹{(totalStockValue / 100000).toFixed(1)}L inventory value</p>
         </div>
         <div className="ui-actions flex gap-2 flex-wrap">
-          {tab === 'branches' && <button onClick={() => { setEditingBranchId(null); setBranchForm({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false }); setShowBranchModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Branch</button>}
-          {tab === 'godowns' && <button onClick={() => { setEditingGodownId(null); setGodownForm({ name: '', address: '', branchId: '', type: 'Warehouse', capacity: '', isDefault: false }); setShowGodownModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Godown</button>}
-          {tab === 'stock' && <button onClick={() => setShowAssignModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Assign Stock</button>}
-          {tab === 'transfers' && <button onClick={() => setShowTransferModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New Transfer</button>}
-          <button onClick={handleMigrate} disabled={migrating} className="px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-foreground hover:bg-surface-hover flex items-center gap-1.5 disabled:opacity-50" title="Sync existing product stock to default godown">
+          {isAdmin && tab === 'branches' && <button onClick={() => { setEditingBranchId(null); setBranchForm({ name: '', address: '', phone: '', email: '', managerName: '', isHeadOffice: false }); setShowBranchModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Branch</button>}
+          {canManage && tab === 'godowns' && <button onClick={() => { setEditingGodownId(null); setGodownForm({ name: '', address: '', branchId: '', type: 'Warehouse', capacity: '', isDefault: false }); setShowGodownModal(true) }} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Add Godown</button>}
+          {canManage && tab === 'stock' && <button onClick={() => setShowAssignModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> Receive/Add Stock</button>}
+          {canManage && tab === 'transfers' && <button onClick={() => setShowTransferModal(true)} className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 flex items-center gap-2"><Plus className="w-4 h-4" /> New Transfer</button>}
+          {isAdmin && <button onClick={handleMigrate} disabled={migrating} className="px-3 py-2 border border-border rounded-lg text-sm text-muted hover:text-foreground hover:bg-surface-hover flex items-center gap-1.5 disabled:opacity-50" title="Allocate legacy stock without existing godown assignments">
             <RefreshCw className={`w-3.5 h-3.5 ${migrating ? 'animate-spin' : ''}`} /> Sync Stock
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -221,7 +275,7 @@ export default function GodownsPage() {
         {[
           { label: 'Branches', value: branches.length, icon: Building2, color: 'text-blue-400' },
           { label: 'Godowns', value: godowns.length, icon: Warehouse, color: 'text-emerald-400' },
-          { label: 'Stock Items', value: totalStockItems, icon: Package, color: 'text-amber-400' },
+          { label: 'Stock Qty (all UOMs)', value: Number(totalStockItems.toFixed(6)), icon: Package, color: 'text-amber-400' },
           { label: 'Inventory Value', value: `₹${(totalStockValue / 100000).toFixed(1)}L`, icon: BarChart3, color: 'text-purple-400' },
           { label: 'Pending Transfers', value: transfers.filter(t => t.status === 'Pending').length, icon: ArrowRightLeft, color: 'text-orange-400' },
         ].map((s, i) => (
@@ -261,9 +315,9 @@ export default function GodownsPage() {
                 </div>
                 <div className="ui-actions flex items-center gap-1">
                   <span className="text-xs text-muted bg-surface-hover px-2 py-1 rounded-full">{b._count?.godowns || 0} godowns</span>
-                  <button title="Edit branch" onClick={() => { setEditingBranchId(b.id); setBranchForm({ name: b.name, address: b.address || '', phone: b.phone || '', email: b.email || '', managerName: b.managerName || '', isHeadOffice: b.isHeadOffice }); setShowBranchModal(true) }} className="p-1 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>
-                  <button onClick={async () => { if (confirm('Delete this branch?')) { const r = await deleteBranch(b.id); if (r.success) loadData(); else alert(r.error) }}}
-                    className="p-1 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                  {isAdmin && <><button title="Edit branch" onClick={() => { setEditingBranchId(b.id); setBranchForm({ name: b.name, address: b.address || '', phone: b.phone || '', email: b.email || '', managerName: b.managerName || '', isHeadOffice: b.isHeadOffice }); setShowBranchModal(true) }} className="p-1 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>
+                  <button title="Delete branch" onClick={async () => { if (confirm('Delete this branch?')) { const r = await deleteBranch(b.id); if (r.success) await loadData(); else alert(r.error) }}}
+                    className="p-1 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button></>}
                 </div>
               </div>
               <div className="space-y-1.5 text-sm text-muted">
@@ -303,15 +357,15 @@ export default function GodownsPage() {
                     <span className={`text-[9px] px-2 py-0.5 rounded-full font-medium ${typeColors[g.type] || typeColors.Warehouse}`}>{g.type}</span>
                   </div>
                   <div className="ui-actions flex gap-0.5">
-                    {!g.isDefault && (
+                    {canManage && !g.isDefault && (
                       <button onClick={async () => { const r = await setDefaultGodown(g.id); if (r.success) loadData(); else alert(r.error) }}
                         className="p-1.5 text-muted hover:text-accent rounded" title="Set as default">
                         <Star className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    <button title="Edit godown" onClick={() => { setEditingGodownId(g.id); setGodownForm({ name: g.name, address: g.address || '', branchId: g.branchId ? String(g.branchId) : '', type: g.type, capacity: g.capacity ?? '', isDefault: g.isDefault }); setShowGodownModal(true) }} className="p-1.5 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>
-                    <button onClick={async () => { if (confirm('Delete this godown?')) { const r = await deleteGodown(g.id); if (r.success) loadData(); else alert(r.error) }}}
-                      className="p-1.5 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>
+                    {canManage && <button title="Edit godown" onClick={() => { setEditingGodownId(g.id); setGodownForm({ name: g.name, address: g.address || '', branchId: g.branchId ? String(g.branchId) : '', type: g.type, capacity: g.capacity ?? '', isDefault: g.isDefault }); setShowGodownModal(true) }} className="p-1.5 text-muted hover:text-accent rounded"><Edit2 className="w-3.5 h-3.5" /></button>}
+                    {isAdmin && <button title="Delete godown" onClick={async () => { if (confirm('Delete this empty godown? Stock and linked history must be preserved.')) { const r = await deleteGodown(g.id); if (r.success) await loadData(); else alert(r.error) }}}
+                      className="p-1.5 text-red-400/50 hover:text-red-400 rounded"><Trash2 className="w-3.5 h-3.5" /></button>}
                   </div>
                 </div>
                 <p className="text-xs text-muted mb-3">Branch: {g.branch?.name || 'Unassigned'}</p>
@@ -320,7 +374,7 @@ export default function GodownsPage() {
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="bg-surface rounded-lg p-2 text-center">
                     <p className="text-sm font-bold text-foreground">{g.totalItems}</p>
-                    <p className="text-[9px] text-muted">Items</p>
+                    <p className="text-[9px] text-muted">{g.mixedUnits ? 'Qty (mixed UOMs)' : g.stockUnitTypes?.[0] || 'Qty'}</p>
                   </div>
                   <div className="bg-surface rounded-lg p-2 text-center">
                     <p className="text-sm font-bold text-foreground">₹{(g.totalValue / 1000).toFixed(0)}k</p>
@@ -333,7 +387,7 @@ export default function GodownsPage() {
                 </div>
 
                 {/* Capacity bar */}
-                {g.capacity && (
+                {g.capacity && g.utilization !== null && (
                   <div>
                     <div className="flex justify-between text-[10px] text-muted mb-1">
                       <span>Capacity</span>
@@ -345,6 +399,7 @@ export default function GodownsPage() {
                     </div>
                   </div>
                 )}
+                {g.capacity && g.mixedUnits && <p className="text-[10px] text-muted">Capacity utilization is not comparable across mixed units.</p>}
 
                 {g.address && <p className="text-[10px] text-muted flex items-center gap-1 mt-2"><MapPin className="w-3 h-3" /> {g.address}</p>}
               </div>
@@ -382,15 +437,15 @@ export default function GodownsPage() {
                       <td className="px-4 py-3 text-foreground">{s.godown?.name}</td>
                       <td className="px-4 py-3"><span className="text-[10px] px-2 py-0.5 rounded-full bg-surface-hover text-muted">{s.godown?.type}</span></td>
                       <td className="px-4 py-3">
-                        <span className={`font-medium ${s.quantity <= 0 ? 'text-red-400' : s.quantity < 5 ? 'text-amber-400' : 'text-emerald-400'}`}>{s.quantity}</span>
+                        <span className={`font-medium ${s.quantity <= 0 ? 'text-red-400' : 'text-foreground'}`}>{s.quantity} {s.product?.unitOfMeasure || 'PCS'}</span>
                       </td>
-                      <td className="px-4 py-3 text-foreground">₹{((s.quantity || 0) * (s.product?.price || 0)).toLocaleString('en-IN')}</td>
+                      <td className="px-4 py-3 text-foreground">₹{((s.quantity || 0) * godownUnitValue(s.product || {})).toLocaleString('en-IN')}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            {filteredStocks.length === 0 && <div className="text-center py-12 text-muted">No stock records found. Use &quot;Assign Stock&quot; or &quot;Sync Stock&quot; to allocate products to godowns.</div>}
+            {filteredStocks.length === 0 && <div className="text-center py-12 text-muted">No matching stock records. Receive new stock here or use Transfers to move existing stock.</div>}
           </div>
         </div>
       )}
@@ -419,11 +474,12 @@ export default function GodownsPage() {
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${t.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400' : t.status === 'Cancelled' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'}`}>{t.status}</span>
                     </td>
                     <td className="px-4 py-3">
-                      {t.status === 'Pending' && (
-                        <button onClick={() => handleCompleteTransfer(t.id)}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 border border-emerald-500/20 flex items-center gap-1">
-                          <CheckCircle className="w-3.5 h-3.5" /> Complete
+                      {canManage && t.status === 'Pending' && (
+                        <div className="flex flex-wrap gap-2"><button disabled={busyTransferId !== null} onClick={() => handleCompleteTransfer(t.id)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 text-xs font-medium hover:bg-emerald-500/20 border border-emerald-500/20 flex items-center gap-1 disabled:opacity-50">
+                          <CheckCircle className="w-3.5 h-3.5" /> {busyTransferId === t.id ? 'Processing...' : 'Complete'}
                         </button>
+                        <button disabled={busyTransferId !== null} onClick={() => handleCancelTransfer(t.id)} className="px-3 py-1.5 rounded-lg border border-border text-muted text-xs disabled:opacity-50">Cancel</button></div>
                       )}
                     </td>
                   </tr>
@@ -538,14 +594,14 @@ export default function GodownsPage() {
               </select>
             </div>
             <div>
-              <label className="text-sm text-muted mb-1 block">Capacity (items)</label>
-              <input type="number" min="0" value={godownForm.capacity} onChange={e => setGodownForm(p => ({ ...p, capacity: e.target.value }))} placeholder="Optional" className={INP} />
+              <label className="text-sm text-muted mb-1 block">Capacity (same-unit stock only)</label>
+              <input type="number" min="1" step="1" value={godownForm.capacity} onChange={e => setGodownForm(p => ({ ...p, capacity: e.target.value }))} placeholder="Blank for no limit" className={INP} />
             </div>
           </div>
           <div>
             <label className="text-sm text-muted mb-1 block">Branch</label>
             <select value={godownForm.branchId} onChange={e => setGodownForm(p => ({ ...p, branchId: e.target.value }))} className={SEL}>
-              <option value="">Select Branch</option>
+              <option value="">No branch</option>
               {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
@@ -554,7 +610,7 @@ export default function GodownsPage() {
             <textarea value={godownForm.address} onChange={e => setGodownForm(p => ({ ...p, address: e.target.value }))} rows={2} className={INP} />
           </div>
           <label className="flex items-center gap-2 text-sm text-foreground">
-            <input type="checkbox" checked={godownForm.isDefault} onChange={e => setGodownForm(p => ({ ...p, isDefault: e.target.checked }))} className="rounded" />
+            <input type="checkbox" disabled={!!editingGodownId && godowns.some(g => g.id === editingGodownId && g.isDefault)} checked={godownForm.isDefault} onChange={e => setGodownForm(p => ({ ...p, isDefault: e.target.checked }))} className="rounded" />
             Set as Default Godown (primary stock location)
           </label>
           <button onClick={handleCreateGodown} disabled={submitting || !godownForm.name} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
@@ -564,13 +620,14 @@ export default function GodownsPage() {
       </Modal>
 
       {/* Assign Stock Modal */}
-      <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title="Assign Stock to Godown">
+      <Modal isOpen={showAssignModal} onClose={() => { if (!submitting) setShowAssignModal(false) }} title="Receive/Add New Stock">
         <div className="space-y-4">
+          <p className="text-sm text-muted">This adds new stock and increases total inventory. To relocate existing stock without increasing totals, use Transfers. Quantities are in the product&apos;s base unit, not packs.</p>
           <div>
             <label className="text-sm text-muted mb-1 block">Product *</label>
             <select value={assignForm.productId} onChange={e => setAssignForm(p => ({ ...p, productId: e.target.value }))} className={SEL}>
               <option value="">Select Product</option>
-              {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku}) — Stock: {p.stock}</option>)}
+              {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku}) — Stock: {p.stock} {p.unitOfMeasure || 'PCS'}</option>)}
             </select>
           </div>
           <div>
@@ -582,25 +639,26 @@ export default function GodownsPage() {
           </div>
           <div>
             <label className="text-sm text-muted mb-1 block">Quantity *</label>
-            <input type="number" min="1" value={assignForm.quantity} onChange={e => setAssignForm(p => ({ ...p, quantity: e.target.value }))} className={INP} />
+            <input type="number" min="0.000001" step="any" value={assignForm.quantity} onChange={e => setAssignForm(p => ({ ...p, quantity: e.target.value }))} className={INP} />
           </div>
           <div>
             <label className="text-sm text-muted mb-1 block">Notes</label>
             <input value={assignForm.notes} onChange={e => setAssignForm(p => ({ ...p, notes: e.target.value }))} placeholder="e.g. New shipment arrived" className={INP} />
           </div>
           <button onClick={handleAssignStock} disabled={submitting || !assignForm.productId || !assignForm.godownId} className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:bg-accent/90 disabled:opacity-50">
-            {submitting ? 'Assigning...' : 'Assign Stock'}
+            {submitting ? 'Receiving...' : 'Receive/Add Stock'}
           </button>
         </div>
       </Modal>
 
       {/* Create Transfer Modal */}
-      <Modal isOpen={showTransferModal} onClose={() => setShowTransferModal(false)} title="New Inter-Godown Transfer" size="lg">
+      <Modal isOpen={showTransferModal} onClose={() => { if (!submitting) setShowTransferModal(false) }} title="New Inter-Godown Transfer" size="lg">
         <div className="space-y-4">
+          <p className="text-sm text-muted">Stock moves only when a pending transfer is completed. Availability is checked again at completion; pending requests do not reserve stock. Quantities use base units.</p>
           <div className="ui-form-grid grid grid-cols-2 gap-4">
             <div>
               <label className="text-sm text-muted mb-1 block">From Godown *</label>
-              <select value={transferForm.fromGodownId} onChange={e => setTransferForm(p => ({ ...p, fromGodownId: e.target.value }))} className={SEL}>
+              <select value={transferForm.fromGodownId} onChange={e => setTransferForm(p => ({ ...p, fromGodownId: e.target.value, toGodownId: p.toGodownId === e.target.value ? '' : p.toGodownId, items: [{ productId: '', quantity: 1 }] }))} className={SEL}>
                 <option value="">Select Source</option>
                 {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
@@ -609,27 +667,27 @@ export default function GodownsPage() {
               <label className="text-sm text-muted mb-1 block">To Godown *</label>
               <select value={transferForm.toGodownId} onChange={e => setTransferForm(p => ({ ...p, toGodownId: e.target.value }))} className={SEL}>
                 <option value="">Select Destination</option>
-                {godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                {godowns.filter(g => g.id !== Number(transferForm.fromGodownId)).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
           </div>
           <div>
             <label className="text-sm text-muted mb-1 block">Requested By</label>
-            <input value={transferForm.requestedBy} onChange={e => setTransferForm(p => ({ ...p, requestedBy: e.target.value }))} className={INP} />
+            <input value={session?.user?.name || ''} readOnly className={INP} />
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-sm text-muted">Items</label>
-              <button onClick={() => setTransferForm(f => ({ ...f, items: [...f.items, { productId: '', name: '', sku: '', quantity: 1 }] }))} className="text-xs text-accent hover:underline">+ Add Item</button>
+              <button disabled={submitting || transferForm.items.length >= 200} onClick={() => setTransferForm(f => ({ ...f, items: [...f.items, { productId: '', name: '', sku: '', quantity: 1 }] }))} className="text-xs text-accent hover:underline disabled:opacity-50">+ Add Item</button>
             </div>
             {transferForm.items.map((item, i) => (
               <div key={i} className="ui-form-grid grid grid-cols-12 gap-2 mb-2">
-                <select value={item.productId} onChange={e => { const v = [...transferForm.items]; v[i].productId = e.target.value; setTransferForm(f => ({ ...f, items: v })) }} className="col-span-8 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+                <select value={item.productId} onChange={e => { const value = e.target.value; setTransferForm(f => ({ ...f, items: f.items.map((row, index) => index === i ? { ...row, productId: value } : row) })) }} className="col-span-8 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
                   <option value="">Select Product</option>
-                  {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
+                  {stocks.filter(s => s.godownId === Number(transferForm.fromGodownId) && s.quantity > 0 && !transferForm.items.some((other, index) => index !== i && Number(other.productId) === s.productId)).map(s => <option key={s.productId} value={s.productId}>{s.product.name} ({s.product.sku}) — Available: {s.quantity} {s.product.unitOfMeasure || 'PCS'}</option>)}
                 </select>
-                <input type="number" min="1" value={item.quantity} onChange={e => { const v = [...transferForm.items]; v[i].quantity = e.target.value; setTransferForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="col-span-3 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
-                <button onClick={() => setTransferForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-lg">×</button>
+                <input type="number" min="0.000001" step="any" value={item.quantity} onChange={e => { const v = transferForm.items.map((row, index) => index === i ? { ...row, quantity: e.target.value } : row); setTransferForm(f => ({ ...f, items: v })) }} placeholder="Qty" className="col-span-3 px-2 py-2 bg-surface border border-border rounded-lg text-sm text-foreground" />
+                <button aria-label="Remove transfer item" disabled={submitting || transferForm.items.length === 1} onClick={() => setTransferForm(f => ({ ...f, items: f.items.filter((_, j) => j !== i) }))} className="col-span-1 text-red-400 hover:text-red-300 text-lg disabled:opacity-50">×</button>
               </div>
             ))}
           </div>

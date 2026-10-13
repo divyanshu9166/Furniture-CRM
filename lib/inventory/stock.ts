@@ -165,9 +165,10 @@ export async function completeStockTransfer(tx: Tx, id: number, actor: string) {
   if (!transfer) throw new Error('Transfer not found')
   if (transfer.status !== 'Pending') throw new Error('Only a pending transfer can be completed')
   if (transfer.fromGodownId === transfer.toGodownId || !transfer.items.length) throw new Error('Invalid transfer locations or items')
+  if (new Set(transfer.items.map(item => item.productId)).size !== transfer.items.length) throw new Error('Duplicate transfer products; review the pending transfer before completing it')
   await lockProducts(tx, transfer.items.map(item => item.productId))
   for (const item of transfer.items) {
-    if (!Number.isInteger(item.quantity) || item.quantity <= 0) throw new Error('Invalid transfer quantity')
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) throw new Error('Invalid transfer quantity')
     const options = { referenceType: 'Transfer', referenceId: transfer.id, notes: `Transfer ${transfer.displayId}`, createdBy: actor }
     await moveStock(tx, item.productId, transfer.fromGodownId, -item.quantity, 'TRANSFER_OUT', options)
     await moveStock(tx, item.productId, transfer.toGodownId, item.quantity, 'TRANSFER_IN', options)

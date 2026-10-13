@@ -280,10 +280,36 @@ test('product validation rejects invalid database integers and bypass stock upda
   assert.equal(updateStockSchema.safeParse({ id: 1, stock: 1.5, mode: 'REMOVE' }).success, true)
 })
 
-test('transfer rejects duplicate products and fractional line quantities', () => {
+test('transfer rejects duplicate/same-location lines and supports fractional base quantities', () => {
   const item = { productId: 1, name: 'Tape', sku: 'TAPE', quantity: 2 }
   assert.equal(createTransferSchema.safeParse({ fromGodownId: 1, toGodownId: 2, items: [item, item] }).success, false)
-  assert.equal(createTransferSchema.safeParse({ fromGodownId: 1, toGodownId: 2, items: [{ ...item, quantity: 1.5 }] }).success, false)
+  assert.equal(createTransferSchema.safeParse({ fromGodownId: 1, toGodownId: 2, items: [{ ...item, quantity: 1.5 }] }).success, true)
+  assert.equal(createTransferSchema.safeParse({ fromGodownId: 1, toGodownId: 1, items: [item] }).success, false)
+  for (const quantity of [0, -1, NaN, Infinity]) assert.equal(createTransferSchema.safeParse({ fromGodownId: 1, toGodownId: 2, items: [{ ...item, quantity }] }).success, false)
+})
+
+test('fractional transfer conserves stock, lots and restock age', async () => {
+  const f = fixture(2.5)
+  f.holder.state.transfers[0].items[0].quantity = 0.75
+  f.holder.state.batches.push({ id: 1, productId: 1, batchNumber: 'ROLL', quantity: 2.5, remainingQty: 2.5, costPrice: 100, purchaseDate: new Date('2026-01-01'), expiryDate: null })
+  const batches = structuredClone(f.holder.state.batches)
+  await f.run(tx => completeStockTransfer(tx, 1, 'Manager'))
+  assert.deepEqual(f.holder.state.stocks.map(row => row.quantity), [1.75, 0.75])
+  assert.equal(f.holder.state.products[0].stock, 2.5)
+  assert.deepEqual(f.holder.state.batches, batches)
+  assert.equal(f.holder.state.batchMovements.length, 0)
+  assert.deepEqual(f.holder.state.ledger.map(row => [row.entryType, row.quantity]), [['TRANSFER_OUT', -0.75], ['TRANSFER_IN', 0.75]])
+})
+
+test('malformed duplicate pending transfer and cancelled transfers never move stock', async () => {
+  for (const kind of ['duplicate', 'cancelled']) {
+    const f = fixture()
+    if (kind === 'duplicate') f.holder.state.transfers[0].items.push({ ...f.holder.state.transfers[0].items[0] })
+    else f.holder.state.transfers[0].status = 'Cancelled'
+    const before = structuredClone(f.holder.state)
+    await assert.rejects(f.run(tx => completeStockTransfer(tx, 1, 'Manager')))
+    assert.deepEqual(f.holder.state, before)
+  }
 })
 
 test('batch validation rejects impossible dates/over-allocation and accepts fractional base units', () => {
