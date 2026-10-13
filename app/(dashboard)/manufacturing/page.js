@@ -828,12 +828,18 @@ export default function ManufacturingPage() {
   }
 
   const handleDeleteRawMaterial = async (id, name) => {
-    if (!confirm(`Delete raw material "${name}"? This cannot be undone.`)) return
+    if (submitting || bulkDeleting) return
+    if (!confirm(`Move raw material "${name}" to Drafts? You can restore it for 30 days. Only zero-stock materials without linked history can be removed.`)) return
     setSubmitting(true)
-    const res = await deleteRawMaterial(id)
-    if (res.success) loadData()
-    else alert(res.error)
-    setSubmitting(false)
+    try {
+      const res = await deleteRawMaterial(id)
+      if (res?.success) {
+        setSelectedRmIds(current => new Set([...current].filter(selectedId => selectedId !== id)))
+        await loadData()
+        alert('Raw material moved to Drafts. You can restore it within 30 days.')
+      } else alert(res?.error || 'Unable to remove raw material. Refresh and retry.')
+    } catch (error) { alert(error?.message || 'Unable to remove raw material. Refresh and retry.') }
+    finally { setSubmitting(false) }
   }
 
   const handleUpdateRawMaterial = async (id) => {
@@ -874,35 +880,37 @@ export default function ManufacturingPage() {
   }
 
   const handleBulkDelete = async () => {
+    if (bulkDeleting || submitting || selectedRmIds.size === 0) return
     setBulkDeleting(true)
     let deleted = 0
-    let failed = 0
+    const failedIds = new Set()
     const errors = []
-
-    for (const id of selectedRmIds) {
-      const res = await deleteRawMaterial(id)
-      if (res.success) {
-        deleted++
-      } else {
-        failed++
+    try {
+      for (const id of selectedRmIds) {
         const material = rawMaterials.find(rm => rm.id === id)
-        errors.push(`${material?.name}: ${res.error}`)
+        try {
+          const res = await deleteRawMaterial(id)
+          if (res?.success) deleted++
+          else {
+            failedIds.add(id)
+            errors.push(`${material?.name || `Item ${id}`}: ${res?.error || 'Unable to remove material'}`)
+          }
+        } catch (error) {
+          failedIds.add(id)
+          errors.push(`${material?.name || `Item ${id}`}: ${error?.message || 'Unable to remove material'}`)
+        }
       }
-    }
-
-    setShowBulkDeleteModal(false)
-    setSelectedRmIds(new Set())
-    loadData()
-
-    let message = `Deleted ${deleted} raw material${deleted !== 1 ? 's' : ''}.`
-    if (failed > 0) {
-      message += `\n\nFailed to delete ${failed} item${failed !== 1 ? 's' : ''}:`
-      message += '\n' + errors.slice(0, 5).join('\n')
-      if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
-    }
-
-    alert(message)
-    setBulkDeleting(false)
+      setShowBulkDeleteModal(false)
+      setSelectedRmIds(failedIds)
+      await loadData()
+      let message = `Moved ${deleted} raw material${deleted !== 1 ? 's' : ''} to Drafts (restorable for 30 days).`
+      if (failedIds.size > 0) {
+        message += `\n\nKept ${failedIds.size} item${failedIds.size !== 1 ? 's' : ''} unchanged:`
+        message += '\n' + errors.slice(0, 5).join('\n')
+        if (errors.length > 5) message += `\n... and ${errors.length - 5} more`
+      }
+      alert(message)
+    } finally { setBulkDeleting(false) }
   }
 
   // Filter raw materials (products with category "Raw Material")
@@ -2565,7 +2573,7 @@ export default function ManufacturingPage() {
             <p className="text-sm text-red-400">
               Are you sure you want to delete <span className="font-semibold">{selectedRmIds.size}</span> raw material{selectedRmIds.size !== 1 ? 's' : ''}?
             </p>
-            <p className="text-xs text-red-400/70 mt-2">This action cannot be undone. Materials used in BOMs or production orders cannot be deleted.</p>
+            <p className="text-xs text-red-400/70 mt-2">Removed materials go to Drafts and can be restored for 30 days. Only zero-stock materials without BOM, document, production, batch or stock-ledger history can be removed. Linked records are preserved.</p>
           </div>
           <div className="ui-actions flex justify-end gap-2">
             <button

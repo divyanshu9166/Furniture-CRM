@@ -17,6 +17,7 @@ import {
 } from '@prisma/client'
 
 import { activeStaff, nextDocumentId } from '@/lib/commerce/documents'
+import { moveInventoryProductToDraft, restoreEmptyGodownStocks } from '@/lib/inventory/product-drafts'
 
 const DRAFT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -818,97 +819,16 @@ export async function moveExpenseToDraft(expenseId: number) {
 
 // ─── MOVE PRODUCT TO DRAFT ──────────────────────────
 
-export async function moveProductToDraft(productId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+export async function moveProductToDraft(productId: number, expectedCategory?: 'Raw Material') {
+  let actor: string
+  try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   try {
-  const result = await inventoryTransaction(prisma, async tx => {
-  await lockProducts(tx, [productId])
-  const product = await tx.product.findUnique({
-    where: { id: productId },
-    include: { category: true, warehouse: true, stockGroup: true },
-  })
-  if (!product) return { success: false, error: 'Product not found' }
-
-  const usageChecks = await Promise.all([
-    tx.bomItem.count({ where: { rawMaterialId: productId } }),
-    tx.billOfMaterials.count({ where: { finishedProductId: productId } }),
-    tx.productionOrder.count({ where: { finishedProductId: productId } }),
-    tx.order.count({ where: { productId } }),
-    tx.quotationItem.count({ where: { productId } }),
-    tx.invoiceItem.count({ where: { productId } }),
-    tx.purchaseOrderItem.count({ where: { productId } }),
-    tx.purchaseReturnItem.count({ where: { productId } }),
-    tx.godownStock.count({ where: { productId } }),
-    tx.stockLedger.count({ where: { productId } }),
-  ])
-
-  const [bomUsage, bomFinished, prodUsage, orderUsage, quotationUsage, invoiceUsage, poUsage, prUsage, godownUsage, ledgerUsage] = usageChecks
-  if (bomUsage > 0) return { success: false, error: `Cannot delete: used in ${bomUsage} BOM(s).` }
-  if (bomFinished > 0) return { success: false, error: 'Cannot delete: used as a finished product in a BOM.' }
-  if (prodUsage > 0) return { success: false, error: 'Cannot delete: tied to production orders.' }
-  if (orderUsage > 0 || quotationUsage > 0 || invoiceUsage > 0) return { success: false, error: 'Cannot delete: product is linked to sales documents.' }
-  if (poUsage > 0 || prUsage > 0) return { success: false, error: 'Cannot delete: product is linked to purchase documents.' }
-  if (godownUsage > 0) return { success: false, error: 'Cannot delete: product has godown stock entries.' }
-  if (ledgerUsage > 0) return { success: false, error: 'Cannot delete: product has stock ledger history.' }
-  const extraUsage = await Promise.all([
-    tx.productBatch.count({ where: { productId } }),
-    tx.materialConsumption.count({ where: { rawMaterialId: productId } }),
-    tx.scrapInventory.count({ where: { rawMaterialId: productId } }),
-    tx.customOrderInventory.count({ where: { productId } }),
-    tx.godownTransferItem.count({ where: { productId } }),
-  ])
-  if (extraUsage.some(count => count > 0)) return { success: false, error: 'Cannot delete: product has batch, production, transfer or custom-order history.' }
-
-  const now = new Date()
-  const expiresAt = getDraftExpiry(now)
-
-  const snapshot = {
-    displayId: product.sku,
-    sku: product.sku,
-    name: product.name,
-    categoryId: product.categoryId,
-    categoryName: product.category?.name,
-    price: product.price,
-    bulkPrice: product.bulkPrice,
-    brand: product.brand,
-    unitSize: product.unitSize,
-    createdAt: product.createdAt.toISOString(),
-    stock: product.stock,
-    sold: product.sold,
-    reorderLevel: product.reorderLevel,
-    image: product.image,
-    material: product.material,
-    color: product.color,
-    description: product.description,
-    warehouseId: product.warehouseId,
-    warehouseName: product.warehouse?.name,
-    lastRestocked: product.lastRestocked?.toISOString() || null,
-    hsnCode: product.hsnCode,
-    unitOfMeasure: product.unitOfMeasure,
-    costPrice: product.costPrice,
-    stockGroupId: product.stockGroupId,
-    stockGroupName: product.stockGroup?.name,
-    title: product.name,
-    subtitle: `Product · ${product.sku}`,
-  }
-
-  await tx.draft.create({
-      data: {
-        sourceType: 'Product',
-        sourceId: product.sku,
-        data: snapshot,
-        deletedBy: 'Manager',
-        deletedAt: now,
-        expiresAt,
-      },
-    })
-  await tx.product.delete({ where: { id: productId } })
-  return { success: true }
-  })
+  const result = await inventoryTransaction(prisma, tx => moveInventoryProductToDraft(tx, productId, actor, expectedCategory))
 
   revalidatePath('/inventory')
   revalidatePath('/drafts')
   revalidatePath('/manufacturing')
+  revalidatePath('/godowns')
   return result
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
@@ -1792,6 +1712,7 @@ export async function restoreFromDraft(draftId: number) {
       },
     })
     if ((data.stock as number) > 0) await moveTotalStock(tx, restored.id, data.stock as number, 'IN', { referenceType: 'Manual', notes: 'Product restored from draft', createdBy: 'Manager' })
+    await restoreEmptyGodownStocks(tx, restored.id, data.emptyGodownIds)
     await tx.product.update({ where: { id: restored.id }, data: { lastRestocked: data.lastRestocked ? new Date(data.lastRestocked as string) : null } })
     await tx.draft.delete({ where: { id: draftId } })
     return restored
@@ -1799,6 +1720,8 @@ export async function restoreFromDraft(draftId: number) {
 
     revalidatePath('/inventory')
     revalidatePath('/drafts')
+    revalidatePath('/manufacturing')
+    revalidatePath('/godowns')
     return { success: true, data: { id: product.id } }
   }
 

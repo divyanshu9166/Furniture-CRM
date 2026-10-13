@@ -2024,6 +2024,7 @@ export default function InventoryPage() {
         {productToDelete && (
           <div className="space-y-4">
             <p className="text-sm text-muted">Are you sure you want to move <strong className="text-foreground">{productToDelete.name}</strong> to drafts? It will be permanently deleted after 30 days.</p>
+            <p className="text-xs text-muted">Only zero-stock items without linked documents, BOMs, production, batch or ledger history can be removed. Empty godown assignments alone do not block removal.</p>
             <div className="ui-actions flex gap-3 justify-end">
               <button onClick={cancelMoveToDraft} className="px-4 py-2 rounded-lg text-sm text-muted hover:bg-surface-hover">Cancel</button>
               <button onClick={confirmMoveToDraft} disabled={deleting} className="px-4 py-2 rounded-lg bg-red-600 text-white text-sm disabled:opacity-50">

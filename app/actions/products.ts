@@ -413,8 +413,7 @@ export async function deleteProduct(id: number) {
 }
 
 export async function deleteRawMaterial(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
-  const product = await prisma.product.findUnique({ where: { id }, include: { category: true } })
-  if (!product || product.category.name !== 'Raw Material') return { success: false, error: 'Raw material not found' }
-  return moveProductToDraft(id)
+  // Permission and canonical-category checks run inside the shared deletion
+  // workflow, with the category checked after locking the product.
+  return moveProductToDraft(id, 'Raw Material')
 }
