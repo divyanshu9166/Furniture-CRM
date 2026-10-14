@@ -10,6 +10,8 @@ import { canonicalInventoryCategory, isManualCategory } from '@/lib/inventory/ca
 import { assertCompletionMembers, priorityRank, productionCost, usableOutput, weightedCost } from '@/lib/manufacturing/logic'
 import { assertRawMaterialUnit, assertWorkCenters, changeStep, lockBom, lockedOrder, transitionOrder } from '@/lib/manufacturing/operations'
 import { archiveFailedProductionOrder, restoreArchivedProductionOrder, archiveFailedProductionSchema } from '@/lib/manufacturing/archive'
+import { previewPermanentBomCleanup, permanentlyDeleteBomAndFailedJobs, permanentBomCleanupSchema } from '@/lib/manufacturing/permanent-cleanup'
+import { nextProductionDisplayId } from '@/lib/manufacturing/production-number'
 import { indiaDate } from '@/lib/inventory/batches'
 import {
   createWorkCenterSchema,
@@ -228,6 +230,25 @@ export async function deleteBOM(id: number) {
   })
   revalidatePath('/manufacturing')
   return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
+
+export async function getPermanentBomCleanupPreview(bomId: number) {
+  try {
+    await requireRole('ADMIN')
+    const data = await inventoryTransaction(prisma, tx => previewPermanentBomCleanup(tx, bomId))
+    return { success: true, data }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
+
+export async function permanentlyDeleteBOM(input: unknown) {
+  try {
+    const session = await requireRole('ADMIN')
+    const parsed = permanentBomCleanupSchema.safeParse(input)
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+    const data = await inventoryTransaction(prisma, tx => permanentlyDeleteBomAndFailedJobs(tx, parsed.data, session.user.name))
+    revalidatePath('/manufacturing'); revalidatePath('/staff-portal'); revalidatePath('/inventory'); revalidatePath('/godowns')
+    return { success: true, data }
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
@@ -686,8 +707,8 @@ export async function createProductionOrder(data: unknown) {
         if (!staff || staff.status !== 'Active') throw new Error('Select an active staff member')
         assignee = staff.name
       }
-      const maximum = await tx.$queryRaw<{ maximum: bigint }[]>`SELECT COALESCE(MAX((substring("displayId" from '^PRD-([0-9]+)$'))::bigint), 0) AS maximum FROM "ProductionOrder"`
-      const displayId = `PRD-${String(Number(maximum[0].maximum) + 1).padStart(4, '0')}`
+      const maximum = await tx.$queryRaw<{ maximum: bigint }[]>`SELECT GREATEST(COALESCE(MAX((substring("displayId" from '^PRD-([0-9]+)$'))::bigint), 0), (SELECT COALESCE(MAX("maxOrderNumber"), 0) FROM "ProductionCleanupAudit")) AS maximum FROM "ProductionOrder"`
+      const displayId = nextProductionDisplayId(maximum[0].maximum)
       const created = await tx.productionOrder.create({ data: {
         displayId, bomId, finishedProductId: bom.finishedProductId, customOrderId: customOrderId ?? null, workCenterId: workCenterId ?? null,
         plannedQty, standardMins: bom.steps.reduce((sum, step) => sum + step.durationMins * plannedQty, 0), priority,

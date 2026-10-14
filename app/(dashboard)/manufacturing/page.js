@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { removeInChunks } from '@/lib/inventory/bulk-removal'
 import { canArchiveFailedProductionOrder, matchesProductionArchiveView } from '@/lib/manufacturing/archive-rules'
 import { archiveFailedProduction as archiveFailedProductionAction, restoreArchivedProduction as restoreArchivedProductionAction } from '@/app/actions/manufacturing'
+import { getPermanentBomCleanupPreview as getPermanentBomCleanupPreviewAction, permanentlyDeleteBOM as permanentlyDeleteBOMAction } from '@/app/actions/manufacturing'
 import {
   Plus, Factory, Layers, PlayCircle, CheckCircle, Package,
   Eye, AlertTriangle, Pause, XCircle, Wrench,
@@ -96,6 +97,8 @@ const startProduction = safeAction(startProductionAction)
 const holdProduction = safeAction(holdProductionAction)
 const cancelProductionOrder = safeAction(cancelProductionOrderAction)
 const deleteProductionOrder = safeAction(deleteProductionOrderAction)
+const getPermanentBomCleanupPreview = safeAction(getPermanentBomCleanupPreviewAction)
+const permanentlyDeleteBOM = safeAction(permanentlyDeleteBOMAction)
 const archiveFailedProduction = safeAction(archiveFailedProductionAction)
 const restoreArchivedProduction = safeAction(restoreArchivedProductionAction)
 const completeProduction = safeAction(completeProductionAction)
@@ -206,6 +209,16 @@ export default function ManufacturingPage() {
   const [restoringProdId, setRestoringProdId] = useState(null)
   const productionGeneration = useRef(0)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [permanentBomTarget, setPermanentBomTarget] = useState(null)
+  const [permanentBomPreview, setPermanentBomPreview] = useState(null)
+  const [permanentBomLoading, setPermanentBomLoading] = useState(false)
+  const [permanentBomDeleting, setPermanentBomDeleting] = useState(false)
+  const [permanentBomError, setPermanentBomError] = useState('')
+  const [permanentBomPhrase, setPermanentBomPhrase] = useState('')
+  const [permanentBomReason, setPermanentBomReason] = useState('')
+  const [permanentBomAcknowledged, setPermanentBomAcknowledged] = useState(false)
+  const permanentBomRequest = useRef(0)
+  const permanentBomBusy = useRef(false)
 
   // Selected items
   const [selectedOrder, setSelectedOrder] = useState(null)
@@ -510,6 +523,36 @@ export default function ManufacturingPage() {
       if (result.success) await loadData()
       else alert(result.error)
     } finally { setRestoringProdId(null) }
+  }
+
+  const openPermanentBomCleanup = async bom => {
+    if (permanentBomBusy.current) return
+    const version = ++permanentBomRequest.current
+    setPermanentBomTarget(bom); setPermanentBomPreview(null); setPermanentBomError(''); setPermanentBomLoading(true)
+    setPermanentBomPhrase(''); setPermanentBomReason(''); setPermanentBomAcknowledged(false)
+    try {
+      const result = await getPermanentBomCleanupPreview(bom.id)
+      if (version !== permanentBomRequest.current) return
+      if (result.success) setPermanentBomPreview(result.data)
+      else setPermanentBomError(result.error || 'Unable to inspect this BOM')
+    } finally { if (version === permanentBomRequest.current) setPermanentBomLoading(false) }
+  }
+
+  const closePermanentBomCleanup = () => {
+    if (permanentBomBusy.current) return
+    permanentBomRequest.current++; setPermanentBomTarget(null); setPermanentBomPreview(null); setPermanentBomLoading(false)
+  }
+
+  const handlePermanentBomCleanup = async () => {
+    if (permanentBomBusy.current || !permanentBomPreview || permanentBomPreview.blockers.length || !permanentBomAcknowledged || permanentBomPhrase.trim() !== permanentBomPreview.confirmation || permanentBomReason.trim().length < 3) return
+    permanentBomBusy.current = true; setPermanentBomDeleting(true); setPermanentBomError(''); productionGeneration.current++
+    try {
+      const result = await permanentlyDeleteBOM({ bomId: permanentBomPreview.bomId, revision: permanentBomPreview.revision, confirmation: permanentBomPhrase, reason: permanentBomReason, acknowledge: permanentBomAcknowledged })
+      if (!result.success) { setPermanentBomError(result.error || 'Unable to confirm cleanup. Refresh the preview before retrying.'); return }
+      setPermanentBomTarget(null); setPermanentBomPreview(null); setSelectedOrder(null); setShowDetailModal(false)
+      await loadData()
+      alert(`Permanently deleted BOM "${result.data.bomName}" and ${result.data.counts.orders} archived failed order(s). Stock quantities and ledger movements were retained. Cleanup receipt #${result.data.auditId}.`)
+    } finally { permanentBomBusy.current = false; setPermanentBomDeleting(false) }
   }
 
   const openCompleteModal = (order) => {
@@ -1285,7 +1328,7 @@ export default function ManufacturingPage() {
             <BOMCard
               key={bom.id} bom={bom} products={products} workCenters={workCenters}
               onToggle={async () => { const r = await toggleBOMStatus(bom.id); if (r.success) loadData(); else alert(r.error) }}
-              onDelete={async () => { if (!confirm('Delete this BOM?')) return; const r = await deleteBOM(bom.id); if (r.success) loadData(); else alert(r.error) }}
+              onDelete={async () => { if (userRole === 'ADMIN' && bom._count?.productionOrders > 0) { await openPermanentBomCleanup(bom); return } if (!confirm('Permanently delete this unused BOM?')) return; const r = await deleteBOM(bom.id); if (r.success) loadData(); else alert(r.error) }}
               onExport={() => downloadBOMCSV(bom)}
               onSaveAsTemplate={async (steps) => {
                 const name = prompt('Template name:')
@@ -2824,6 +2867,32 @@ export default function ManufacturingPage() {
         )}
       </Modal>
 
+      <Modal isOpen={!!permanentBomTarget} onClose={closePermanentBomCleanup} title="Permanently Delete BOM & Archived Failed Orders" size="lg">
+        <div className="space-y-4">
+          <p className="font-semibold">{permanentBomTarget?.name}</p>
+          {permanentBomLoading && <p role="status" className="text-sm text-muted">Checking linked production records...</p>}
+          {permanentBomError && <p role="alert" className="text-sm text-danger break-words">{permanentBomError}</p>}
+          {permanentBomPreview && <>
+            <div className="border border-red-500/30 bg-red-500/10 rounded-lg p-3 space-y-2 text-sm">
+              <p>This is permanent, not an archive. Take a database backup first.</p>
+              <p>Deletes this BOM ({permanentBomPreview.counts.bomItems} material lines, {permanentBomPreview.counts.bomSteps} routing steps) and the listed {permanentBomPreview.counts.orders} archived failed production orders, {permanentBomPreview.counts.consumptions} consumption records, {permanentBomPreview.counts.productionSteps} production steps and {permanentBomPreview.counts.scrapHistory} non-live scrap history records.</p>
+              <p>Removes ₹{permanentBomPreview.counts.removedJobCosts.toLocaleString('en-IN')} of these job costs from production reports. No stock is returned or reset. Products, current godown/batch quantities, invoices and unrelated orders are kept. {permanentBomPreview.counts.retainedLedger} stock ledger entries and their batch allocations are retained with a cleanup reference.</p>
+              <p>No Draft/Restore copy is created. Only a minimal deletion receipt is retained.</p>
+            </div>
+            <div className="max-h-[25dvh] overflow-y-auto space-y-2">{permanentBomPreview.orders.map(job => <p key={job.id} className="text-xs p-2 rounded-lg border border-border">{job.displayId} · {job.status} · QC {job.qualityStatus} · {job.archived ? 'Archived' : 'Not archived'}</p>)}</div>
+            {permanentBomPreview.blockers.length > 0 && <div role="alert" className="space-y-2 text-sm text-danger">{permanentBomPreview.blockers.map((message, index) => <p key={index}>{message}</p>)}</div>}
+            <div><label htmlFor="permanent-bom-reason" className="text-xs text-muted block mb-1">Cleanup reason (required)</label><textarea id="permanent-bom-reason" disabled={permanentBomDeleting} maxLength={500} value={permanentBomReason} onChange={event => setPermanentBomReason(event.target.value)} rows={2} className={INP} /></div>
+            <div><label htmlFor="permanent-bom-confirmation" className="text-xs text-muted block mb-1">Type {permanentBomPreview.confirmation} to confirm this exact BOM</label><input id="permanent-bom-confirmation" disabled={permanentBomDeleting} value={permanentBomPhrase} onChange={event => setPermanentBomPhrase(event.target.value)} className={INP} /></div>
+            <label className="flex gap-2 items-start text-sm"><input type="checkbox" disabled={permanentBomDeleting} checked={permanentBomAcknowledged} onChange={event => setPermanentBomAcknowledged(event.target.checked)} className="mt-1" /><span>I understand the listed documents/history will be permanently deleted, current stock will not change, and this cannot be restored from Drafts.</span></label>
+          </>}
+          <div className="ui-actions flex flex-wrap justify-end gap-2">
+            <button disabled={permanentBomDeleting} onClick={closePermanentBomCleanup} className="px-4 py-2 border border-border rounded-lg disabled:opacity-50">Cancel</button>
+            <button disabled={permanentBomDeleting || permanentBomLoading} onClick={() => openPermanentBomCleanup(permanentBomTarget)} className="px-4 py-2 border border-border rounded-lg disabled:opacity-50">Refresh preview</button>
+            <button disabled={permanentBomDeleting || permanentBomLoading || !permanentBomPreview || permanentBomPreview.blockers.length > 0 || !permanentBomAcknowledged || permanentBomPhrase.trim() !== permanentBomPreview.confirmation || permanentBomReason.trim().length < 3} onClick={handlePermanentBomCleanup} className="px-4 py-2 bg-red-600 text-white rounded-lg disabled:opacity-50">{permanentBomDeleting ? 'Deleting...' : 'Permanently Delete Listed Records'}</button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Delete Production Order */}
       <Modal isOpen={showDeleteProdModal} onClose={() => { if (submitting) return; setShowDeleteProdModal(false); setDeleteProdTarget(null) }} title={deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) ? 'Archive Failed Production Order' : 'Delete Production Order'}>
         <div className="space-y-4">
@@ -3736,7 +3805,7 @@ function BOMCard({ bom, products, workCenters, onToggle, onDelete, onExport, onS
           <button onClick={onToggle} className={`px-2.5 py-1 rounded-lg text-xs ${bom.isActive ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}>
             {bom.isActive ? 'Deactivate' : 'Activate'}
           </button>
-          <button onClick={onDelete} className="p-1.5 text-red-400/40 hover:text-red-400 hover:bg-red-500/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+          <button onClick={onDelete} title="Delete BOM / inspect permanent cleanup" aria-label={`Delete BOM ${bom.name}`} className="p-1.5 text-red-400/40 hover:text-red-400 hover:bg-red-500/10 rounded-lg"><Trash2 className="w-4 h-4" /></button>
         </div>
       </div>
 

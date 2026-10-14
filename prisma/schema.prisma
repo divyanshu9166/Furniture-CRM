@@ -1622,6 +1622,23 @@ model ProductionOrder {
   @@index([archivedAt])
 }
 
+// Minimal permanent-cleanup receipt, not a restorable document snapshot.
+// No FK to deleted entities. Keeps deleted PRD numbers from being reused.
+model ProductionCleanupAudit {
+  id             Int      @id @default(autoincrement())
+  bomId          Int
+  bomName        String
+  orderIds       Json
+  orderNumbers   Json
+  maxOrderNumber BigInt   @default(0)
+  counts         Json
+  reason         String
+  deletedBy      String
+  deletedAt      DateTime @default(now())
+
+  @@index([bomId])
+}
+
 // Tracks progress of each BOM step within a production order
 model ProductionStep {
   id                 Int             @id @default(autoincrement())
