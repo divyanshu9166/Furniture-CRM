@@ -14,6 +14,7 @@ import {
 import {getBranches as getBranchesAction, createBranch as createBranchAction, updateBranch as updateBranchAction, deleteBranch as deleteBranchAction, getGodowns as getGodownsAction, createGodown as createGodownAction, updateGodown as updateGodownAction, deleteGodown as deleteGodownAction, setDefaultGodown as setDefaultGodownAction, getGodownStock as getGodownStockAction, getTransfers as getTransfersAction, createTransfer as createTransferAction, completeTransfer as completeTransferAction, getGodownStockSummary as getGodownStockSummaryAction, getStockLedger as getStockLedgerAction, assignStockToGodown as assignStockToGodownAction, migrateExistingStockToGodowns as migrateExistingStockToGodownsAction} from '@/app/actions/godowns'
 import {getProducts as getProductsAction} from '@/app/actions/products'
 import Modal from '@/components/Modal'
+import { ledgerQuantityClass } from '@/lib/inventory/ledger-view'
 
 import { safeAction } from '@/lib/safe-action';
 const getBranches = safeAction(getBranchesAction);
@@ -520,7 +521,7 @@ export default function GodownsPage() {
       {/* ═══════ STOCK LEDGER ═══════ */}
       {tab === 'ledger' && (
         <div className="space-y-4">
-          <p className="text-xs text-muted">Complete audit trail of all stock movements across godowns. Every add, transfer, sale, and adjustment is recorded.</p>
+          <p className="text-xs text-muted">Complete audit trail of all stock movements across godowns. Balance is the item&apos;s godown balance after that movement.</p>
           <div className="glass-card overflow-hidden">
             <div className="ui-table-scroll overflow-x-auto">
               <table className="w-full text-sm">
@@ -551,8 +552,8 @@ export default function GodownsPage() {
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeColors[e.entryType] || 'bg-gray-500/10 text-gray-400'}`}>{e.entryType.replace('_', ' ')}</span>
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className={`font-semibold text-sm flex items-center gap-0.5 ${e.quantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                          <span className={`font-semibold text-sm flex items-center gap-0.5 ${ledgerQuantityClass(e.quantity)}`}>
+                            {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : e.quantity < 0 ? <ArrowDown className="w-3 h-3" /> : null}
                             {Math.abs(e.quantity)}
                           </span>
                         </td>
@@ -571,7 +572,8 @@ export default function GodownsPage() {
               <button disabled={ledgerLoading} onClick={() => loadLedger()} className="px-3 py-2 border border-border rounded-lg">Refresh ledger</button>
               {ledgerCursor && <button disabled={ledgerLoading} onClick={() => loadLedger(true)} className="px-3 py-2 bg-accent text-white rounded-lg">{ledgerLoading ? 'Loading...' : 'Load older entries'}</button>}
             </div>
-            {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No ledger entries yet. Stock movements will appear here.</div>}
+            {ledgerLoading && <p role="status" className="p-3 text-muted">Loading ledger…</p>}
+            {ledgerEntries.length === 0 && !ledgerLoading && !ledgerError && <div className="text-center py-12 text-muted">No ledger entries yet. Stock movements will appear here.</div>}
           </div>
         </div>
       )}

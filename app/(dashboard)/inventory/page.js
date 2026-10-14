@@ -11,6 +11,7 @@ import {
 import { getProducts, getCategories, getWarehouses, createInventoryItem as createProduct, updateStock, bulkImportProducts, reconcileInventoryStock } from '@/app/actions/products';
 import { moveProductToDraft, moveProductsToDraft } from '@/app/actions/drafts';
 import { inventoryCreationError } from '@/lib/inventory/creation-rules';
+import { createLedgerRequestGuard, mergeLedgerEntries, ledgerQuantityClass } from '@/lib/inventory/ledger-view';
 import { getStockGroups, createStockGroup, updateStockGroup, deleteStockGroup } from '@/app/actions/stock-groups';
 import { getBatches, createBatch, updateBatch, getAgingAnalysis } from '@/app/actions/batches';
 import { getGodownStock, getGodowns, getStockLedger } from '@/app/actions/godowns';
@@ -160,6 +161,22 @@ export default function InventoryPage() {
   const [ledgerProduct, setLedgerProduct] = useState('');
   const [ledgerGodown, setLedgerGodown] = useState('');
   const [ledgerCursor, setLedgerCursor] = useState(null);
+  const [ledgerError, setLedgerError] = useState('');
+  const ledgerRequests = React.useRef(null);
+  if (ledgerRequests.current === null) {
+    ledgerRequests.current = createLedgerRequestGuard('|');
+  }
+
+  const changeLedgerFilter = (filter, value) => {
+    ledgerRequests.current.selectScope(filter === 'product' ? `${value}|${ledgerGodown}` : `${ledgerProduct}|${value}`);
+    setLedgerEntries([]); setLedgerCursor(null); setLedgerError('');
+    if (filter === 'product') setLedgerProduct(value); else setLedgerGodown(value);
+  };
+
+  useEffect(() => {
+    const requests = ledgerRequests.current;
+    return () => requests.invalidate();
+  }, []);
 
   const openStock = (product) => {
     setStockError('');
@@ -524,16 +541,28 @@ export default function InventoryPage() {
   }, []);
 
   const loadLedger = useCallback(async (nextCursor) => {
-    setLedgerLoading(true);
-    try {
     const cursor = typeof nextCursor === 'number' ? nextCursor : undefined;
+    const request = ledgerRequests.current.begin(cursor, `${ledgerProduct}|${ledgerGodown}`);
+    if (!request) return;
+    setLedgerLoading(true);
+    setLedgerError('');
+    try {
     const res = await getStockLedger({ limit: 200, productId: ledgerProduct ? Number(ledgerProduct) : undefined, godownId: ledgerGodown ? Number(ledgerGodown) : undefined, cursor });
-    if (res.success) {
-      setLedgerEntries(previous => cursor ? [...previous, ...res.data] : res.data);
+    if (!ledgerRequests.current.isCurrent(request)) return;
+    if (res?.success && Array.isArray(res.data)) {
+      setLedgerEntries(previous => mergeLedgerEntries(cursor ? previous : [], res.data));
       setLedgerCursor(res.nextCursor);
+      ledgerRequests.current.finish(request, res.nextCursor ?? null);
+    } else {
+      setLedgerError(res?.error || 'Stock ledger could not be loaded. Please retry.');
     }
-    } catch { setPanelError('Stock ledger could not be loaded. Please retry.'); }
-    finally { setLedgerLoading(false); }
+    } catch {
+      if (ledgerRequests.current.isCurrent(request)) setLedgerError('Stock ledger could not be loaded. Please retry.');
+    } finally {
+      if (ledgerRequests.current.isCurrent(request)) {
+        ledgerRequests.current.release(request); setLedgerLoading(false);
+      }
+    }
   }, [ledgerProduct, ledgerGodown]);
 
   useEffect(() => {
@@ -1180,25 +1209,26 @@ export default function InventoryPage() {
       {tab === 'ledger' && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-muted">Complete audit trail of all stock movements</p>
-            <button onClick={loadLedger} className="p-2 bg-surface border border-border rounded-lg text-muted hover:text-foreground"><RefreshCw className="w-4 h-4" /></button>
+            <p className="text-xs text-muted">All stock movements. Balance is the item&apos;s godown balance after that movement.</p>
+            <button aria-label="Refresh stock ledger" disabled={ledgerLoading} onClick={() => loadLedger()} className="p-2 bg-surface border border-border rounded-lg text-muted hover:text-foreground disabled:opacity-50"><RefreshCw className="w-4 h-4" /></button>
           </div>
           <div className="flex flex-wrap gap-2">
-            <select aria-label="Ledger product" value={ledgerProduct} onChange={e => setLedgerProduct(e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
+            <select aria-label="Ledger product" value={ledgerProduct} onChange={e => changeLedgerFilter('product', e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
               <option value="">All items</option>{products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>)}
             </select>
-            <select aria-label="Ledger location" value={ledgerGodown} onChange={e => setLedgerGodown(e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
+            <select aria-label="Ledger location" value={ledgerGodown} onChange={e => changeLedgerFilter('godown', e.target.value)} className="min-w-0 max-w-full bg-surface border border-border p-2 rounded-lg text-xs">
               <option value="">All locations</option>{godowns.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
+          {ledgerError && <p role="alert" className="text-sm text-danger">{ledgerError} Displayed entries may be out of date; refresh or retry loading older movements.</p>}
           {ledgerLoading ? (
             <div className="flex justify-center py-12"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-accent" /></div>
           ) : (
             <>
               {/* Mobile: ledger movement cards */}
               <div className="md:hidden space-y-2.5">
-                {ledgerEntries.length === 0 && (
-                  <div className="glass-card py-12 text-center text-sm text-muted">No stock movements yet.</div>
+                {ledgerEntries.length === 0 && !ledgerError && (
+                  <div className="glass-card py-12 text-center text-sm text-muted">No stock movements match these filters.</div>
                 )}
                 {ledgerEntries.map((e, i) => {
                   const typeColors = {
@@ -1220,8 +1250,8 @@ export default function InventoryPage() {
                       <div className="flex items-center justify-between gap-2 mt-1.5">
                         <span className="text-[11px] text-muted">{new Date(e.createdAt).toLocaleDateString('en-IN')} {new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
                         <span className="flex items-center gap-3">
-                          <span className={`font-semibold flex items-center gap-0.5 text-sm ${e.quantity > 0 ? 'text-success' : 'text-danger'}`}>
-                            {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                          <span className={`font-semibold flex items-center gap-0.5 text-sm ${ledgerQuantityClass(e.quantity)}`}>
+                            {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : e.quantity < 0 ? <ArrowDown className="w-3 h-3" /> : null}
                             {Math.abs(e.quantity)}
                           </span>
                           <span className="text-xs text-muted">Bal: <span className="text-foreground font-medium">{e.balanceAfter}</span></span>
@@ -1259,8 +1289,8 @@ export default function InventoryPage() {
                               <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${typeColors[e.entryType] || 'bg-gray-500/10 text-gray-400'}`}>{e.entryType.replace('_', ' ')}</span>
                             </td>
                             <td className="px-3 py-2.5">
-                              <span className={`font-semibold flex items-center gap-0.5 ${e.quantity > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                              <span className={`font-semibold flex items-center gap-0.5 ${ledgerQuantityClass(e.quantity)}`}>
+                                {e.quantity > 0 ? <ArrowUp className="w-3 h-3" /> : e.quantity < 0 ? <ArrowDown className="w-3 h-3" /> : null}
                                 {Math.abs(e.quantity)}
                               </span>
                             </td>
@@ -1273,7 +1303,7 @@ export default function InventoryPage() {
                     </tbody>
                   </table>
                 </div>
-                {ledgerEntries.length === 0 && <div className="text-center py-12 text-muted">No stock movements yet. Movements will appear here when stock is adjusted, transferred, or sold.</div>}
+                {ledgerEntries.length === 0 && !ledgerError && <div className="text-center py-12 text-muted">No stock movements match these filters.</div>}
               </div>
             </>
           )}
