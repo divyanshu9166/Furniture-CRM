@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { lockBom } from './operations'
-import { productionNumber } from './production-number'
+import { lockProductionNumbering, productionNumber } from './production-number'
 
 export const permanentBomCleanupSchema = z.object({
   bomId: z.number().int().positive(),
@@ -14,7 +14,7 @@ export const permanentBomCleanupSchema = z.object({
 
 async function loadPlan(tx: Prisma.TransactionClient, bomId: number) {
   // Same lock order as createProductionOrder: numbering, then BOM, then jobs.
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(742013)`
+  await lockProductionNumbering(tx)
   await lockBom(tx, bomId)
   const bom = await tx.billOfMaterials.findUniqueOrThrow({ where: { id: bomId }, include: { items: { orderBy: { id: 'asc' } }, steps: { orderBy: { id: 'asc' } } } })
   const jobs = await tx.productionOrder.findMany({ where: { bomId }, include: { consumptions: { orderBy: { id: 'asc' } }, productionSteps: { orderBy: { id: 'asc' } }, customInventoryItems: { orderBy: { id: 'asc' } } }, orderBy: { id: 'asc' }, take: 201 })

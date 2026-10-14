@@ -43,7 +43,38 @@ The production-creation query now uses the audit table for number retention, so 
 
 ## Verification and limitations
 
+### Preview failure fixed after release
+
+The initial preview used `SELECT pg_advisory_xact_lock(742013)` through
+`$queryRaw`. PostgreSQL returns `void` (OID 2278), which the installed
+`@prisma/adapter-pg` rejects during result decoding. The shared numbering-lock
+helper now selects `pg_advisory_xact_lock(742013)::text`; the lock key,
+transaction lifetime and lock order are unchanged. Production creation uses
+the same corrected helper. A regression test exercises the real installed
+adapter and PrismaClient with simulated PostgreSQL field metadata (no database
+connection), reproducing the old `P2010` rejection and checking the corrected query.
+
+Cleanup-specific database failures now report missing migrations separately
+from raw-query errors, with a server-side `[manufacturing:bom-cleanup:preview]`
+or `[manufacturing:bom-cleanup:delete]` code diagnostic. No query, credentials
+or customer data are logged by that diagnostic. VPS logs are still required
+to rule out other deployment/database problems.
+
+References: [PostgreSQL advisory lock return types](https://www.postgresql.org/docs/16/functions-admin.html)
+and [Prisma v6 unsupported raw-query result types](https://www.prisma.io/docs/orm/v6/prisma-client/using-raw-sql/raw-queries).
+
+This fix needs a rebuilt application, not an additional migration. The earlier
+cleanup-audit migration remains mandatory. Rebuild both Compose images before
+running the migration service; an old `migrate` image cannot apply newer files.
+Back up the database and review pending migrations before deploying. If the
+preview still fails after deployment, collect `docker compose logs --since=10m app`
+immediately after clicking **Refresh preview**, redacting credentials before
+sharing. Do not use reset, force-reset, or seed commands.
+
 - 339 regression tests passed across auth, inventory, manufacturing, commerce, billing, walk-ins, email and WhatsApp state. Cleanup tests use isolated copy-on-commit fixtures with no live database connection.
+- After the preview fix, 343 regression tests (including 60 manufacturing tests)
+  passed and the production build succeeded again. The added tests cover
+  adapter/PrismaClient decoding and safe, actionable database-error reporting.
 - Tests cover exact scope, unrelated shared-material records, customer/live-scrap protection, explicit confirmation, stale recipe/job/ledger previews, acknowledgement/forged-input validation, full rollback at every write/deletion stage, duplicate requests, numbering retention and bounded histories.
 - Prisma generation/schema validation and production build (106 routes) succeeded. Targeted ESLint has no errors; Manufacturing retains six existing image/unused-suppression warnings.
 - Full TypeScript check retains seven pre-existing unrelated errors in financials, Prisma config and missing Vitest imports. No new errors were reported in these changes. Next.js already skips type errors during build.

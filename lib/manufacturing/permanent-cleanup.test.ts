@@ -33,7 +33,11 @@ function fixture(failure = '') {
     const s = structuredClone(holder.state)
     const fail = (stage: string) => { if (failure === stage) throw new Error(`Injected ${stage} failure`) }
     const tx = {
-      $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => { calls.push(sql.join('?') + JSON.stringify(values)); return [] },
+      $queryRaw: async (sql: TemplateStringsArray, ...values: unknown[]) => {
+        const query = sql.join('?')
+        if (query.includes('pg_advisory_xact_lock')) assert.match(query, /pg_advisory_xact_lock\(742013\)::text$/)
+        calls.push(query + JSON.stringify(values)); return []
+      },
       billOfMaterials: {
         findUnique: async ({ where }: { where: { id: number } }) => structuredClone(s.boms.find(row => row.id === where.id) ?? null),
         findUniqueOrThrow: async ({ where }: { where: { id: number } }) => { const bom = s.boms.find(row => row.id === where.id); if (!bom) throw new Error('BOM not found'); return structuredClone(bom) },

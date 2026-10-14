@@ -11,7 +11,8 @@ import { assertCompletionMembers, priorityRank, productionCost, usableOutput, we
 import { assertRawMaterialUnit, assertWorkCenters, changeStep, lockBom, lockedOrder, transitionOrder } from '@/lib/manufacturing/operations'
 import { archiveFailedProductionOrder, restoreArchivedProductionOrder, archiveFailedProductionSchema } from '@/lib/manufacturing/archive'
 import { previewPermanentBomCleanup, permanentlyDeleteBomAndFailedJobs, permanentBomCleanupSchema } from '@/lib/manufacturing/permanent-cleanup'
-import { nextProductionDisplayId } from '@/lib/manufacturing/production-number'
+import { lockProductionNumbering, nextProductionDisplayId } from '@/lib/manufacturing/production-number'
+import { permanentBomCleanupError } from '@/lib/manufacturing/cleanup-error'
 import { indiaDate } from '@/lib/inventory/batches'
 import {
   createWorkCenterSchema,
@@ -238,7 +239,7 @@ export async function getPermanentBomCleanupPreview(bomId: number) {
     await requireRole('ADMIN')
     const data = await inventoryTransaction(prisma, tx => previewPermanentBomCleanup(tx, bomId))
     return { success: true, data }
-  } catch (error) { return { success: false, error: inventoryError(error) } }
+  } catch (error) { return { success: false, error: permanentBomCleanupError(error, 'preview') } }
 }
 
 export async function permanentlyDeleteBOM(input: unknown) {
@@ -249,7 +250,7 @@ export async function permanentlyDeleteBOM(input: unknown) {
     const data = await inventoryTransaction(prisma, tx => permanentlyDeleteBomAndFailedJobs(tx, parsed.data, session.user.name))
     revalidatePath('/manufacturing'); revalidatePath('/staff-portal'); revalidatePath('/inventory'); revalidatePath('/godowns')
     return { success: true, data }
-  } catch (error) { return { success: false, error: inventoryError(error) } }
+  } catch (error) { return { success: false, error: permanentBomCleanupError(error, 'delete') } }
 }
 
 export async function addBOMItem(data: unknown) {
@@ -685,7 +686,7 @@ export async function createProductionOrder(data: unknown) {
     const order = await inventoryTransaction(prisma, async tx => {
       const { bomId, customOrderId, plannedQty, priority, dueDate, startDate, workCenterId, assignedStaffId, assignedTo, notes } = parsed.data
       // Serialize display-ID allocation, retaining the client's PRD-0001 format.
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(742013)`
+      await lockProductionNumbering(tx)
       await tx.$queryRaw`SELECT id FROM "BillOfMaterials" WHERE id = ${bomId} FOR UPDATE`
       const bom = await tx.billOfMaterials.findUnique({ where: { id: bomId }, include: { finishedProduct: { include: { category: true } }, items: { include: { rawMaterial: { include: { category: true } } } }, steps: { orderBy: { stepNumber: 'asc' } } } })
       if (!bom?.isActive || !bom.items.length) throw new Error('Select an active BOM with materials')
