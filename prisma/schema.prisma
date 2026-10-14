@@ -1598,6 +1598,9 @@ model ProductionOrder {
   scrapReason        String?
   qualityStatus      String          @default("PENDING") // PENDING | PASSED | FAILED | PARTIAL
   qualityNotes       String?
+  archivedAt         DateTime?
+  archivedBy         String?
+  archiveReason      String?
   assignedStaffId    Int?
   assignedStaff      Staff?          @relation("ProductionOrderAssignedStaff", fields: [assignedStaffId], references: [id])
   assignedTo         String? // legacy/manual assignee text fallback
@@ -1616,6 +1619,7 @@ model ProductionOrder {
   @@index([dueDate])
   @@index([assignedStaffId])
   @@index([customOrderId])
+  @@index([archivedAt])
 }
 
 // Tracks progress of each BOM step within a production order

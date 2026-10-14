@@ -1,14 +1,16 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { removeInChunks } from '@/lib/inventory/bulk-removal'
+import { canArchiveFailedProductionOrder, matchesProductionArchiveView } from '@/lib/manufacturing/archive-rules'
+import { archiveFailedProduction as archiveFailedProductionAction, restoreArchivedProduction as restoreArchivedProductionAction } from '@/app/actions/manufacturing'
 import {
   Plus, Factory, Layers, PlayCircle, CheckCircle, Package,
   Eye, AlertTriangle, Pause, XCircle, Wrench,
   TrendingUp, BarChart3, Search, Trash2,
   ChevronDown, ChevronUp, RefreshCw,
   ShieldCheck, FlameKindling, Star, Cpu, Activity,
-  Download, Edit2, Save, X, FileText, BookTemplate,
+  Download, Edit2, Save, X, FileText, BookTemplate, Archive, RotateCcw,
   Clock, DollarSign, Zap, Copy, Upload, Check,
 } from 'lucide-react'
 import {
@@ -94,6 +96,8 @@ const startProduction = safeAction(startProductionAction)
 const holdProduction = safeAction(holdProductionAction)
 const cancelProductionOrder = safeAction(cancelProductionOrderAction)
 const deleteProductionOrder = safeAction(deleteProductionOrderAction)
+const archiveFailedProduction = safeAction(archiveFailedProductionAction)
+const restoreArchivedProduction = safeAction(restoreArchivedProductionAction)
 const completeProduction = safeAction(completeProductionAction)
 const recordQualityCheck = safeAction(recordQualityCheckAction)
 const getMRPAnalysis = safeAction(getMRPAnalysisAction)
@@ -196,6 +200,11 @@ export default function ManufacturingPage() {
   const [showCancelModal, setShowCancelModal] = useState(false)
   const [showQCModal, setShowQCModal] = useState(false)
   const [showDeleteProdModal, setShowDeleteProdModal] = useState(false)
+  const [productionArchiveView, setProductionArchiveView] = useState('CURRENT')
+  const [archiveProdReason, setArchiveProdReason] = useState('')
+  const [archiveProdConfirmation, setArchiveProdConfirmation] = useState('')
+  const [restoringProdId, setRestoringProdId] = useState(null)
+  const productionGeneration = useRef(0)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
 
   // Selected items
@@ -309,6 +318,7 @@ export default function ManufacturingPage() {
   }, [])
 
   const loadData = useCallback(async () => {
+    const generation = ++productionGeneration.current
     setLoading(true)
     setLoadError('')
     try {
@@ -318,6 +328,7 @@ export default function ManufacturingPage() {
       getManufacturingCustomOrders(), getScrapInventory(), getCustomOrderInventory(),
       getGodowns(), getGodownStock(),
     ])
+    if (generation !== productionGeneration.current) return
     if (bomRes.success) setBoms(bomRes.data)
     if (ordRes.success) setOrders(ordRes.data)
     if (ordRes.success) setSelectedOrder(previous => previous ? ordRes.data.find(order => order.id === previous.id) ?? previous : null)
@@ -333,8 +344,8 @@ export default function ManufacturingPage() {
     if (godownStockRes.success) setGodownStocks(godownStockRes.data)
     const failures = [bomRes, ordRes, prodRes, wcRes, statsRes, tmplRes, staffRes, customRes, scrapRes, customInvRes, godownRes, godownStockRes].filter(result => !result.success)
     if (failures.length) setLoadError(failures.map(result => result.error || 'Unable to load a manufacturing panel').join(' · '))
-    } catch (error) { setLoadError(error?.message || 'Unable to load manufacturing. Please retry.') }
-    finally { setLoading(false) }
+    } catch (error) { if (generation === productionGeneration.current) setLoadError(error?.message || 'Unable to load manufacturing. Please retry.') }
+    finally { if (generation === productionGeneration.current) setLoading(false) }
   }, [])
 
   useEffect(() => {
@@ -356,13 +367,15 @@ export default function ManufacturingPage() {
 
   // Auto-refresh production data every 30s so admin sees staff progress updates
   useEffect(() => {
+    let active = true
     const interval = setInterval(async () => {
-      const ordRes = await getProductionOrders()
+      const generation = productionGeneration.current
+      const [ordRes, statsRes] = await Promise.all([getProductionOrders(), getManufacturingStats()])
+      if (!active || generation !== productionGeneration.current) return
       if (ordRes.success) setOrders(ordRes.data)
-      const statsRes = await getManufacturingStats()
       if (statsRes.success) setStats(statsRes.data)
     }, 30000)
-    return () => clearInterval(interval)
+    return () => { active = false; clearInterval(interval) }
   }, [])
 
   // Filtered orders
@@ -374,9 +387,9 @@ export default function ManufacturingPage() {
         o.bom?.name.toLowerCase().includes(orderSearch.toLowerCase())
       const matchStatus = orderStatusFilter === 'ALL' || o.status === orderStatusFilter
       const matchPriority = orderPriorityFilter === 'ALL' || o.priority === orderPriorityFilter
-      return matchSearch && matchStatus && matchPriority
+      return matchSearch && matchStatus && matchPriority && matchesProductionArchiveView(o, productionArchiveView)
     })
-  }, [orders, orderSearch, orderStatusFilter, orderPriorityFilter])
+  }, [orders, orderSearch, orderStatusFilter, orderPriorityFilter, productionArchiveView])
 
   // ─── Apply template to BOM steps ─────────────────────
   const applyTemplate = (templateId) => {
@@ -469,15 +482,34 @@ export default function ManufacturingPage() {
   }
 
   const handleDeleteProd = async () => {
-    if (!deleteProdTarget) return
+    if (!deleteProdTarget || submitting) return
+    productionGeneration.current++ // Discard background snapshots from before this mutation.
     setSubmitting(true)
-    const res = await deleteProductionOrder(deleteProdTarget.id)
+    const archiving = canArchiveFailedProductionOrder(deleteProdTarget)
+    const res = archiving ? await archiveFailedProduction({ id: deleteProdTarget.id, confirmation: archiveProdConfirmation, reason: archiveProdReason }) : await deleteProductionOrder(deleteProdTarget.id)
     if (res.success) {
       setShowDeleteProdModal(false)
       setDeleteProdTarget(null)
-      loadData()
+      await loadData()
     } else alert(res.error)
     setSubmitting(false)
+  }
+
+  const openArchiveProduction = order => {
+    if (!canArchiveFailedProductionOrder(order)) return
+    setArchiveProdReason('Failed QC — removed from the current production list')
+    setArchiveProdConfirmation(''); setDeleteProdTarget(order); setShowDeleteProdModal(true)
+  }
+
+  const handleRestoreProduction = async order => {
+    if (restoringProdId !== null || !confirm(`Restore ${order.displayId} to the current production list? Its FAILED quality and original stock/history remain unchanged.`)) return
+    setRestoringProdId(order.id)
+    productionGeneration.current++
+    try {
+      const result = await restoreArchivedProduction(order.id)
+      if (result.success) await loadData()
+      else alert(result.error)
+    } finally { setRestoringProdId(null) }
   }
 
   const openCompleteModal = (order) => {
@@ -1072,7 +1104,11 @@ export default function ManufacturingPage() {
               <option value="ALL">All Priority</option>
               {['LOW', 'MEDIUM', 'HIGH', 'URGENT'].map(p => <option key={p} value={p}>{p}</option>)}
             </select>
+            <select aria-label="Production archive view" value={productionArchiveView} onChange={e => setProductionArchiveView(e.target.value)} className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground">
+              <option value="CURRENT">Current orders</option><option value="ARCHIVED">Archived orders</option><option value="ALL">Current + archived</option>
+            </select>
           </div>
+          <p className="text-xs text-muted">Completed jobs with failed QC can be archived, not hard-deleted. Archived jobs remain in analytics/cost totals and keep BOM, stock and consumption history. {orders.filter(order => order.archivedAt).length} archived.</p>
 
           {/* Mobile: app-style production order cards */}
           <div className="md:hidden space-y-2.5">
@@ -1129,7 +1165,7 @@ export default function ManufacturingPage() {
                           <button onClick={() => openCompleteModal(o)} className="p-2 rounded-lg tap-press-sm hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-4 h-4" /></button>
                         </>
                       )}
-                      {o.status === 'COMPLETED' && (
+                      {!o.archivedAt && o.status === 'COMPLETED' && (
                         <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-4 h-4" /></button>
                       )}
                       {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
@@ -1138,6 +1174,8 @@ export default function ManufacturingPage() {
                       {o.status === 'PLANNED' && (
                         <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-2 rounded-lg tap-press-sm hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-4 h-4" /></button>
                       )}
+                      {isPrivileged && canArchiveFailedProductionOrder(o) && <button onClick={() => openArchiveProduction(o)} className="p-2 rounded-lg tap-press-sm text-muted hover:text-amber-500 flex items-center gap-1" title="Archive failed order"><Archive className="w-4 h-4" /><span className="text-xs">Archive</span></button>}
+                      {isPrivileged && o.archivedAt && <button disabled={restoringProdId !== null} onClick={() => handleRestoreProduction(o)} className="p-2 rounded-lg tap-press-sm text-muted hover:text-accent flex items-center gap-1 disabled:opacity-50" title="Restore archived order"><RotateCcw className="w-4 h-4" /><span className="text-xs">Restore</span></button>}
                     </div>
                   </div>
                 </div>
@@ -1212,7 +1250,7 @@ export default function ManufacturingPage() {
                                 <button onClick={() => openCompleteModal(o)} className="p-1.5 rounded hover:bg-emerald-500/10 text-muted hover:text-emerald-400" title="Complete"><CheckCircle className="w-3.5 h-3.5" /></button>
                               </>
                             )}
-                            {o.status === 'COMPLETED' && (
+                            {!o.archivedAt && o.status === 'COMPLETED' && (
                               <button onClick={() => { if (o.status !== 'COMPLETED') { openCompleteModal(o); return } setQcTarget(o); setQcForm({ qualityStatus: o.qualityStatus === 'PENDING' ? 'PASSED' : o.qualityStatus, qualityNotes: o.qualityNotes || '', scrapQty: o.scrapQty || 0, scrapReason: o.scrapReason || '' }); setShowQCModal(true) }} className="p-1.5 rounded hover:bg-purple-500/10 text-muted hover:text-purple-400" title="Quality Check"><ShieldCheck className="w-3.5 h-3.5" /></button>
                             )}
                             {!['COMPLETED', 'CANCELLED'].includes(o.status) && (
@@ -1221,6 +1259,8 @@ export default function ManufacturingPage() {
                             {o.status === 'PLANNED' && (
                               <button onClick={() => { setDeleteProdTarget(o); setShowDeleteProdModal(true) }} className="p-1.5 rounded hover:bg-red-500/10 text-muted hover:text-red-400" title="Delete Order"><Trash2 className="w-3.5 h-3.5" /></button>
                             )}
+                            {isPrivileged && canArchiveFailedProductionOrder(o) && <button onClick={() => openArchiveProduction(o)} className="px-2 py-1.5 rounded text-muted hover:text-amber-500 flex items-center gap-1" title="Archive failed order"><Archive className="w-3.5 h-3.5" /><span className="text-xs">Archive</span></button>}
+                            {isPrivileged && o.archivedAt && <button disabled={restoringProdId !== null} onClick={() => handleRestoreProduction(o)} className="px-2 py-1.5 rounded text-muted hover:text-accent flex items-center gap-1 disabled:opacity-50" title="Restore archived order"><RotateCcw className="w-3.5 h-3.5" /><span className="text-xs">Restore</span></button>}
                           </div>
                         </td>
                       </tr>
@@ -2739,7 +2779,7 @@ export default function ManufacturingPage() {
                       <span className="text-muted text-xs">{s.workCenter?.name || '—'}</span>
                       <span className="text-muted text-xs">{s.plannedMins}min</span>
                       {s.actualMins > 0 && <span className={`text-xs ${s.actualMins > s.plannedMins ? 'text-red-400' : 'text-emerald-400'}`}>Actual {s.actualMins}min</span>}
-                      {['PLANNED', 'IN_PROGRESS', 'COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
+                      {!selectedOrder.archivedAt && ['PLANNED', 'IN_PROGRESS', 'COMPLETED'].includes(selectedOrder.status) && s.status !== 'DONE' && (
                         <div className="flex gap-1">
                           {s.status === 'PENDING' && (
                             <button onClick={async () => { const r = await updateProductionStep(s.id, 'IN_PROGRESS'); if (r.success) await loadData(); else alert(r.error) }} className="px-2 py-0.5 text-[10px] bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 rounded">Start</button>
@@ -2756,7 +2796,7 @@ export default function ManufacturingPage() {
               </div>
             )}
 
-            {selectedOrder.status === 'COMPLETED' && (
+            {!selectedOrder.archivedAt && selectedOrder.status === 'COMPLETED' && (
               <div className="grid grid-cols-4 gap-2">
                 {[
                   ['Material', selectedOrder.totalMaterialCost],
@@ -2778,22 +2818,29 @@ export default function ManufacturingPage() {
                 Cancel reason: {selectedOrder.cancelReason}
               </div>
             )}
+            {selectedOrder.archivedAt && <div className="p-3 rounded-lg border border-border text-sm"><p>Archived on {new Date(selectedOrder.archivedAt).toLocaleDateString('en-IN')} by {selectedOrder.archivedBy || 'Manager'}. Read-only; restore from the Archived orders view to make changes.</p><p className="text-muted">Reason: {selectedOrder.archiveReason}</p></div>}
             {selectedOrder.notes && <p className="text-xs text-muted">Notes: {selectedOrder.notes}</p>}
           </div>
         )}
       </Modal>
 
       {/* Delete Production Order */}
-      <Modal isOpen={showDeleteProdModal} onClose={() => { if (submitting) return; setShowDeleteProdModal(false); setDeleteProdTarget(null) }} title="Delete Production Order">
+      <Modal isOpen={showDeleteProdModal} onClose={() => { if (submitting) return; setShowDeleteProdModal(false); setDeleteProdTarget(null) }} title={deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) ? 'Archive Failed Production Order' : 'Delete Production Order'}>
         <div className="space-y-4">
           <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20">
-            <p className="text-sm text-red-400 font-medium">⚠ This action cannot be undone</p>
-            <p className="text-xs text-muted mt-1">Permanently delete order <span className="font-semibold text-foreground">{deleteProdTarget?.displayId}</span>?</p>
+            {deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) ? <>
+              <p className="text-sm font-medium text-foreground">Remove {deleteProdTarget.displayId} from the current production list?</p>
+              <p className="text-xs text-muted mt-2">This is a reversible archive, not permanent deletion or cancellation. Consumed materials are not returned; stock, costs, BOM links, steps and ledger history remain unchanged. Linked raw materials/BOMs will still be protected. Restore from Archived orders; there is no 30-day expiry.</p>
+            </> : <><p className="text-sm text-red-400 font-medium">⚠ This action cannot be undone</p><p className="text-xs text-muted mt-1">Permanently delete untouched planned order <span className="font-semibold text-foreground">{deleteProdTarget?.displayId}</span>?</p></>}
           </div>
+          {deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) && <>
+            <div><label htmlFor="production-archive-reason" className="block text-xs text-muted mb-1">Archive reason</label><textarea id="production-archive-reason" disabled={submitting} maxLength={500} value={archiveProdReason} onChange={e => setArchiveProdReason(e.target.value)} className={INP} rows={2} /></div>
+            <div><label htmlFor="production-archive-confirmation" className="block text-xs text-muted mb-1">Type {deleteProdTarget.displayId} to confirm</label><input id="production-archive-confirmation" disabled={submitting} value={archiveProdConfirmation} onChange={e => setArchiveProdConfirmation(e.target.value)} className={INP} /></div>
+          </>}
           <div className="ui-actions flex gap-3">
-            <button onClick={() => { setShowDeleteProdModal(false); setDeleteProdTarget(null) }} className="flex-1 py-2 border border-border text-muted rounded-lg text-sm hover:text-foreground">Cancel</button>
-            <button onClick={handleDeleteProd} disabled={submitting} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-600/90 disabled:opacity-50">
-              {submitting ? 'Deleting...' : 'Delete Order'}
+            <button disabled={submitting} onClick={() => { setShowDeleteProdModal(false); setDeleteProdTarget(null) }} className="flex-1 py-2 border border-border text-muted rounded-lg text-sm hover:text-foreground disabled:opacity-50">Cancel</button>
+            <button onClick={handleDeleteProd} disabled={submitting || (deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) && (!archiveProdReason.trim() || archiveProdConfirmation.trim() !== deleteProdTarget.displayId))} className="flex-1 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-600/90 disabled:opacity-50">
+              {submitting ? 'Processing...' : deleteProdTarget && canArchiveFailedProductionOrder(deleteProdTarget) ? 'Archive Order' : 'Delete Order'}
             </button>
           </div>
         </div>

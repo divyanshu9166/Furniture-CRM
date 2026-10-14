@@ -16,12 +16,13 @@ export async function assertRawMaterialUnit(tx: Prisma.TransactionClient, id: nu
   if (unit.trim().toUpperCase() !== product.unitOfMeasure.trim().toUpperCase()) throw new Error(`Use ${product.unitOfMeasure} for ${product.name}; implicit unit conversion is not supported`)
 }
 
-export async function lockedOrder(tx: Prisma.TransactionClient, id: number, staffId?: number) {
+export async function lockedOrder(tx: Prisma.TransactionClient, id: number, staffId?: number, allowArchived = false) {
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid production order')
   await tx.$queryRaw`SELECT id FROM "ProductionOrder" WHERE id = ${id} FOR UPDATE`
   const order = await tx.productionOrder.findUnique({ where: { id } })
   if (!order) throw new Error('Production order not found')
   if (staffId !== undefined && order.assignedStaffId !== staffId) throw new Error('You are not assigned to this order')
+  if (order.archivedAt && !allowArchived) throw new Error('Archived production orders are read-only. Restore the order before making changes.')
   return order
 }
 

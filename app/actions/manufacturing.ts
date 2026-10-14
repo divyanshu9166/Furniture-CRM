@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client'
 import { canonicalInventoryCategory, isManualCategory } from '@/lib/inventory/category'
 import { assertCompletionMembers, priorityRank, productionCost, usableOutput, weightedCost } from '@/lib/manufacturing/logic'
 import { assertRawMaterialUnit, assertWorkCenters, changeStep, lockBom, lockedOrder, transitionOrder } from '@/lib/manufacturing/operations'
+import { archiveFailedProductionOrder, restoreArchivedProductionOrder, archiveFailedProductionSchema } from '@/lib/manufacturing/archive'
 import { indiaDate } from '@/lib/inventory/batches'
 import {
   createWorkCenterSchema,
@@ -802,6 +803,26 @@ export async function deleteProductionOrder(id: number) {
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
+export async function archiveFailedProduction(input: unknown) {
+  try {
+    const session = await requireRole('ADMIN', 'MANAGER')
+    const parsed = archiveFailedProductionSchema.safeParse(input)
+    if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
+    await inventoryTransaction(prisma, tx => archiveFailedProductionOrder(tx, parsed.data, session.user.name))
+    revalidatePath('/manufacturing'); revalidatePath('/staff-portal')
+    return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
+
+export async function restoreArchivedProduction(id: number) {
+  try {
+    await requireRole('ADMIN', 'MANAGER')
+    await inventoryTransaction(prisma, tx => restoreArchivedProductionOrder(tx, id))
+    revalidatePath('/manufacturing'); revalidatePath('/staff-portal')
+    return { success: true }
+  } catch (error) { return { success: false, error: inventoryError(error) } }
+}
+
 export async function updateProductionStep(stepId: number, status: string, actualMins?: number, assignedWorker?: string) {
   try {
     await requireRole('ADMIN', 'MANAGER')
@@ -838,7 +859,7 @@ export async function completeProduction(data: unknown) {
   await inventoryTransaction(prisma, async (tx) => {
     await tx.$queryRaw`SELECT id FROM "ProductionOrder" WHERE id = ${productionOrderId} FOR UPDATE`
     const order = await tx.productionOrder.findUnique({ where: { id: productionOrderId }, include: { consumptions: { include: { rawMaterial: { select: { unitOfMeasure: true } } } }, productionSteps: true } })
-    if (!order || !['IN_PROGRESS', 'ON_HOLD'].includes(order.status)) throw new Error('Production order was already completed or its status changed')
+    if (!order || order.archivedAt || !['IN_PROGRESS', 'ON_HOLD'].includes(order.status)) throw new Error('Production order was already completed, archived or its status changed')
     assertCompletionMembers(order.consumptions.map(item => item.rawMaterialId), consumptions.map(item => item.rawMaterialId), order.productionSteps.map(step => step.id), (stepActuals ?? []).map(step => step.stepId))
     await lockProducts(tx, [order.finishedProductId, ...consumptions.map(c => c.rawMaterialId)])
     let totalMaterialCost = 0
@@ -1195,7 +1216,7 @@ export async function getManufacturingStats() {
 export async function getStaffProductionOrders(staffId: number) {
   try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const orders = await prisma.productionOrder.findMany({
-    where: { assignedStaffId: staffId },  // Only fetch orders assigned to THIS staff
+    where: { assignedStaffId: staffId, archivedAt: null },  // Archived jobs remain available in admin history only.
     orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
     include: {
       bom: {
