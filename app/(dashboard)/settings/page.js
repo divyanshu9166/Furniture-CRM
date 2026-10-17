@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import SenderSettings from '@/components/email/SenderSettings';
+import SendingSafetyPanel from '@/components/email/SendingSafetyPanel';
 import { changeSmtpPort, changeSmtpEncryption, smtpTransportProblem } from '@/lib/email-senders';
 import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText, ShieldCheck, Factory } from 'lucide-react';
 import Image from 'next/image';
@@ -1523,6 +1524,7 @@ export default function SettingsPage() {
                     {smtpTransportError || 'Port 465 uses SSL/TLS; port 587 uses STARTTLS (also encrypted). Changing either option keeps standard ports paired automatically. For a custom port, follow your email provider’s settings.'}
                   </p>
                   <SenderSettings config={smtpForm} onChange={changeSmtpForm} testFrom={smtpTestFrom} onTestFromChange={value => { setSmtpTestFrom(value); setSmtpSendResult(null); }} disabled={smtpSaving || smtpSending || smtpTesting} />
+                  <SendingSafetyPanel reloadKey={smtpSendResult} />
                   </fieldset>
 
                   {/* Gmail Setup Info */}
@@ -1600,7 +1602,7 @@ export default function SettingsPage() {
                   {smtpTestResult && (
                     <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${smtpTestResult.success ? 'bg-success-light text-success' : 'bg-red-500/10 text-red-500'}`}>
                       {smtpTestResult.success ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      {smtpTestResult.success ? 'SMTP connection successful!' : `Connection failed: ${smtpTestResult.error}`}
+                      {smtpTestResult.success ? 'SMTP login verified. Sending permission and inbox delivery are not verified.' : `Connection failed: ${smtpTestResult.error}`}
                     </div>
                   )}
                   {smtpSendResult && (

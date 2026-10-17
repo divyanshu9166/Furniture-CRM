@@ -1,7 +1,8 @@
 import nodemailer from 'nodemailer'
 import { prisma } from '@/lib/db'
 import { addTrackingToEmail } from '@/lib/email-tracking'
-import { formatSmtpError, senderHeaders, smtpConfigSchema } from '@/lib/email-senders'
+import { formatSmtpError, senderHeaders, senderEmailSchema, smtpConfigSchema } from '@/lib/email-senders'
+import { withSmtpSafety } from '@/lib/smtp-safety-service'
 import { emailFailureMessage, isSmtpAccountBlocked } from '@/lib/email-errors'
 import { getSuppressedCampaignEmails } from '@/lib/email-audience-service'
 
@@ -54,6 +55,10 @@ export function createTransporter(config: SmtpConfig) {
   })
 }
 
+function requireSmtpAcceptance(result: { accepted?: unknown[] }) {
+  if (!Array.isArray(result.accepted) || !result.accepted.length) throw new Error('SMTP did not accept this recipient. This is not a successful send.')
+}
+
 // ─── SEND SINGLE EMAIL ──────────────────────────────
 
 export async function sendEmail(options: {
@@ -70,11 +75,16 @@ export async function sendEmail(options: {
     const headers = senderHeaders(config, options.fromEmail, options.fromName)
     const transporter = createTransporter(config)
     const html = options.recipientId ? addTrackingToEmail(options.html, options.recipientId) : options.html
-    const result = await transporter.sendMail({
+    const to = senderEmailSchema.parse(options.to)
+    const result = await withSmtpSafety(config, async () => {
+      const response = await transporter.sendMail({
       ...headers,
-      to: options.to,
+      to,
       subject: options.subject,
       html,
+      })
+      requireSmtpAcceptance(response)
+      return response
     })
 
     return { success: true, messageId: result.messageId }
@@ -110,8 +120,9 @@ export async function sendBulkEmails(emails: {
   const errors: string[] = []
   const deliveryResults: Array<{ recipientId: number; success: boolean; error?: string }> = []
 
-  // Send in batches of 5 with 1 second delay between batches
-  const batchSize = 5
+  // One recipient at a time. The shared DB gate additionally coordinates
+  // different campaigns, aliases, tests and application processes.
+  const batchSize = 1
   for (let i = 0; i < emails.length; i += batchSize) {
     const batch = emails.slice(i, i + batchSize)
     const suppressed = new Set(await getSuppressedCampaignEmails(batch.map(email => email.to)))
@@ -119,13 +130,19 @@ export async function sendBulkEmails(emails: {
     const results = await Promise.allSettled(
       batch.map(async (email) => {
         if (suppressed.has(email.to.trim().toLowerCase())) throw new Error('Recipient unsubscribed; email was not sent.')
-        const response = await transporter.sendMail({
+        const to = senderEmailSchema.parse(email.to)
+        await withSmtpSafety(config, async () => {
+          // A recipient may unsubscribe while waiting for another worker's
+          // mailbox lease. Recheck after the wait, immediately before SMTP.
+          if ((await getSuppressedCampaignEmails([to])).includes(to)) throw new Error('Recipient unsubscribed; email was not sent.')
+          const response = await transporter.sendMail({
           ...headers,
-          to: email.to,
+          to,
           subject: email.subject,
           html: addTrackingToEmail(email.html, email.recipientId),
+          })
+          requireSmtpAcceptance(response)
         })
-        if (Array.isArray(response.accepted) && !response.accepted.length) throw new Error('SMTP did not accept this recipient.')
         return email.recipientId
       })
     )
@@ -154,10 +171,7 @@ export async function sendBulkEmails(emails: {
       break
     }
 
-    // Throttle: wait 1 second between batches to avoid rate limits
-    if (i + batchSize < emails.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000))
-    }
+    // Pacing is enforced by the persistent mailbox gate, not by a local timer.
   }
 
   return { sent, failed, errors: [...new Set(errors)], results: deliveryResults }
@@ -181,21 +195,25 @@ export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: 
   try {
     const headers = senderHeaders(config, fromEmail)
     const transporter = createTransporter(config)
-    await transporter.sendMail({
+    const recipient = senderEmailSchema.parse(to)
+    await withSmtpSafety(config, async () => {
+      const result = await transporter.sendMail({
       ...headers,
-      to,
+      to: recipient,
       subject: 'Test Email from Furzentic',
       html: `
         <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 30px;">
-          <h2 style="color: #1a1a1a;">Email Setup Successful!</h2>
-          <p style="color: #555;">Your Furzentic email is configured and working correctly.</p>
+          <h2 style="color: #1a1a1a;">Furzentic SMTP Test</h2>
+          <p style="color: #555;">This is a test of your selected SMTP sender. SMTP acceptance does not guarantee inbox delivery or an unrestricted mailbox.</p>
           <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
             <p style="color: #166534; margin: 0; font-weight: 600;">Your selected sender was accepted by the SMTP server.</p>
             <p style="color: #166534; margin: 4px 0 0;">Check this message's From and Reply-To addresses before using it for campaigns.</p>
           </div>
-          <p style="color: #888; font-size: 13px;">You can now send email campaigns to your customers.</p>
+          <p style="color: #888; font-size: 13px;">Before campaigns, review provider logs, SPF/DKIM/DMARC results, recipient consent and your plan limits.</p>
         </div>
       `,
+      })
+      requireSmtpAcceptance(result)
     })
     return { success: true }
   } catch (err: any) {

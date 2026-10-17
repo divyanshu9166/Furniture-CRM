@@ -425,10 +425,13 @@ export default function EmailMarketingPage() {
           </Link>
         </div>
       )}
+      {emailConfig?.sendingSafety?.blocked && <div role="alert" className="rounded-xl border border-danger/30 bg-danger-light p-4 text-sm text-danger">
+        Sending stopped for this SMTP mailbox and all aliases. {emailConfig.sendingSafety.reason} Review Settings → Email Setup → Sending safety after provider recovery. Paused campaigns will not resume automatically.
+      </div>}
       {emailConfig?.configured && (
         <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 rounded-xl bg-success-light/50 text-success text-sm break-all">
           <CheckCircle2 className="w-4 h-4" />
-          Default sender: <strong>{emailConfig.fromName}</strong> ({emailConfig.fromEmail || emailConfig.smtpUser}) · Choose a sender for each campaign
+          Configured sender: <strong>{emailConfig.fromName}</strong> ({emailConfig.fromEmail || emailConfig.smtpUser}) · Configuration does not verify delivery or provider sending permission
         </div>
       )}
       {emailConfig?.configured && !emailConfig.trackingConfigured && (

@@ -13,6 +13,9 @@ import { Prisma } from '@prisma/client'
 import { assertEmailContentReady } from '@/lib/email-content'
 import { campaignAudienceSchema, recipientSelectionSchema } from '@/lib/email-audience'
 import { resolveCampaignAudience } from '@/lib/email-audience-service'
+import { getSmtpSafetyStatus, resetSmtpSafety } from '@/lib/smtp-safety-service'
+import { emailFailureMessage } from '@/lib/email-errors'
+import { smtpMailboxKey } from '@/lib/smtp-safety'
 
 // ─── VALIDATION SCHEMAS ─────────────────────────────
 
@@ -410,10 +413,33 @@ export async function getEmailConfigStatus() {
       fromEmail: sender?.email || null,
       senders: config ? getSenderIdentities(config) : [],
       trackingConfigured: isEmailTrackingConfigured(),
+      sendingSafety: config ? await getSmtpSafetyStatus(config) : null,
     }
   } catch {
     return { success: false, configured: false, error: 'Email sender settings are invalid or unavailable. Review Email Setup before sending.', senders: [], trackingConfigured: isEmailTrackingConfigured() }
   }
+}
+
+export async function getEmailSendingSafety() {
+  try {
+    const session = await requireRole('ADMIN', 'MANAGER')
+    const config = await getSmtpConfig()
+    if (!config) return { success: false, error: 'Save SMTP settings before reviewing sending safety.' }
+    return { success: true, data: { ...await getSmtpSafetyStatus(config), mailbox: config.smtpUser, mailboxKey: smtpMailboxKey(config), canReset: session.user.role === 'ADMIN' } }
+  } catch (error) { return { success: false, error: emailFailureMessage(error) } }
+}
+
+export async function resetEmailSendingSafety(input: unknown) {
+  try {
+    const session = await requireRole('ADMIN')
+    const data = z.object({ blockedAt: z.string().datetime(), mailboxKey: z.string().regex(/^[a-f0-9]{64}$/), acknowledge: z.literal(true) }).strict().parse(input)
+    const config = await getSmtpConfig()
+    if (!config) return { success: false, error: 'SMTP is not configured.' }
+    if (smtpMailboxKey(config) !== data.mailboxKey) return { success: false, error: 'Saved SMTP mailbox changed. Refresh sending safety before resetting.' }
+    await resetSmtpSafety(config, data.blockedAt, data.acknowledge, session.user.name)
+    revalidatePath('/settings'); revalidatePath('/email-marketing')
+    return { success: true }
+  } catch (error) { return { success: false, error: emailFailureMessage(error) } }
 }
 
 // ─── CAMPAIGN ANALYTICS ─────────────────────────────

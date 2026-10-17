@@ -34,6 +34,7 @@ function shouldRefreshPrismaClient(client: PrismaClient | undefined) {
     typeof (client as any).customOrder === 'undefined' ||
     typeof (client as any).followUpEntry === 'undefined' ||
     typeof (client as any).followUpReminderConfig === 'undefined' ||
+    typeof client.smtpSendingSafety === 'undefined' ||
     typeof client.walkinRequirementSettings === 'undefined'
 }
 

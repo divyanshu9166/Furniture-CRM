@@ -9,6 +9,8 @@ import * as emailContent from './email-content'
 import * as audience from './email-audience'
 import * as emailErrors from './email-errors'
 import * as crypto from 'node:crypto'
+import { createSmtpSafety, type SafetyRepository, type SafetyState } from './smtp-safety'
+import * as smtpSafety from './smtp-safety'
 
 // Execute the actual delivery modules with isolated dependencies. Never import
 // the real database client, connect to SMTP, or send a customer email in tests.
@@ -16,6 +18,9 @@ function isolatedModule(file: string, dependencies: Record<string, unknown>) {
   const js = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText
   const exports: Record<string, any> = {}
   vm.runInNewContext(js, { exports, require: (name: string) => {
+    if (name in dependencies) return dependencies[name]
+    if (name === '@/lib/smtp-safety-service') return { withSmtpSafety: (_config: unknown, operation: () => Promise<unknown>) => operation(), assertSmtpSendingAvailable: async () => {}, getSmtpSafetyStatus: async () => ({ blocked: false, blockedAt: null, reason: null }), resetSmtpSafety: async () => {} }
+    if (name === '@/lib/smtp-safety') return smtpSafety
     if (name === '@/lib/email-content') return emailContent
     if (name === '@/lib/email-audience' || name === './email-audience') return audience
     if (name === '@/lib/email-errors') return emailErrors
@@ -41,14 +46,25 @@ test('tracking signatures reject malformed Unicode without throwing and accept g
 
 function mailHarness(options: { fail?: (index: number) => Error | null; suppressed?: string[]; emptyAcceptance?: boolean } = {}) {
   const messages: any[] = [], transports: any[] = []
+  let clock = Date.now()
+  const rows = new Map<string, SafetyState>()
+  const repository: SafetyRepository = {
+    ensure: async id => { if (!rows.has(id)) rows.set(id, { id, blockedAt: null, blockReason: null, leaseToken: null, leaseUntil: null, nextAllowedAt: new Date(clock) }) },
+    read: async id => rows.get(id) ?? null,
+    claim: async (id, token, now, until) => { const row = rows.get(id)!; if (row.blockedAt || row.nextAllowedAt > now || (row.leaseUntil && row.leaseUntil > now)) return false; row.leaseToken = token; row.leaseUntil = until; return true },
+    release: async (id, token, next, blocked) => { const row = rows.get(id)!; if (row.leaseToken !== token) return; Object.assign(row, { leaseToken: null, leaseUntil: null, nextAllowedAt: next }, blocked ? { blockedAt: blocked.at, blockReason: blocked.reason } : {}) },
+    reset: async () => false,
+  }
+  const safety = createSmtpSafety(repository, { now: () => clock, sleep: async ms => { clock += ms } })
   const email = isolatedModule('lib/email.ts', {
-    nodemailer: { createTransport(transport: unknown) { transports.push(transport); return { verify: async () => true, sendMail: async (message: unknown) => { messages.push(message); const error = options.fail?.(messages.length); if (error) throw error; return { messageId: 'test-message', ...(options.emptyAcceptance ? { accepted: [] } : {}) } } } } },
+    nodemailer: { createTransport(transport: unknown) { transports.push(transport); return { verify: async () => true, sendMail: async (message: unknown) => { messages.push(message); const error = options.fail?.(messages.length); if (error) throw error; return { messageId: 'test-message', accepted: options.emptyAcceptance ? [] : ['accepted@example.com'] } } } } },
+    '@/lib/smtp-safety-service': { withSmtpSafety: safety.send },
     '@/lib/db': { prisma: { storeSettings: { findFirst: async () => ({ ...config }) } } },
     '@/lib/email-tracking': { addTrackingToEmail: (body: string) => `tracked:${body}` },
     '@/lib/email-senders': senders,
     '@/lib/email-audience-service': { getSuppressedCampaignEmails: async () => options.suppressed || [] },
   })
-  return { email, messages, transports }
+  return { email, messages, transports, safety }
 }
 
 test('actual single-email path uses explicit alias, reply-to and unchanged SMTP auth', async () => {
@@ -116,7 +132,7 @@ test('invalid SSL/587 pairing returns readable errors before any actual SMTP ope
 test('account-level sending rejection stops later batches and preserves results for every recipient', async () => {
   const { email, messages } = mailHarness({ fail: () => new Error('554 5.7.1 Outbound sending is disabled for this account') })
   const result = await email.sendBulkEmails(Array.from({ length: 12 }, (_, index) => ({ recipientId: index + 1, to: `client${index}@example.com`, subject: 'Hi', html: 'Hi' })), { config })
-  assert.equal(messages.length, 5)
+  assert.equal(messages.length, 1)
   assert.equal(result.sent, 0); assert.equal(result.failed, 12)
   assert.equal(result.results.length, 12)
   assert.match(result.errors[0], /hPanel/)
@@ -144,6 +160,23 @@ test('empty SMTP accepted array is not reported as successful delivery', async (
   const result = await email.sendBulkEmails([{ recipientId: 1, to: 'client@example.com', subject: 'Hi', html: 'Hi' }], { config })
   assert.equal(result.sent, 0); assert.equal(result.failed, 1)
   assert.match(result.errors[0], /did not accept/)
+})
+
+test('single and test-email paths cannot report success for an empty SMTP acceptance', async () => {
+  const { email } = mailHarness({ emptyAcceptance: true })
+  assert.equal((await email.sendEmail({ to: 'client@example.com', subject: 'Hi', html: 'Hi' })).success, false)
+  assert.equal((await email.sendTestEmail(config, 'client@example.com')).success, false)
+})
+
+test('successful login cannot clear a provider-rejection stop, including another alias', async () => {
+  const { email, messages, safety } = mailHarness({ fail: () => new Error('554 5.7.1 Sending suspended due to suspicious activity') })
+  assert.equal((await email.sendEmail({ to: 'client@example.com', subject: 'Hi', html: 'Hi', fromEmail: 'sales@example.com' })).success, false)
+  assert.equal((await email.testSmtpConnection(config)).success, true)
+  const testResult = await email.sendTestEmail(config, 'owner@example.com', 'support@example.com')
+  assert.equal(testResult.success, false)
+  assert.match(testResult.error, /CRM email sending is stopped/)
+  assert.equal(messages.length, 1)
+  assert.equal((await safety.status(config)).blocked, true)
 })
 
 function campaignHarness(overrides: Record<string, unknown> = {}, aliases = config.smtpAliases) {
@@ -186,6 +219,7 @@ function campaignHarness(overrides: Record<string, unknown> = {}, aliases = conf
     },
   }
   const runner = isolatedModule('lib/email-campaign-runner.ts', {
+    '@/lib/smtp-safety-service': { assertSmtpSendingAvailable: async () => { if (overrides.safetyBlocked) throw new smtpSafety.SmtpSafetyStop() } },
     '@/lib/db': { prisma }, '@/lib/email-senders': senders,
     '@/lib/email-tracking': { getPublicAppUrl: () => 'https://example.com', isEmailTrackingConfigured: () => true },
     '@/lib/email': { getSmtpConfig: async () => ({ ...config, smtpAliases: aliases }), replaceVariables: (body: string) => body,
@@ -208,6 +242,17 @@ test('actual immediate and scheduled runner forwards saved alias/name to both A/
     assert.equal(deliveries[0].sender.config.smtpUser, 'info@example.com')
     assert.deepEqual(deliveries[0].emails.map((email: any) => email.subject), ['Subject A', 'Subject B'])
     assert.equal(campaign.status, 'SENT')
+  }
+})
+
+test('pre-existing mailbox stop pauses regular/automated campaigns before recipient creation', async () => {
+  for (const automated of [false, true]) {
+    const f = campaignHarness({ safetyBlocked: true, status: 'SCHEDULED', isAutomated: automated })
+    if (automated) await f.runner.processDueEmailCampaigns()
+    else assert.equal((await f.runner.deliverEmailCampaign(1)).success, false)
+    assert.equal(f.campaign.status, 'PAUSED')
+    assert.equal(f.rows().length, 0)
+    assert.equal(f.deliveries.length, 0)
   }
 })
 
@@ -301,9 +346,10 @@ test('actual alias settings reject manager access, duplicate aliases and removal
   assert.equal(writes(), 0)
 })
 
-function campaignActionsHarness() {
+function campaignActionsHarness(safetyBlocked = false) {
   let role = 'MANAGER'
   const writes: any[] = [], tests: any[] = []
+  const safetyResets: unknown[][] = []
   const original: any = { id: 1, status: 'DRAFT', fromEmail: 'sales@example.com', fromName: 'Pinned Sales', totalRecipients: 0, isAutomated: false, triggerType: 'new_lead', name: 'Original', subject: 'Hello', body: 'Body', audience: 'all', isABTest: false, abSplitPercent: 50 }
   const prisma: any = { storeSettings: { findUnique: async () => ({ ...config }) },
     emailCampaign: { create: async ({ data }: any) => { writes.push(data); return { id: 2 } }, findFirst: async () => null, findUnique: async () => ({ ...original }), update: async ({ data }: any) => { writes.push(data); return { id: 1 } }, delete: async () => { writes.push('delete') } },
@@ -311,10 +357,14 @@ function campaignActionsHarness() {
     $queryRaw: async () => [], $transaction: async (task: any) => task(prisma),
   }
   const actions = isolatedModule('app/actions/email-campaigns.ts', {
+    '@/lib/smtp-safety-service': {
+      getSmtpSafetyStatus: async () => ({ blocked: safetyBlocked, blockedAt: safetyBlocked ? '2026-10-17T09:00:00.000Z' : null, reason: safetyBlocked ? 'Provider account rejection' : null }),
+      resetSmtpSafety: async (...args: unknown[]) => { safetyResets.push(args) },
+    },
     '@/lib/db': { prisma },
     '@/lib/email-events': { recordEmailEvent: async () => ({ success: true }) },
     'next/cache': { revalidatePath() {} }, zod: { z },
-    '@/lib/auth-helpers': { requireRole: async (...roles: string[]) => { if (!roles.includes(role)) throw new Error('Forbidden') } },
+    '@/lib/auth-helpers': { requireRole: async (...roles: string[]) => { if (!roles.includes(role)) throw new Error('Forbidden'); return { user: { name: 'Signed-in Admin', role } } } },
     '@/lib/email': { getSmtpConfig: async () => ({ ...config }),
       testSmtpConnection: async (value: unknown) => { tests.push(value); return { success: true } },
       sendTestEmail: async (value: unknown, to: string, from: string) => { tests.push({ config: value, to, from }); return { success: true } } },
@@ -327,8 +377,26 @@ function campaignActionsHarness() {
       return { recipients: selected.emails.map(row => ({ ...row, contactId: null })) }
     } },
   })
-  return { actions, writes, tests, original, prisma, setRole: (value: string) => { role = value } }
+  return { actions, writes, tests, safetyResets, original, prisma, setRole: (value: string) => { role = value } }
 }
+
+test('sending safety status is read-only, resets are admin-only and scoped to the saved mailbox', async () => {
+  const f = campaignActionsHarness(true)
+  const status = await f.actions.getEmailSendingSafety()
+  assert.equal(status.success, true); assert.equal(status.data.canReset, false)
+  assert.equal(JSON.stringify(status).includes('test-only-password'), false)
+  const request = { blockedAt: status.data.blockedAt, mailboxKey: status.data.mailboxKey, acknowledge: true }
+  assert.equal((await f.actions.resetEmailSendingSafety(request)).success, false)
+  f.setRole('ADMIN')
+  assert.equal((await f.actions.resetEmailSendingSafety({ ...request, acknowledge: false })).success, false)
+  assert.equal((await f.actions.resetEmailSendingSafety({ ...request, mailboxKey: '0'.repeat(64) })).success, false)
+  assert.equal(f.safetyResets.length, 0)
+  assert.equal((await f.actions.resetEmailSendingSafety(request)).success, true)
+  assert.equal(f.safetyResets.length, 1)
+  assert.equal(f.safetyResets[0][3], 'Signed-in Admin')
+  assert.equal(f.writes.length, 0); assert.equal(f.tests.length, 0)
+  f.setRole('STAFF'); assert.equal((await f.actions.getEmailSendingSafety()).success, false)
+})
 
 test('SMTP settings reject mismatched encryption without writing or modifying existing data', async () => {
   const { settings, saved, writes } = settingsHarness()

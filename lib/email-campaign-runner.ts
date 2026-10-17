@@ -5,6 +5,7 @@ import { resolveSender, smtpConfigSchema } from '@/lib/email-senders'
 import { assertEmailContentReady } from '@/lib/email-content'
 import { resolveCampaignAudience } from '@/lib/email-audience-service'
 import { emailFailureMessage, isSmtpAccountBlocked } from '@/lib/email-errors'
+import { assertSmtpSendingAvailable } from '@/lib/smtp-safety-service'
 
 type DeliveryResult =
   | { success: true; data: { recipientCount: number; sent: number; failed: number; errors: string[] } }
@@ -44,6 +45,7 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
   try {
     const smtpConfig = await getSmtpConfig()
     if (!smtpConfig) return restore('Email is not configured. Go to Settings → Email Setup to configure SMTP.')
+    await assertSmtpSendingAvailable(smtpConfig)
     if (!isEmailTrackingConfigured()) return restore('Set NEXT_PUBLIC_SITE_URL and EMAIL_TRACKING_SECRET before sending campaigns so unsubscribe and tracking links work correctly.')
 
     const campaign = await prisma.emailCampaign.findUnique({ where: { id: campaignId } })
@@ -111,7 +113,7 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
     if (!delivery.sent) return { success: false, error: `No emails were accepted by SMTP. ${delivery.errors[0] || 'Review SMTP settings and recipient statuses.'} Duplicate the campaign after resolving the error to retry without erasing history.` }
     return { success: true, data: { recipientCount: recipients.length, sent: delivery.sent, failed: delivery.failed, errors: delivery.errors } }
   } catch (error) {
-    await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: deliveryStarted ? 'PAUSED' : current.status } }).catch(() => {})
+    await prisma.emailCampaign.update({ where: { id: campaignId }, data: { status: deliveryStarted || isSmtpAccountBlocked(error) ? 'PAUSED' : current.status } }).catch(() => {})
     return { success: false, error: emailFailureMessage(error) }
   }
 }
@@ -119,6 +121,7 @@ export async function deliverEmailCampaign(campaignId: number): Promise<Delivery
 async function deliverAutomationToContact(campaignId: number, contactId: number) {
   const smtpConfig = await getSmtpConfig()
   if (!smtpConfig || !isEmailTrackingConfigured()) return null
+  await assertSmtpSendingAvailable(smtpConfig)
   smtpConfigSchema.parse(smtpConfig)
   // Short database claim, never hold a transaction open during network SMTP.
   // Lock the campaign so scheduler/cron workers cannot queue the same contact
@@ -195,7 +198,8 @@ export async function processDueEmailCampaigns() {
     prisma.emailCampaign.findMany({ where: { status: 'SCHEDULED', isAutomated: true }, select: { id: true, createdAt: true, audience: true, triggerType: true, triggerDelay: true }, take: 20 }),
   ])
 
-  const scheduledResults = await Promise.all(scheduled.map(campaign => deliverEmailCampaign(campaign.id)))
+  const scheduledResults: DeliveryResult[] = []
+  for (const campaign of scheduled) scheduledResults.push(await deliverEmailCampaign(campaign.id))
   let automationDeliveries = 0
   let automationFailures = 0
   for (const campaign of automated) {
@@ -209,6 +213,10 @@ export async function processDueEmailCampaigns() {
         if (delivered === false) automationFailures++
       } catch (error) {
         automationFailures++
+        if (isSmtpAccountBlocked(error)) {
+          await prisma.emailCampaign.update({ where: { id: campaign.id }, data: { status: 'PAUSED' } })
+          break
+        }
         console.error('[email-campaign-scheduler] automation delivery failed', { campaignId: campaign.id, error: error instanceof Error ? error.message : 'Delivery failed' })
       }
       existing.add(contactId)

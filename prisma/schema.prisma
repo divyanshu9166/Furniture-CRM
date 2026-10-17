@@ -1043,6 +1043,19 @@ model IndiaMartLead {
 
 // ─── EMAIL MARKETING ────────────────────────────────
 
+// One safety gate per SMTP login, shared by aliases and application processes.
+// This is CRM state, not an assertion about the provider's live mailbox status.
+model SmtpSendingSafety {
+  id             String    @id
+  blockedAt      DateTime?
+  blockReason    String?
+  leaseToken     String?
+  leaseUntil     DateTime?
+  nextAllowedAt  DateTime  @default(now())
+  resetAt        DateTime?
+  resetBy        String?
+}
+
 model EmailTemplate {
   id        Int      @id @default(autoincrement())
   name      String
