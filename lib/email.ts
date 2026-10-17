@@ -191,31 +191,24 @@ export async function testSmtpConnection(config: SmtpConfig): Promise<{ success:
 
 // ─── SEND TEST EMAIL ────────────────────────────────
 
-export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: string): Promise<{ success: boolean; error?: string }> {
+export async function sendTestEmail(config: SmtpConfig, to: string, fromEmail?: string): Promise<{ success: boolean; error?: string; messageId?: string; acceptedAt?: string }> {
   try {
     const headers = senderHeaders(config, fromEmail)
     const transporter = createTransporter(config)
     const recipient = senderEmailSchema.parse(to)
-    await withSmtpSafety(config, async () => {
+    const receipt = await withSmtpSafety(config, async () => {
       const result = await transporter.sendMail({
       ...headers,
       to: recipient,
-      subject: 'Test Email from Furzentic',
-      html: `
-        <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 30px;">
-          <h2 style="color: #1a1a1a;">Furzentic SMTP Test</h2>
-          <p style="color: #555;">This is a test of your selected SMTP sender. SMTP acceptance does not guarantee inbox delivery or an unrestricted mailbox.</p>
-          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="color: #166534; margin: 0; font-weight: 600;">Your selected sender was accepted by the SMTP server.</p>
-            <p style="color: #166534; margin: 4px 0 0;">Check this message's From and Reply-To addresses before using it for campaigns.</p>
-          </div>
-          <p style="color: #888; font-size: 13px;">Before campaigns, review provider logs, SPF/DKIM/DMARC results, recipient consent and your plan limits.</p>
-        </div>
-      `,
+      subject: 'SMTP configuration check',
+      // A diagnostic, not a campaign: no links, attachments, tracking or HTML.
+      // This simplification is not a guarantee against provider anti-abuse rules.
+      text: 'An administrator requested this single SMTP configuration check from the CRM. No action is required. If received, inspect the From, Reply-To and authentication headers. SMTP acceptance alone does not confirm inbox delivery or that the provider will keep sending enabled.',
       })
       requireSmtpAcceptance(result)
+      return { messageId: typeof result.messageId === 'string' ? result.messageId : undefined, acceptedAt: new Date().toISOString() }
     })
-    return { success: true }
+    return { success: true, ...receipt }
   } catch (err: any) {
     return { success: false, error: emailFailureMessage(err) }
   }

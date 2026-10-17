@@ -1559,6 +1559,7 @@ export default function SettingsPage() {
                       <button
                         onClick={async () => {
                           if (!smtpTestEmail) return;
+                          if (!window.confirm('Send one real diagnostic email? If your provider has suspended this mailbox or a previous test caused suspension, cancel and resolve it with the provider first. SMTP acceptance is not proof of delivery or an unrestricted account.')) return;
                           setSmtpSending(true); setSmtpSendResult(null);
                           try {
                           const available = [smtpForm.smtpUser, ...smtpForm.smtpAliases.map(alias => alias.email)];
@@ -1605,10 +1606,14 @@ export default function SettingsPage() {
                       {smtpTestResult.success ? 'SMTP login verified. Sending permission and inbox delivery are not verified.' : `Connection failed: ${smtpTestResult.error}`}
                     </div>
                   )}
+                  <p className="text-xs text-muted">Send Test sends one real email, not just a login check. If it triggers a suspension notice, stop testing, report the suspension above and contact your provider. Re-enabling sending repeatedly does not resolve its cause.</p>
                   {smtpSendResult && (
-                    <div className={`flex items-center gap-2 p-3 rounded-xl text-sm ${smtpSendResult.success ? 'bg-success-light text-success' : 'bg-red-500/10 text-red-500'}`}>
+                    <div className={`space-y-2 p-3 rounded-xl text-sm ${smtpSendResult.success ? 'bg-surface border border-border text-foreground' : 'bg-red-500/10 text-red-500'}`}>
+                      <p className="flex items-start gap-2">
                       {smtpSendResult.success ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                      {smtpSendResult.success ? `SMTP accepted a test email from ${smtpSendResult.fromEmail} to ${smtpSendResult.toEmail}. Check inbox/spam and the reply address.` : `Failed: ${smtpSendResult.error}`}
+                      {smtpSendResult.success ? `SMTP accepted one test email from ${smtpSendResult.fromEmail} to ${smtpSendResult.toEmail}. Delivery and provider account status remain unverified. Do not retry if a suspension notice arrives.` : `Failed: ${smtpSendResult.error}`}
+                      </p>
+                      {smtpSendResult.success && <p className="break-all text-xs text-muted">For provider support: Message-ID: {smtpSendResult.messageId || 'Not returned by SMTP'} · SMTP acceptance time (UTC): {smtpSendResult.acceptedAt || 'Not returned'}. Ask the provider for the matching delivery log, queue ID and security rule. These details are not proof of inbox delivery.</p>}
                     </div>
                   )}
 

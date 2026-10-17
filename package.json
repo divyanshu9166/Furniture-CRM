@@ -15,7 +15,7 @@
     "test:billing": "tsx --test lib/billing/*.test.ts",
     "qa:invoice": "tsx scripts/qa-invoice-export.ts",
     "test:walkins": "tsx --test lib/walkins/*.test.ts",
-    "test:email": "tsx --test lib/email-senders.test.ts lib/email-delivery.test.ts lib/email-audience.test.ts lib/smtp-safety.test.ts",
+    "test:email": "tsx --test lib/email-senders.test.ts lib/email-delivery.test.ts lib/email-audience.test.ts lib/email-content.test.ts lib/smtp-safety.test.ts",
     "test:whatsapp-inbox": "tsx --test lib/whatsapp/inbox-state.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",

@@ -26,6 +26,10 @@ function fixture(failure = '') {
       if (row.leaseToken !== token) return
       Object.assign(row, { leaseToken: null, leaseUntil: null, nextAllowedAt: next }, blocked ? { blockedAt: blocked.at, blockReason: blocked.reason } : {})
     },
+    stop: async (id, at, reason) => {
+      const row = rows.get(id)!
+      if (!row.blockedAt) { row.blockedAt = at; row.blockReason = reason }
+    },
     reset: async (id, expected, actor, now) => {
       const row = rows.get(id)
       if (!row?.blockedAt || row.blockedAt.getTime() !== expected.getTime() || (row.leaseUntil && row.leaseUntil > now)) return false
@@ -68,6 +72,36 @@ test('a rejected recipient does not suspend the mailbox; suppression never requi
   await assert.rejects(safety.send(config, async () => { throw new Error('550 5.1.1 Recipient not found') }))
   assert.equal((await safety.status(config)).blocked, false)
   assert.equal(await safety.send(config, async () => 'accepted'), 'accepted')
+})
+
+test('an administrator-reported asynchronous suspension blocks future sends across workers without SMTP', async () => {
+  const f = fixture(); const safety = f.worker(); let sends = 0
+  await assert.rejects(safety.stop(config, false), /Confirm/)
+  assert.equal(f.rows.size, 0)
+  assert.equal(await safety.send(config, async () => { sends++; return 'accepted before provider notice' }), 'accepted before provider notice')
+  await safety.stop(config, true)
+  const before = await safety.status(config)
+  assert.equal(before.blocked, true); assert.match(before.reason!, /outside SMTP/)
+  await safety.stop(config, true)
+  assert.deepEqual(await safety.status(config), before)
+  await assert.rejects(f.worker().send(config, async () => { sends++; return 'unsafe retry' }), SmtpSafetyStop)
+  assert.equal(sends, 1)
+  await safety.reset(config, before.blockedAt!, true, 'Admin')
+  assert.equal((await safety.status(config)).blocked, false)
+})
+
+test('reporting a suspension preserves the in-flight lease and accepted outcome; release cannot clear the stop', async () => {
+  const f = fixture(); const safety = f.worker()
+  const accepted = await safety.send(config, async () => {
+    const lease = f.rows.get(smtpMailboxKey(config))!.leaseToken
+    await f.worker().stop(config, true)
+    assert.equal(f.rows.get(smtpMailboxKey(config))!.leaseToken, lease)
+    await assert.rejects(safety.reset(config, (await safety.status(config)).blockedAt!, true, 'Admin'))
+    return 'already accepted'
+  })
+  assert.equal(accepted, 'already accepted')
+  assert.equal((await safety.status(config)).blocked, true)
+  await assert.rejects(f.worker().send(config, async () => 'unsafe'), SmtpSafetyStop)
 })
 
 test('recovery requires exact stop revision and acknowledgement; no SMTP call is made by reset', async () => {
@@ -114,4 +148,5 @@ test('migration is additive, and guard persistence never stores SMTP passwords o
   assert.doesNotMatch(service, /smtpPass|emailRecipient|emailCampaign|deleteMany/)
   assert.match(service, /where: \{ id, leaseToken: token \}/)
   assert.match(service, /where: \{ id, blockedAt, OR:/)
+  assert.match(service, /stop:[\s\S]*?where: \{ id, blockedAt: null \}, data: \{ blockedAt: at, blockReason: reason \}/)
 })

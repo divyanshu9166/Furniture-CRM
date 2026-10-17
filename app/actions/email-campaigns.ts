@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client'
 import { assertEmailContentReady } from '@/lib/email-content'
 import { campaignAudienceSchema, recipientSelectionSchema } from '@/lib/email-audience'
 import { resolveCampaignAudience } from '@/lib/email-audience-service'
-import { getSmtpSafetyStatus, resetSmtpSafety } from '@/lib/smtp-safety-service'
+import { getSmtpSafetyStatus, resetSmtpSafety, stopSmtpSafety } from '@/lib/smtp-safety-service'
 import { emailFailureMessage } from '@/lib/email-errors'
 import { smtpMailboxKey } from '@/lib/smtp-safety'
 
@@ -437,6 +437,19 @@ export async function resetEmailSendingSafety(input: unknown) {
     if (!config) return { success: false, error: 'SMTP is not configured.' }
     if (smtpMailboxKey(config) !== data.mailboxKey) return { success: false, error: 'Saved SMTP mailbox changed. Refresh sending safety before resetting.' }
     await resetSmtpSafety(config, data.blockedAt, data.acknowledge, session.user.name)
+    revalidatePath('/settings'); revalidatePath('/email-marketing')
+    return { success: true }
+  } catch (error) { return { success: false, error: emailFailureMessage(error) } }
+}
+
+export async function reportEmailProviderSuspension(input: unknown) {
+  try {
+    await requireRole('ADMIN')
+    const data = z.object({ mailboxKey: z.string().regex(/^[a-f0-9]{64}$/), acknowledge: z.literal(true) }).strict().parse(input)
+    const config = await getSmtpConfig()
+    if (!config) return { success: false, error: 'SMTP is not configured.' }
+    if (smtpMailboxKey(config) !== data.mailboxKey) return { success: false, error: 'Saved SMTP mailbox changed. Refresh sending safety before reporting the suspension.' }
+    await stopSmtpSafety(config, data.acknowledge)
     revalidatePath('/settings'); revalidatePath('/email-marketing')
     return { success: true }
   } catch (error) { return { success: false, error: emailFailureMessage(error) } }

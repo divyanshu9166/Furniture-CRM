@@ -11,6 +11,8 @@ import {
 import Modal from '@/components/Modal';
 import SenderSelect from '@/components/email/SenderSelect';
 import CampaignRecipients from '@/components/email/CampaignRecipients';
+import CampaignPlaceholderValues from '@/components/email/CampaignPlaceholderValues';
+import { assertEmailContentReady, isEditablePlaceholderError, shouldClearCampaignContentError } from '@/lib/email-content';
 import { emptyRecipientSelection } from '@/lib/email-audience';
 import {
   getEmailCampaigns, createEmailCampaign, updateEmailCampaign, deleteEmailCampaign,
@@ -143,6 +145,7 @@ export default function EmailMarketingPage() {
   const [recipientReady, setRecipientReady] = useState(true);
   const [campaignError, setCampaignError] = useState('');
   const [deliveryError, setDeliveryError] = useState('');
+  const [deliveryErrorCampaignId, setDeliveryErrorCampaignId] = useState(null);
   const [templateForm, setTemplateForm] = useState({ name: '', subject: '', body: '', category: 'Promotional', variables: '' });
   const [submitting, setSubmitting] = useState(false);
 
@@ -214,6 +217,9 @@ export default function EmailMarketingPage() {
         ? await updateEmailCampaign(editingCampaign.id, payload)
         : await createEmailCampaign(payload);
       if (res.success) {
+        if (editingCampaign && shouldClearCampaignContentError(deliveryError, deliveryErrorCampaignId, editingCampaign.id, campaignForm)) {
+          setDeliveryError(''); setDeliveryErrorCampaignId(null);
+        }
         setShowCreateCampaign(false);
         setEditingCampaign(null);
         setCampaignForm(newCampaignForm());
@@ -254,13 +260,16 @@ export default function EmailMarketingPage() {
     return runAction(async () => {
       const campaign = campaigns.find(row => row.id === id);
       if (!campaign) return;
+      const reportDeliveryError = message => { setDeliveryError(message); setDeliveryErrorCampaignId(id); };
+      try { assertEmailContentReady(campaign.subject, campaign.body, campaign.isABTest ? campaign.variantB : null); }
+      catch (error) { reportDeliveryError(error.message); setSelectedCampaign(null); return; }
       const review = await previewCampaignRecipients(campaign.audience, campaign.audienceFilter);
-      if (!review.success || !review.data.total) { setDeliveryError(review.error || 'No eligible recipients. Edit the campaign and choose subscribed, valid emails.'); return; }
+      if (!review.success || !review.data.total) { reportDeliveryError(review.error || 'No eligible recipients. Edit the campaign and choose subscribed, valid emails.'); return; }
       if (!confirm(`Send this campaign to ${review.data.total} unique eligible email addresses? Subscriptions will be checked again when sending.`)) return;
-      setDeliveryError('');
+      setDeliveryError(''); setDeliveryErrorCampaignId(null);
       const res = await sendEmailCampaign(id);
-      if (!res.success) { setDeliveryError(res.error); setSelectedCampaign(null); await refresh(); return; }
-      if (res.data.failed) setDeliveryError(`${res.data.failed} recipients failed. ${res.data.errors[0] || 'Review campaign recipient statuses.'} Accepted emails will not be replayed.`);
+      if (!res.success) { reportDeliveryError(res.error); setSelectedCampaign(null); await refresh(); return; }
+      if (res.data.failed) reportDeliveryError(`${res.data.failed} recipients failed. ${res.data.errors[0] || 'Review campaign recipient statuses.'} Accepted emails will not be replayed.`);
       alert(`SMTP accepted ${res.data.sent} emails; ${res.data.failed} failed out of ${res.data.recipientCount}. Inbox delivery is not guaranteed by SMTP acceptance.`);
       setSelectedCampaign(null);
       await refresh();
@@ -410,7 +419,15 @@ export default function EmailMarketingPage() {
       {loadError && <div role="alert" className="ui-actions flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-3"><p className="flex-1 text-sm text-red-500">{loadError}</p><button disabled={submitting} onClick={() => runAction(refresh)} className="rounded-xl border border-border px-3 py-2 text-sm">Retry</button></div>}
       {deliveryError && <div role="alert" className="space-y-2 rounded-xl border border-danger/30 bg-danger-light p-4">
         <p className="text-sm text-danger break-words">{deliveryError}</p>
-        <div className="flex flex-wrap gap-3 text-sm"><Link href="/settings" className="text-accent underline">Review email setup</Link><button type="button" onClick={() => setDeliveryError('')} className="text-muted underline">Dismiss</button></div>
+        <div className="flex flex-wrap gap-3 text-sm">
+          {isEditablePlaceholderError(deliveryError)
+            ? <button type="button" disabled={submitting} onClick={() => {
+              const campaign = campaigns.find(row => row.id === deliveryErrorCampaignId);
+              if (campaign) openCampaignEditor(campaign);
+            }} className="text-accent underline">Edit campaign content</button>
+            : <Link href="/settings" className="text-accent underline">Review email setup</Link>}
+          <button type="button" onClick={() => { setDeliveryError(''); setDeliveryErrorCampaignId(null); }} className="text-muted underline">Dismiss</button>
+        </div>
       </div>}
       {/* Email Config Status Banner */}
       {emailConfig && !emailConfig.configured && (
@@ -1099,6 +1116,7 @@ export default function EmailMarketingPage() {
           <Link href="/settings" className="text-xs text-accent underline">Manage aliases in Settings → Email Setup</Link>
 
           {/* Body editor */}
+          <CampaignPlaceholderValues key={`${editingCampaign?.id || 'new'}:${campaignForm.templateId}`} form={campaignForm} onChange={setCampaignForm} disabled={submitting} />
           <div>
             <label className="block text-xs font-medium text-muted mb-1.5">Email Body (HTML) *</label>
             <textarea rows={8} placeholder="Write your email HTML content..." value={campaignForm.body}

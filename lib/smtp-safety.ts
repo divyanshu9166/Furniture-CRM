@@ -11,9 +11,10 @@ export interface SafetyRepository {
   read(id: string): Promise<SafetyState | null>
   claim(id: string, token: string, now: Date, until: Date): Promise<boolean>
   release(id: string, token: string, next: Date, blocked?: { at: Date; reason: string }): Promise<unknown>
+  stop(id: string, at: Date, reason: string): Promise<unknown>
   reset(id: string, blockedAt: Date, actor: string, now: Date): Promise<boolean>
 }
-export const SMTP_SAFETY_MESSAGE = 'CRM email sending is stopped for this SMTP mailbox and all its aliases after an account/security rejection. Secure the mailbox and resolve the provider suspension first, then ask an administrator to review Email Setup → Sending safety. SMTP login success does not clear this stop.'
+export const SMTP_SAFETY_MESSAGE = 'CRM email sending is stopped for this SMTP mailbox and all its aliases after an account/security rejection or an administrator-reported provider suspension. Secure the mailbox and resolve the provider suspension first, then ask an administrator to review Email Setup → Sending safety. SMTP login success does not clear this stop.'
 
 export class SmtpSafetyStop extends Error {
   constructor() { super(SMTP_SAFETY_MESSAGE); this.name = 'SmtpSafetyStop' }
@@ -30,6 +31,13 @@ export function createSmtpSafety(repo: SafetyRepository, options: { now?: () => 
     async status(config: Mailbox) {
       const row = await repo.read(smtpMailboxKey(config))
       return { blocked: !!row?.blockedAt, blockedAt: row?.blockedAt?.toISOString() ?? null, reason: row?.blockReason ?? null }
+    },
+    async stop(config: Mailbox, acknowledge: boolean) {
+      if (acknowledge !== true) throw new Error('Confirm the provider suspension before stopping CRM sending.')
+      const id = smtpMailboxKey(config)
+      await repo.ensure(id)
+      // Do not clear the in-flight lease or replace an existing stop revision.
+      await repo.stop(id, new Date(now()), 'Administrator reported a provider suspension received outside SMTP. Resolve it with the provider before resetting the CRM stop.')
     },
     async reset(config: Mailbox, blockedAt: string, acknowledge: boolean, actor: string) {
       if (acknowledge !== true || !actor.trim() || !blockedAt || !Number.isFinite(Date.parse(blockedAt))) throw new Error('Review the provider suspension and explicitly confirm recovery before resetting the CRM stop.')

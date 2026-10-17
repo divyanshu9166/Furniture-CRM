@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { getEmailSendingSafety, resetEmailSendingSafety } from '@/app/actions/email-campaigns';
+import { getEmailSendingSafety, resetEmailSendingSafety, reportEmailProviderSuspension } from '@/app/actions/email-campaigns';
 
 export default function SendingSafetyPanel({ reloadKey }) {
   const [state, setState] = useState(null);
@@ -26,6 +26,19 @@ export default function SendingSafetyPanel({ reloadKey }) {
     <p className="text-sm text-muted">SMTP connection testing checks login, not permission to send or inbox delivery. Provider suspension is separate from this CRM safety stop. Aliases share the main mailbox gate.</p>
     {error && <p role="alert" className="text-sm text-danger break-words">{error}</p>}
     {state && <p role="status" className={`text-sm break-words ${state.blocked ? 'text-danger' : 'text-muted'}`}>{state.mailbox}: {state.blocked ? 'CRM sending stopped. ' + state.reason : 'No recorded CRM safety stop. This does not verify the provider mailbox is active or that messages reach inboxes.'}</p>}
+    {state && !state.blocked && state.canReset && <>
+      <p className="text-sm text-muted">If Hostinger sent a suspension notice after SMTP accepted a message, report it here to stop further CRM sends for this saved mailbox and every alias. This does not cancel a message already in flight or stop other apps.</p>
+      <button type="button" disabled={busy} className="rounded-lg border border-danger px-3 py-2 text-sm text-danger disabled:opacity-50" onClick={async () => {
+        if (!window.confirm(`Hostinger/provider has suspended ${state.mailbox}? Stop further CRM emails for this saved mailbox and all aliases until an administrator confirms provider recovery.`)) return;
+        setBusy(true); setError('');
+        try {
+          const result = await reportEmailProviderSuspension({ mailboxKey: state.mailboxKey, acknowledge: true });
+          if (!result.success) { setError(result.error); return; }
+          await load();
+        } catch { setError('Could not record the provider suspension. Do not send or retry; refresh safety status.'); }
+        finally { setBusy(false); }
+      }}>Provider suspended sending — stop CRM emails</button>
+    </>}
     {state?.blocked && <>
       <p className="text-sm text-muted">First review provider Email Logs, unknown devices/app passwords, sending limits and recipient consent. Resolve the suspension with the provider. Resetting below does not unsuspend Hostinger, replay failed messages, or resume paused campaigns.</p>
       {state.canReset && <>

@@ -53,6 +53,7 @@ function mailHarness(options: { fail?: (index: number) => Error | null; suppress
     read: async id => rows.get(id) ?? null,
     claim: async (id, token, now, until) => { const row = rows.get(id)!; if (row.blockedAt || row.nextAllowedAt > now || (row.leaseUntil && row.leaseUntil > now)) return false; row.leaseToken = token; row.leaseUntil = until; return true },
     release: async (id, token, next, blocked) => { const row = rows.get(id)!; if (row.leaseToken !== token) return; Object.assign(row, { leaseToken: null, leaseUntil: null, nextAllowedAt: next }, blocked ? { blockedAt: blocked.at, blockReason: blocked.reason } : {}) },
+    stop: async (id, at, reason) => { const row = rows.get(id)!; if (!row.blockedAt) Object.assign(row, { blockedAt: at, blockReason: reason }) },
     reset: async () => false,
   }
   const safety = createSmtpSafety(repository, { now: () => clock, sleep: async ms => { clock += ms } })
@@ -84,6 +85,34 @@ test('actual transactional default and test-email selection use correct identity
   assert.equal(messages[0].from.address, 'support@example.com')
   assert.equal(messages[1].from.address, 'sales@example.com')
   assert.equal(messages[1].replyTo.address, 'sales@example.com')
+})
+
+test('one diagnostic click sends one plain-text message with a traceable receipt, not a campaign or retry loop', async () => {
+  const { email, messages } = mailHarness()
+  assert.equal((await email.testSmtpConnection(config)).success, true)
+  assert.equal(messages.length, 0)
+  const result = await email.sendTestEmail(config, 'owner@example.com', 'sales@example.com')
+  assert.equal(result.success, true); assert.equal(messages.length, 1)
+  assert.equal(result.messageId, 'test-message')
+  assert.ok(Number.isFinite(Date.parse(result.acceptedAt)))
+  assert.equal(messages[0].to, 'owner@example.com')
+  assert.match(messages[0].text, /administrator requested this single SMTP/i)
+  assert.equal(messages[0].html, undefined); assert.equal(messages[0].attachments, undefined)
+  assert.doesNotMatch(messages[0].text, /https?:\/\//)
+  assert.equal(messages[0].from.address, 'sales@example.com')
+  assert.equal(messages[0].replyTo.address, 'sales@example.com')
+})
+
+test('a manually recorded provider suspension stops tests, bulk and transactional email for every alias', async () => {
+  const { email, messages, safety } = mailHarness()
+  await safety.stop(config, true)
+  assert.equal((await email.sendTestEmail(config, 'owner@example.com', 'sales@example.com')).success, false)
+  assert.equal((await email.sendEmail({ to: 'client@example.com', subject: 'Order', html: 'Order', fromEmail: 'support@example.com' })).success, false)
+  const bulk = await email.sendBulkEmails([{ to: 'client@example.com', subject: 'A', html: 'Body', recipientId: 1 }], { config })
+  assert.equal(bulk.sent, 0); assert.equal(bulk.failed, 1)
+  assert.equal(messages.length, 0)
+  await email.testSmtpConnection(config)
+  assert.equal((await safety.status(config)).blocked, true)
 })
 
 test('actual bulk/A-B path pins one identity for every recipient and retains tracking', async () => {
@@ -349,7 +378,7 @@ test('actual alias settings reject manager access, duplicate aliases and removal
 function campaignActionsHarness(safetyBlocked = false) {
   let role = 'MANAGER'
   const writes: any[] = [], tests: any[] = []
-  const safetyResets: unknown[][] = []
+  const safetyResets: unknown[][] = [], safetyStops: unknown[][] = []
   const original: any = { id: 1, status: 'DRAFT', fromEmail: 'sales@example.com', fromName: 'Pinned Sales', totalRecipients: 0, isAutomated: false, triggerType: 'new_lead', name: 'Original', subject: 'Hello', body: 'Body', audience: 'all', isABTest: false, abSplitPercent: 50 }
   const prisma: any = { storeSettings: { findUnique: async () => ({ ...config }) },
     emailCampaign: { create: async ({ data }: any) => { writes.push(data); return { id: 2 } }, findFirst: async () => null, findUnique: async () => ({ ...original }), update: async ({ data }: any) => { writes.push(data); return { id: 1 } }, delete: async () => { writes.push('delete') } },
@@ -360,6 +389,7 @@ function campaignActionsHarness(safetyBlocked = false) {
     '@/lib/smtp-safety-service': {
       getSmtpSafetyStatus: async () => ({ blocked: safetyBlocked, blockedAt: safetyBlocked ? '2026-10-17T09:00:00.000Z' : null, reason: safetyBlocked ? 'Provider account rejection' : null }),
       resetSmtpSafety: async (...args: unknown[]) => { safetyResets.push(args) },
+      stopSmtpSafety: async (...args: unknown[]) => { safetyStops.push(args) },
     },
     '@/lib/db': { prisma },
     '@/lib/email-events': { recordEmailEvent: async () => ({ success: true }) },
@@ -367,7 +397,7 @@ function campaignActionsHarness(safetyBlocked = false) {
     '@/lib/auth-helpers': { requireRole: async (...roles: string[]) => { if (!roles.includes(role)) throw new Error('Forbidden'); return { user: { name: 'Signed-in Admin', role } } } },
     '@/lib/email': { getSmtpConfig: async () => ({ ...config }),
       testSmtpConnection: async (value: unknown) => { tests.push(value); return { success: true } },
-      sendTestEmail: async (value: unknown, to: string, from: string) => { tests.push({ config: value, to, from }); return { success: true } } },
+      sendTestEmail: async (value: unknown, to: string, from: string) => { tests.push({ config: value, to, from }); return { success: true, messageId: '<test-message@example.com>', acceptedAt: '2026-10-17T09:00:00.000Z' } } },
     '@/lib/email-campaign-runner': { deliverEmailCampaign: async () => ({ success: true }) },
     '@/lib/email-tracking': { getPublicAppUrl: () => 'https://example.com', isEmailTrackingConfigured: () => true },
     '@/lib/email-senders': senders,
@@ -377,7 +407,7 @@ function campaignActionsHarness(safetyBlocked = false) {
       return { recipients: selected.emails.map(row => ({ ...row, contactId: null })) }
     } },
   })
-  return { actions, writes, tests, safetyResets, original, prisma, setRole: (value: string) => { role = value } }
+  return { actions, writes, tests, safetyResets, safetyStops, original, prisma, setRole: (value: string) => { role = value } }
 }
 
 test('sending safety status is read-only, resets are admin-only and scoped to the saved mailbox', async () => {
@@ -396,6 +426,30 @@ test('sending safety status is read-only, resets are admin-only and scoped to th
   assert.equal(f.safetyResets[0][3], 'Signed-in Admin')
   assert.equal(f.writes.length, 0); assert.equal(f.tests.length, 0)
   f.setRole('STAFF'); assert.equal((await f.actions.getEmailSendingSafety()).success, false)
+})
+
+test('reporting provider suspension is admin-only, acknowledged and scoped to the saved mailbox without sending or editing campaign data', async () => {
+  const f = campaignActionsHarness()
+  const status = await f.actions.getEmailSendingSafety()
+  const request = { mailboxKey: status.data.mailboxKey, acknowledge: true }
+  assert.equal((await f.actions.reportEmailProviderSuspension(request)).success, false)
+  f.setRole('ADMIN')
+  assert.equal((await f.actions.reportEmailProviderSuspension({ ...request, acknowledge: false })).success, false)
+  assert.equal((await f.actions.reportEmailProviderSuspension({ ...request, mailboxKey: '0'.repeat(64) })).success, false)
+  assert.equal(f.safetyStops.length, 0)
+  assert.equal((await f.actions.reportEmailProviderSuspension(request)).success, true)
+  assert.equal(f.safetyStops.length, 1); assert.equal(f.safetyStops[0][1], true)
+  assert.equal(f.tests.length, 0); assert.equal(f.writes.length, 0)
+})
+
+test('settings warns before a real test and supports external suspension reports without treating SMTP acceptance as delivery', () => {
+  const page = fs.readFileSync('app/(dashboard)/settings/page.js', 'utf8')
+  assert.match(page, /window.confirm\('Send one real diagnostic email/)
+  assert.match(page, /Delivery and provider account status remain unverified/)
+  assert.match(page, /smtpSendResult.messageId/); assert.match(page, /smtpSendResult.acceptedAt/)
+  const panel = fs.readFileSync('components/email/SendingSafetyPanel.jsx', 'utf8')
+  assert.match(panel, /state && !state.blocked && state.canReset/)
+  assert.match(panel, /reportEmailProviderSuspension\(\{ mailboxKey: state.mailboxKey, acknowledge: true \}\)/)
 })
 
 test('SMTP settings reject mismatched encryption without writing or modifying existing data', async () => {
@@ -519,6 +573,8 @@ test('actual test-email action reuses saved secret only server-side; managers ca
   const result = await actions.sendSmtpTestEmail({ ...config, smtpPass: '' }, 'owner@example.com', 'sales@example.com')
   assert.equal(result.success, true)
   assert.equal(result.fromEmail, 'sales@example.com')
+  assert.equal(result.messageId, '<test-message@example.com>')
+  assert.equal(result.acceptedAt, '2026-10-17T09:00:00.000Z')
   assert.equal(tests[0].config.smtpPass, 'test-only-password')
   assert.equal(tests[0].config.smtpUser, 'info@example.com')
   assert.equal(JSON.stringify(result).includes('test-only-password'), false)
@@ -636,6 +692,19 @@ test('unfilled starter variables cannot be sent or scheduled; editable drafts re
   assert.equal((await actions.createEmailCampaign(payload)).success, true)
   assert.equal((await actions.createEmailCampaign({ ...payload, scheduledAt: new Date(Date.now() + 3600000).toISOString() })).success, false)
   assert.throws(() => emailContent.assertEmailContentReady('Hi', 'Body', { subject: '{{offerCode}}', body: 'B' }), /offerCode/)
+})
+
+test('applying campaign values persists corrected subject/body and active A/B content through actual save action', async () => {
+  const { actions, writes } = campaignActionsHarness()
+  const payload = emailContent.applyEditableEmailValues({ name: 'Collection', audience: 'all', subject: 'New {{collectionName}}', body: '<p>{{collectionName}} for {{customerName}}</p>', isABTest: true, variantBSubject: '{{collectionName}} launch', variantBBody: '<p>{{collectionName}}</p>' }, { collectionName: 'Office & School' })
+  assert.equal((await actions.updateEmailCampaign(1, payload)).success, true)
+  assert.equal(writes[0].subject, 'New Office & School')
+  assert.equal(writes[0].body, '<p>Office &amp; School for {{customerName}}</p>')
+  assert.equal(writes[0].variantB.subject, 'Office & School launch')
+  assert.equal(writes[0].variantB.body, '<p>Office &amp; School</p>')
+  const runner = campaignHarness({ subject: writes[0].subject, body: writes[0].body, isABTest: true, variantB: writes[0].variantB })
+  assert.equal((await runner.runner.deliverEmailCampaign(1)).success, true)
+  assert.doesNotMatch(JSON.stringify(runner.deliveries), /collectionName/)
 })
 
 test('automation drafts retain their trigger/delay, while duplicate active triggers are blocked', async () => {
