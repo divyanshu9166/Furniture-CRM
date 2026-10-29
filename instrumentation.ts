@@ -4,7 +4,8 @@
  * Next.js instrumentation hook — runs once when the server starts.
  * https://nextjs.org/docs/app/building-your-application/optimizing/instrumentation
  *
- * We use it to boot the BullMQ automation worker so it's registered before
+ * We use it to boot the BullMQ workers (automations, the AI agent, follow-up
+ * reminders and WhatsApp broadcast sending) so they're registered before
  * the first request arrives. The `register` function is called once per
  * server process (not once per request), making it the correct place to
  * start long-lived background workers.
@@ -22,6 +23,9 @@ export async function register() {
 
     const { startFollowUpReminderWorker } = await import('./lib/queues/follow-up-reminders-worker')
     startFollowUpReminderWorker()
+
+    const { startBroadcastSendWorker } = await import('./lib/queues/broadcast-send-worker')
+    startBroadcastSendWorker()
 
     const { startEmailCampaignScheduler } = await import('./lib/email-campaign-runner')
     startEmailCampaignScheduler()

@@ -17,11 +17,13 @@ import {
   Key,
   Webhook,
   BookOpen,
+  ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SavedSecretField, type SecretSource } from './saved-secret-field';
 
 const MASKED_TOKEN = '••••••••••••••••';
 const DRAFT_STORAGE_KEY = 'wa-config-draft';
@@ -38,6 +40,7 @@ type StoredConfig = {
   created_at?: string | null;
   updated_at?: string | null;
   has_access_token: boolean;
+  app_secret_source?: SecretSource;
 };
 
 type ConfigResponse = {
@@ -719,6 +722,31 @@ export function WhatsAppConfig() {
               </Button>
             )}
           </div>
+
+          {/* Webhook security — saved on its own, no need to re-enter the access token */}
+          <Section
+            icon={ShieldCheck}
+            title="Webhook Security"
+            description="Meta App Secret for verifying webhook signatures"
+          >
+            <SavedSecretField
+              label="App Secret"
+              placeholder="Paste your Meta App Secret"
+              hint="Meta App Dashboard → App settings → Basic → App secret. Proves incoming webhook calls really come from Meta."
+              endpoint="/api/whatsapp/config"
+              field="app_secret"
+              source={config?.app_secret_source ?? null}
+              status={{
+                settings: 'Saved here. Incoming webhooks are signature-checked with it.',
+                env: 'Using META_APP_SECRET from the server .env. Saving one here replaces it.',
+                none: 'Not set — webhook signatures are not being verified. Add it to secure your webhook.',
+              }}
+              disabledReason={config ? null : 'Save the WhatsApp configuration above first.'}
+              onSourceChange={(source) =>
+                setConfig((current) => (current ? { ...current, app_secret_source: source } : current))
+              }
+            />
+          </Section>
         </div>
 
         {/* RIGHT — Setup Instructions Sidebar */}

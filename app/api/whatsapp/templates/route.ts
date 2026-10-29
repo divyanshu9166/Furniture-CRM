@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
+import { parseStoredButtons } from '@/lib/whatsapp/template-submission'
 
 const CATEGORY_VALUES = new Set(['Marketing', 'Utility', 'Authentication'])
 const STATUS_VALUES = new Set(['Draft', 'Pending', 'Approved', 'Rejected'])
-const HEADER_TYPES = new Set(['text', 'image', 'video', 'document'])
+const HEADER_TYPES = new Set(['text', 'image', 'video', 'document', 'location'])
 
 function serializeTemplate(template: {
     id: string
@@ -18,6 +19,8 @@ function serializeTemplate(template: {
     footer_text: string | null
     buttons: unknown
     status: string
+    status_reason: string | null
+    meta_template_id: string | null
     created_at: Date
 }) {
     return {
@@ -32,6 +35,8 @@ function serializeTemplate(template: {
         footer_text: template.footer_text,
         buttons: template.buttons,
         status: template.status,
+        status_reason: template.status_reason,
+        meta_template_id: template.meta_template_id,
         created_at: template.created_at.toISOString(),
     }
 }
@@ -130,7 +135,9 @@ export async function POST(request: Request) {
     }
 
     if (body?.buttons !== undefined) {
-        templateData.buttons = body.buttons as any
+        // Keep only the button shapes Meta accepts, so a later submit can send them.
+        const buttons = parseStoredButtons(body.buttons)
+        templateData.buttons = buttons.length ? (buttons as any) : null
     }
 
     const created = await prisma.waMessageTemplate.create({

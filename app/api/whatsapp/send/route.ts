@@ -4,8 +4,19 @@ import { getSession } from '@/lib/auth-helpers'
 import {
   sendTextMessage,
   sendTemplateMessage,
+  uploadMedia,
+  sendMediaMessage,
 } from '@/lib/whatsapp/meta-api'
+import {
+  checkOutboundMedia,
+  mediaMessageText,
+  mediaPreviewText,
+  MEDIA_CAPTION_LIMIT,
+  type OutboundMediaKind,
+} from '@/lib/whatsapp/outbound-media'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
+import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
+import { parseSendExtras, sendExtrasComponentParams, type TemplateSendExtras } from '@/lib/whatsapp/template-send-extras'
 import {
   normalizePhoneForMetaIndia,
   isValidE164,
@@ -36,16 +47,69 @@ export async function POST(request: Request) {
       return rateLimitResponse(limit)
     }
 
-    const body = await request.json()
-    const {
-      conversation_id,
-      message_type,
-      content_text,
-      media_url,
-      template_name,
-      template_params,
-      reply_to_message_id,
-    } = body
+    // Files (photos, videos, audio, documents) arrive as multipart/form-data with a `file`;
+    // text and template sends stay JSON.
+    let conversation_id: string | undefined
+    let message_type: string | undefined
+    let content_text: string | undefined
+    let media_url: string | undefined
+    let template_name: string | undefined
+    let template_params: string[] | undefined
+    let template_language: string | undefined
+    let header_media: unknown
+    let template_extras: unknown
+    let reply_to_message_id: string | undefined
+    let upload: { file: Blob; kind: OutboundMediaKind; mimeType: string; filename: string } | null = null
+
+    if ((request.headers.get('content-type') ?? '').includes('multipart/form-data')) {
+      let form: FormData
+      try {
+        form = await request.formData()
+      } catch {
+        return NextResponse.json({ error: 'Invalid file upload' }, { status: 400 })
+      }
+      const file = form.get('file')
+      if (!(file instanceof Blob)) {
+        return NextResponse.json({ error: 'file is required' }, { status: 400 })
+      }
+      const name = file instanceof File ? file.name : String(form.get('filename') ?? 'file')
+      const check = checkOutboundMedia({ name, type: file.type, size: file.size })
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: 400 })
+      }
+      const caption = String(form.get('caption') ?? '').trim()
+      if (check.kind === 'audio' && caption) {
+        return NextResponse.json(
+          { error: 'WhatsApp sends audio without a caption. Remove the text or send it as a separate message.' },
+          { status: 400 }
+        )
+      }
+      if (caption.length > MEDIA_CAPTION_LIMIT) {
+        return NextResponse.json(
+          { error: `Caption can be at most ${MEDIA_CAPTION_LIMIT} characters` },
+          { status: 400 }
+        )
+      }
+      upload = { file, kind: check.kind, mimeType: check.mimeType, filename: check.filename }
+      conversation_id = String(form.get('conversation_id') ?? '') || undefined
+      message_type = check.kind
+      content_text = caption || undefined
+      reply_to_message_id = String(form.get('reply_to_message_id') ?? '') || undefined
+    } else {
+      const body = await request.json()
+      ;({
+        conversation_id,
+        message_type,
+        content_text,
+        media_url,
+        template_name,
+        template_params,
+        template_language,
+        header_media,
+        template_extras,
+        reply_to_message_id,
+      } = body)
+    }
 
     if (!conversation_id || !message_type) {
       return NextResponse.json(
@@ -66,6 +130,29 @@ export async function POST(request: Request) {
         { error: 'template_name is required for template messages' },
         { status: 400 }
       )
+    }
+
+    // Photo/video/PDF for a template with a media header (uploaded first
+    // through /api/whatsapp/media/upload).
+    const headerMedia = message_type === 'template' ? parseHeaderMedia(header_media) : null
+    if (message_type === 'template' && header_media && !headerMedia) {
+      return NextResponse.json({ error: 'header_media is invalid' }, { status: 400 })
+    }
+
+    // Header {{1}}, location pin, link suffixes and offer code, checked
+    // against the stored template so the button positions are Meta's.
+    let templateExtras: TemplateSendExtras | null = null
+    let templateShape: { header_type: string | null; header_content: string | null; buttons: unknown } | null = null
+    if (message_type === 'template' && template_name) {
+      templateShape = await prisma.waMessageTemplate.findFirst({
+        where: { user_id: userId, name: template_name, ...(template_language ? { language: template_language } : {}) },
+        select: { header_type: true, header_content: true, buttons: true },
+      })
+      if (templateShape) {
+        const parsed = parseSendExtras(templateShape, template_extras)
+        if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
+        templateExtras = parsed.extras
+      }
     }
 
     // Fetch conversation and contact
@@ -156,17 +243,56 @@ export async function POST(request: Request) {
       }
     }
 
+    // Upload once, before the phone-variant retries: the media ID isn't tied
+    // to a recipient. The stored URL goes through our media proxy, which
+    // resolves uploaded IDs the same way as inbound ones.
+    let mediaId: string | null = null
+    if (upload) {
+      try {
+        ;({ mediaId } = await uploadMedia({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          file: upload.file,
+          filename: upload.filename,
+          mimeType: upload.mimeType,
+        }))
+      } catch (err) {
+        const rawMessage = err instanceof Error ? err.message : 'Unknown Meta API error'
+        console.error('Meta media upload failed:', rawMessage)
+        return NextResponse.json({ error: humanReadableMetaError(rawMessage) }, { status: 502 })
+      }
+      media_url = `/api/whatsapp/media/${mediaId}`
+    }
+
     let waMessageId = ''
     let workingPhone = sanitizedPhone
 
     const attempt = async (phone: string): Promise<string> => {
+      if (upload && mediaId) {
+        const result = await sendMediaMessage({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          to: phone,
+          kind: upload.kind,
+          mediaId,
+          caption: content_text,
+          filename: upload.filename,
+          contextMessageId,
+        })
+        return result.messageId
+      }
       if (message_type === 'template') {
         const result = await sendTemplateMessage({
           phoneNumberId: config.phone_number_id,
           accessToken,
           to: phone,
-          templateName: template_name,
-          params: template_params || [],
+          templateName: template_name ?? '',
+          language: template_language || undefined,
+          componentParams: {
+            body: template_params || [],
+            ...(headerMedia ? { headerMedia } : {}),
+            ...(templateShape ? sendExtrasComponentParams(templateShape, templateExtras) : {}),
+          },
           contextMessageId,
         })
         return result.messageId
@@ -175,7 +301,7 @@ export async function POST(request: Request) {
         phoneNumberId: config.phone_number_id,
         accessToken,
         to: phone,
-        text: content_text,
+        text: content_text ?? '',
         contextMessageId,
       })
       return result.messageId
@@ -243,8 +369,11 @@ export async function POST(request: Request) {
         sender_type: 'agent',
         sender_id: userId,
         content_type: message_type,
-        content_text: content_text || null,
-        media_url: media_url || null,
+        content_text: upload
+          ? mediaMessageText(upload.kind, upload.filename, content_text)
+          : content_text || null,
+        // Only photo headers are previewed in the inbox bubble.
+        media_url: headerMedia?.type === 'image' ? `/api/whatsapp/media/${headerMedia.id}` : media_url || null,
         template_name: template_name || null,
         message_id: waMessageId,
         status: 'sent',
@@ -256,7 +385,9 @@ export async function POST(request: Request) {
     const updatedConversation = await prisma.waConversation.update({
       where: { id: conversation_id },
       data: {
-        last_message_text: content_text || `[${message_type}]`,
+        last_message_text: upload
+          ? mediaPreviewText(upload.kind, upload.filename, content_text)
+          : content_text || `[${message_type}]`,
         last_message_at: new Date(),
       },
     })
@@ -280,6 +411,8 @@ export async function POST(request: Request) {
       success: true,
       message_id: messageRecord.id,
       whatsapp_message_id: waMessageId,
+      media_url: messageRecord.media_url,
+      content_text: messageRecord.content_text,
     })
   } catch (error) {
     console.error('Error in WhatsApp send POST:', error)

@@ -49,7 +49,7 @@ describe("verifyMetaWebhookSignature", () => {
     expect(verifyMetaWebhookSignature("{}", "sha256=tooshort")).toBe(false);
   });
 
-  describe("fail-closed when secret is missing", () => {
+  describe("fail-open when no secret is configured", () => {
     const originalSecret = process.env.META_APP_SECRET;
     beforeEach(() => {
       delete process.env.META_APP_SECRET;
@@ -58,12 +58,29 @@ describe("verifyMetaWebhookSignature", () => {
       process.env.META_APP_SECRET = originalSecret;
     });
 
-    it("rejects even a correctly-formed signature when no secret is configured", () => {
+    it("accepts requests (with a warning) so events aren't dropped during initial setup", () => {
       const body = "{}";
-      // Use the original secret to produce the header so we can verify
-      // the rejection is solely due to missing config.
       const header = signedHeader(body, originalSecret!);
-      expect(verifyMetaWebhookSignature(body, header)).toBe(false);
+      expect(verifyMetaWebhookSignature(body, header)).toBe(true);
     });
+  });
+});
+
+describe("verifyMetaWebhookSignature with secrets saved in Settings", () => {
+  it("uses the provided secrets instead of META_APP_SECRET", () => {
+    const body = '{"entry":[]}';
+    expect(verifyMetaWebhookSignature(body, signedHeader(body, "settings-secret"), ["settings-secret"])).toBe(true);
+    // The env secret no longer applies once a Settings secret is provided.
+    expect(verifyMetaWebhookSignature(body, signedHeader(body), ["settings-secret"])).toBe(false);
+  });
+
+  it("accepts a signature from any of several saved secrets", () => {
+    const body = "{}";
+    expect(verifyMetaWebhookSignature(body, signedHeader(body, "second"), ["first", "second"])).toBe(true);
+    expect(verifyMetaWebhookSignature(body, signedHeader(body, "third"), ["first", "second"])).toBe(false);
+  });
+
+  it("still rejects a wrong-length header when secrets are provided", () => {
+    expect(verifyMetaWebhookSignature("{}", "sha256=tooshort", ["settings-secret"])).toBe(false);
   });
 });

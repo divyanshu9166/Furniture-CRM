@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { normalizeTemplateStatus, templateStatusReason } from '@/lib/whatsapp/template-status'
 
 /**
  * Sync message templates from Meta → local message_templates table.
@@ -31,8 +32,10 @@ import { decrypt } from '@/lib/whatsapp/encryption'
  *     manually.
  */
 
-const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+const META_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION ?? 'v24.0'
+// WHATSAPP_GRAPH_API_BASE is only for pointing local tests at a mock Graph API.
+const META_API_BASE =
+  process.env.WHATSAPP_GRAPH_API_BASE ?? `https://graph.facebook.com/${META_API_VERSION}`
 
 interface MetaTemplateComponent {
   type: string
@@ -48,6 +51,7 @@ interface MetaTemplate {
   status: 'APPROVED' | 'PENDING' | 'REJECTED' | 'PAUSED'
   category: string
   components?: MetaTemplateComponent[]
+  rejected_reason?: string
 }
 
 /**
@@ -61,28 +65,6 @@ function normalizeCategory(
   if (upper === 'UTILITY') return 'Utility'
   if (upper === 'AUTHENTICATION') return 'Authentication'
   return 'Marketing'
-}
-
-/**
- * Meta's template status is UPPERCASE; our DB uses TitleCase.
- */
-function normalizeStatus(
-  meta: string,
-): 'Draft' | 'Pending' | 'Approved' | 'Rejected' {
-  switch (meta.toUpperCase()) {
-    case 'APPROVED':
-      return 'Approved'
-    case 'PENDING':
-    case 'IN_APPEAL':
-    case 'PENDING_DELETION':
-      return 'Pending'
-    case 'REJECTED':
-    case 'DISABLED':
-    case 'PAUSED':
-      return 'Rejected'
-    default:
-      return 'Draft'
-  }
 }
 
 export async function POST() {
@@ -128,7 +110,7 @@ export async function POST() {
     const metaTemplates: MetaTemplate[] = []
     let nextUrl:
       | string
-      | null = `${META_API_BASE}/${config.waba_id}/message_templates?limit=100&fields=id,name,language,status,category,components`
+      | null = `${META_API_BASE}/${config.waba_id}/message_templates?limit=100&fields=id,name,language,status,category,components,rejected_reason`
     const PAGE_CAP = 20
     let pageCount = 0
 
@@ -179,7 +161,9 @@ export async function POST() {
         body_text: body?.text ?? '',
         footer_text: footer?.text ?? null,
         buttons: buttons?.buttons as any ?? null,
-        status: normalizeStatus(t.status),
+        status: normalizeTemplateStatus(t.status),
+        status_reason: templateStatusReason(t.status, t.rejected_reason),
+        meta_template_id: t.id,
       }
 
       try {
@@ -214,12 +198,13 @@ export async function POST() {
     const truncated = pageCount >= PAGE_CAP && nextUrl !== null
     let markedStale = 0
     // A local row is not evidence that Meta has approved it. After a complete
-    // sync, downgrade any previously-approved row not returned by Meta so it
-    // can never be selected for an automatic reminder or broadcast by mistake.
+    // sync, downgrade any previously-approved or submitted row not returned by
+    // Meta so it can never be selected for an automatic reminder or broadcast
+    // by mistake. Clearing the Meta ID lets the team submit it again.
     if (!truncated) {
       const metaKeys = new Set(metaTemplates.map((template) => `${template.name}\u0000${template.language}`))
       const localApproved = await prisma.waMessageTemplate.findMany({
-        where: { user_id: userId, status: 'Approved' },
+        where: { user_id: userId, OR: [{ status: 'Approved' }, { meta_template_id: { not: null } }] },
         select: { id: true, name: true, language: true },
       })
       const staleIds = localApproved
@@ -228,7 +213,7 @@ export async function POST() {
       if (staleIds.length) {
         const result = await prisma.waMessageTemplate.updateMany({
           where: { id: { in: staleIds } },
-          data: { status: 'Draft' },
+          data: { status: 'Draft', meta_template_id: null },
         })
         markedStale = result.count
       }

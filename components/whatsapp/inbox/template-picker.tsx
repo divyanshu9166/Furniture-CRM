@@ -20,12 +20,34 @@ import {
   ChevronRight,
   LayoutTemplate,
   Loader2,
+  Paperclip,
 } from "lucide-react";
+import { useTemplateHeaderUpload, type HeaderMediaUpload } from "@/lib/whatsapp/use-template-header-upload";
+import {
+  hasSendNeeds,
+  sendExtrasProblem,
+  templateSendNeeds,
+  type TemplateSendExtras,
+} from "@/lib/whatsapp/template-send-extras";
+import { TemplateSendExtrasFields } from "@/components/whatsapp/template-send-extras-fields";
 
 interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (template: MessageTemplate, params: string[]) => Promise<boolean>;
+  onSelect: (
+    template: MessageTemplate,
+    params: string[],
+    headerMedia?: HeaderMediaUpload,
+    extras?: TemplateSendExtras,
+  ) => Promise<boolean>;
+}
+
+const HEADER_LABEL = { image: "photo", video: "video", document: "PDF" } as const;
+const HEADER_ACCEPT = { image: "image/jpeg,image/png", video: "video/mp4", document: "application/pdf,.pdf" } as const;
+
+function mediaHeaderType(template: MessageTemplate | null) {
+  const type = template?.header_type;
+  return type === "image" || type === "video" || type === "document" ? type : null;
 }
 
 // Meta numbers template placeholders from 1 ({{1}}, {{2}}, …) and the
@@ -61,6 +83,8 @@ export function TemplatePicker({
   const [sending, setSending] = useState(false);
   const sendInFlight = useRef(false);
   const openGeneration = useRef(0);
+  const header = useTemplateHeaderUpload();
+  const [extras, setExtras] = useState<TemplateSendExtras>({});
   useEffect(() => { openGeneration.current += 1; }, [open]);
 
   useEffect(() => {
@@ -83,7 +107,8 @@ export function TemplatePicker({
       } else {
         const body = await res.json();
         if (cancelled) return;
-        setTemplates((body.templates as MessageTemplate[]) ?? []);
+        const all = ((body.data ?? body.templates) as MessageTemplate[] | undefined) ?? [];
+        setTemplates(all.filter((t) => t.status === "Approved"));
         setLoadError('');
       }
       } catch { if (!cancelled) setLoadError('Unable to load templates. Please retry.'); }
@@ -99,17 +124,24 @@ export function TemplatePicker({
     if (!next) {
       setSelected(null);
       setParams([]);
+      setExtras({});
+      header.reset();
     }
     onOpenChange(next);
   }
 
-  async function sendTemplate(template: MessageTemplate, values: string[]) {
+  async function sendTemplate(
+    template: MessageTemplate,
+    values: string[],
+    headerMedia?: HeaderMediaUpload,
+    sendExtras?: TemplateSendExtras,
+  ) {
     if (sendInFlight.current) return;
     sendInFlight.current = true;
     const generation = openGeneration.current;
     setSending(true);
     try {
-      const accepted = await onSelect(template, values);
+      const accepted = await onSelect(template, values, headerMedia, sendExtras);
       if (generation !== openGeneration.current) return;
       if (accepted) handleOpenChange(false);
       else setLoadError('Template was not sent. Review the error before retrying.');
@@ -120,23 +152,30 @@ export function TemplatePicker({
   function pickTemplate(template: MessageTemplate) {
     if (sending || templatePickerProblem(template)) return;
     const vars = extractVariables(template.body_text);
-    if (vars.length === 0) {
+    if (vars.length === 0 && !mediaHeaderType(template) && !hasSendNeeds(templateSendNeeds(template))) {
       void sendTemplate(template, []);
       return;
     }
+    header.reset();
+    setExtras({});
     setSelected(template);
     setParams(new Array(vars.length).fill(""));
   }
 
   function confirm() {
     if (!selected) return;
-    void sendTemplate(selected, params);
+    void sendTemplate(selected, params, header.media ?? undefined, extras);
   }
 
   const variables = selected ? extractVariables(selected.body_text) : [];
+  const headerType = mediaHeaderType(selected);
+  const sendNeeds = selected ? templateSendNeeds(selected) : null;
+  const extrasProblem = sendNeeds ? sendExtrasProblem(sendNeeds, extras) : null;
   const canConfirm =
     !!selected &&
-    variables.every((_, i) => (params[i] ?? "").trim().length > 0);
+    variables.every((_, i) => (params[i] ?? "").trim().length > 0) &&
+    (!headerType || (!!header.media && !header.uploading)) &&
+    !extrasProblem;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -148,7 +187,7 @@ export function TemplatePicker({
           </DialogTitle>
           <DialogDescription className="text-muted">
             {selected
-              ? "Fill in the placeholders to render this template. Meta requires every variable to be set."
+              ? "Fill in everything this template needs. Meta rejects a template with a missing variable or header."
               : "Pick an approved WhatsApp template to send to this contact."}
           </DialogDescription>
         </DialogHeader>
@@ -205,8 +244,42 @@ export function TemplatePicker({
           </div>
         ) : (
           <div className="space-y-3">
+            {headerType && (
+              <div className="space-y-1">
+                <Label className="text-xs text-foreground">{`Header ${HEADER_LABEL[headerType]}`}</Label>
+                <label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-border bg-surface-light px-3 py-2 text-xs text-muted hover:border-accent">
+                  {header.uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  <span className="truncate">
+                    {header.uploading
+                      ? "Uploading…"
+                      : header.media
+                        ? header.media.filename
+                        : `Choose the ${HEADER_LABEL[headerType]} for this template`}
+                  </span>
+                  <input
+                    type="file"
+                    accept={HEADER_ACCEPT[headerType]}
+                    className="hidden"
+                    disabled={header.uploading || sending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void header.upload(headerType, file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+                {header.error && <p className="text-xs text-warning">{header.error}</p>}
+              </div>
+            )}
+            {sendNeeds && hasSendNeeds(sendNeeds) && (
+              <TemplateSendExtrasFields needs={sendNeeds} extras={extras} onChange={setExtras} disabled={sending} />
+            )}
             <div className="rounded-md border border-border bg-surface p-3">
               <p className="mb-1 text-xs text-muted">Preview</p>
+              {header.media?.previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={header.media.previewUrl} alt="Header" className="mb-2 max-h-40 rounded-md object-cover" />
+              )}
               <p className="whitespace-pre-wrap text-sm text-foreground">
                 {renderBodyPreview(selected.body_text, params)}
               </p>
@@ -242,6 +315,8 @@ export function TemplatePicker({
                 onClick={() => {
                   setSelected(null);
                   setParams([]);
+                  setExtras({});
+                  header.reset();
                 }}
                 className="border-border text-foreground hover:bg-surface-light"
               >

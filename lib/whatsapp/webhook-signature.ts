@@ -12,28 +12,30 @@ import crypto from 'node:crypto'
  *   https://developers.facebook.com/docs/graph-api/webhooks/getting-started#verify-payloads
  *
  * Contract:
- *   `META_APP_SECRET` is **required**. If it's missing we fail closed —
- *   every request is rejected until the operator configures the
- *   secret. A previous version fell open with a warning log, which is
- *   unsafe for a public template: anyone who forgets the env var would
- *   be running a fully spoofable webhook.
+ *   An App Secret (WhatsApp Settings or `META_APP_SECRET`) should be
+ *   configured. If none is, verification is skipped with a loud warning
+ *   so events aren't silently dropped during initial setup.
  */
 export function verifyMetaWebhookSignature(
   rawBody: string,
   signatureHeader: string | null,
+  /** App Secrets to accept (from WhatsApp Settings, see saved-secrets.ts).
+   *  Omitted → META_APP_SECRET. */
+  secrets?: string[],
 ): boolean {
-  const secret = process.env.META_APP_SECRET
+  const envSecret = process.env.META_APP_SECRET
+  const candidates = secrets ?? (envSecret ? [envSecret] : [])
 
   // If META_APP_SECRET is not set, skip signature verification but log
   // a loud warning. This prevents webhook events from being silently
   // dropped when the env var is missing (common during initial setup).
   // In production you MUST set META_APP_SECRET — without it anyone can
   // POST fake status updates to your webhook URL.
-  if (!secret) {
+  if (candidates.length === 0) {
     console.warn(
-      '[webhook] META_APP_SECRET is not set — skipping signature ' +
-        'verification. Set META_APP_SECRET (Meta → App Settings → ' +
-        'Basic → App Secret) to secure your webhook.',
+      '[webhook] No Meta App Secret configured — skipping signature ' +
+        'verification. Save it in WhatsApp Marketing → Settings → Webhook ' +
+        'Security (or set META_APP_SECRET) to secure your webhook.',
     )
     return true // fail-open so events aren't silently dropped
   }
@@ -41,13 +43,14 @@ export function verifyMetaWebhookSignature(
   if (!signatureHeader) return false
   if (!signatureHeader.startsWith('sha256=')) return false
 
-  const expected =
-    'sha256=' +
-    crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
-
   const a = Buffer.from(signatureHeader)
-  const b = Buffer.from(expected)
-  // Bail if lengths differ — timingSafeEqual throws otherwise.
-  if (a.length !== b.length) return false
-  return crypto.timingSafeEqual(a, b)
+  return candidates.some((secret) => {
+    const expected =
+      'sha256=' +
+      crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+    const b = Buffer.from(expected)
+    // Bail if lengths differ — timingSafeEqual throws otherwise.
+    if (a.length !== b.length) return false
+    return crypto.timingSafeEqual(a, b)
+  })
 }

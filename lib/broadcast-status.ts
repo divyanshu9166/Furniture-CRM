@@ -42,12 +42,21 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
     label: "Failed",
     classes: "bg-red-500/10 text-red-400 border-red-500/20",
   },
+  cancelled: {
+    label: "Cancelled",
+    classes: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  },
 };
 
 export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {
   pending: {
     label: "Pending",
     classes: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  },
+  sending: {
+    label: "Sending",
+    classes: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+    pulse: true,
   },
   sent: {
     label: "Sent",
@@ -68,6 +77,10 @@ export const recipientStatusConfig: Record<RecipientStatus, StatusDisplay> = {
   failed: {
     label: "Failed",
     classes: "bg-red-500/10 text-red-400 border-red-500/20",
+  },
+  skipped: {
+    label: "Skipped",
+    classes: "bg-amber-500/10 text-amber-400 border-amber-500/20",
   },
 };
 

@@ -2038,6 +2038,8 @@ model WaContact {
   email      String?
   company    String?
   avatar_url String?
+  /// Set when the customer opts out of marketing (STOP reply or Meta error 131050); broadcasts skip them.
+  opted_out_at DateTime?
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
@@ -2163,6 +2165,8 @@ model WaMessage {
   template_name       String?
   message_id          String?
   status              String   @default("sent")
+  /// Meta's reason when an outgoing message fails to deliver.
+  error_message       String?
   created_at          DateTime @default(now())
   reply_to_message_id String?
 
@@ -2184,6 +2188,8 @@ model WaWhatsappConfig {
   waba_id         String?
   access_token    String
   verify_token    String?
+  /// Encrypted Meta App Secret saved from WhatsApp Marketing Settings; falls back to META_APP_SECRET.
+  app_secret      String?
   status          String   @default("disconnected")
   connected_at    DateTime?
   created_at      DateTime @default(now())
@@ -2205,6 +2211,10 @@ model WaMessageTemplate {
   footer_text    String?
   buttons        Json?
   status         String   @default("Draft")
+  /// Meta's reason for a rejected, paused or disabled template.
+  status_reason  String?
+  /// Meta's ID for the template, set when it is submitted or synced.
+  meta_template_id String?
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 
@@ -2280,8 +2290,15 @@ model WaBroadcast {
   template_language String  @default("en_US")
   template_variables Json?
   audience_filter  Json?
+  /// Photo/video/PDF for a media-header template: { type, id, filename? }.
+  header_media     Json?
+  /// Same for every recipient: header {{1}}, location pin, link endings and
+  /// offer code, stored as the send request's header/button parameters.
+  template_extras  Json?
   scheduled_at     DateTime?
   status           String   @default("draft")
+  /// Why the whole broadcast stopped or failed (e.g. WhatsApp not connected).
+  error_message    String?
   total_recipients Int      @default(0)
   sent_count       Int      @default(0)
   delivered_count  Int      @default(0)

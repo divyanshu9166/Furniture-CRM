@@ -16,6 +16,8 @@ export interface Contact {
   email?: string;
   company?: string;
   avatar_url?: string;
+  /** Set when the customer opted out of marketing; broadcasts skip them. */
+  opted_out_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -90,6 +92,8 @@ export interface Message {
   template_name?: string;
   message_id?: string;
   status: MessageStatus;
+  /** Meta's reason when an outgoing message failed to deliver. */
+  error_message?: string | null;
   created_at: string;
   reply_to_message_id?: string;
 }
@@ -123,12 +127,16 @@ export interface MessageTemplate {
   name: string;
   category: 'Marketing' | 'Utility' | 'Authentication';
   language?: string;
-  header_type?: 'text' | 'image' | 'video' | 'document';
+  header_type?: 'text' | 'image' | 'video' | 'document' | 'location';
   header_content?: string;
   body_text: string;
   footer_text?: string;
   buttons?: Record<string, unknown>[];
   status?: 'Draft' | 'Pending' | 'Approved' | 'Rejected';
+  /** Meta's reason for a rejected, paused or disabled template. */
+  status_reason?: string | null;
+  /** Meta's template ID once submitted or synced. */
+  meta_template_id?: string | null;
   created_at: string;
 }
 
@@ -175,8 +183,12 @@ export interface Deal {
   assignee?: Profile;
 }
 
-export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
-export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
+export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed' | 'cancelled';
+/**
+ * `sending`: claimed by the broadcast worker, request to Meta in progress.
+ * `skipped`: not sent because the contact opted out or the broadcast was cancelled.
+ */
+export type RecipientStatus = 'pending' | 'sending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
 
 export interface Broadcast {
   id: string;
@@ -186,8 +198,10 @@ export interface Broadcast {
   template_language: string;
   template_variables?: Record<string, unknown>;
   audience_filter?: Record<string, unknown>;
-  scheduled_at?: string;
+  scheduled_at?: string | null;
   status: BroadcastStatus;
+  /** Why the whole broadcast stopped or failed. */
+  error_message?: string | null;
   total_recipients: number;
   sent_count: number;
   delivered_count: number;

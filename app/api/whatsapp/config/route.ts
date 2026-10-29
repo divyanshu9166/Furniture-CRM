@@ -3,6 +3,12 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/session'
 import { verifyPhoneNumber } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import {
+  ENCRYPTION_KEY_MISSING,
+  envMetaAppSecret,
+  parseSecretInput,
+  secretSource,
+} from '@/lib/whatsapp/saved-secrets'
 
 /**
  * GET /api/whatsapp/config
@@ -51,6 +57,8 @@ export async function GET() {
       created_at: config.created_at.toISOString(),
       updated_at: config.updated_at.toISOString(),
       has_access_token: Boolean(config.access_token),
+      // Where webhook signatures are checked from; the secret itself is never returned.
+      app_secret_source: secretSource(config.app_secret, envMetaAppSecret()),
     }
 
     // Try to decrypt the stored token with the current ENCRYPTION_KEY.
@@ -195,6 +203,59 @@ export async function POST(request: Request) {
   }
 }
 
+/**
+ * PATCH /api/whatsapp/config
+ *
+ * Saves ({ app_secret: "..." }) or removes ({ app_secret: null }) the Meta
+ * App Secret used to verify webhook signatures, without re-entering the
+ * access token. Stored encrypted; when removed, META_APP_SECRET is used.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const session = await getSession()
+    if (!session?.id) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const userId = String(session.id)
+
+    const body = (await request.json().catch(() => null)) as { app_secret?: unknown } | null
+    if (!body || !('app_secret' in body)) {
+      return NextResponse.json({ error: 'app_secret is required' }, { status: 400 })
+    }
+    const parsed = parseSecretInput(body.app_secret)
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 })
+    }
+
+    const config = await prisma.waWhatsappConfig.findUnique({ where: { user_id: userId }, select: { id: true } })
+    if (!config) {
+      return NextResponse.json(
+        { error: 'Save the WhatsApp configuration first, then add the App Secret.' },
+        { status: 404 },
+      )
+    }
+
+    let appSecret: string | null = null
+    if (parsed.value) {
+      try {
+        appSecret = encrypt(parsed.value)
+      } catch {
+        return NextResponse.json({ error: ENCRYPTION_KEY_MISSING }, { status: 500 })
+      }
+    }
+
+    await prisma.waWhatsappConfig.update({ where: { id: config.id }, data: { app_secret: appSecret } })
+
+    return NextResponse.json({
+      success: true,
+      source: secretSource(appSecret, envMetaAppSecret()),
+    })
+  } catch (error) {
+    console.error('Error in WhatsApp config PATCH:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
 
 /**
  * DELETE /api/whatsapp/config

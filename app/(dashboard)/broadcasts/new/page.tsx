@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { MessageTemplate } from '@/types';
@@ -9,7 +9,10 @@ import { Step2SelectAudience } from '@/components/broadcasts/step2-select-audien
 import { Step3Personalize } from '@/components/broadcasts/step3-personalize';
 import { Step4ScheduleSend } from '@/components/broadcasts/step4-schedule-send';
 import { useBroadcastSending } from '@/lib/use-broadcast-sending';
-import { Check } from 'lucide-react';
+import { useTemplateHeaderUpload } from '@/lib/whatsapp/use-template-header-upload';
+import type { TemplateSendExtras } from '@/lib/whatsapp/template-send-extras';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, Check } from 'lucide-react';
 
 const steps = [
   { label: 'Template', key: 'template' },
@@ -20,7 +23,7 @@ const steps = [
 
 export default function NewBroadcastPage() {
   const router = useRouter();
-  const { createAndSendBroadcast, isProcessing, progress } = useBroadcastSending();
+  const { createAndSendBroadcast, isProcessing } = useBroadcastSending();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [template, setTemplate] = useState<MessageTemplate | null>(null);
@@ -40,8 +43,18 @@ export default function NewBroadcastPage() {
     Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
   >({});
   const [name, setName] = useState('');
+  const headerUpload = useTemplateHeaderUpload();
+  const resetHeaderUpload = headerUpload.reset;
+  const [extras, setExtras] = useState<TemplateSendExtras>({});
 
-  async function handleSend() {
+  // A header file and send values belong to the template they were chosen for.
+  useEffect(() => {
+    resetHeaderUpload();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExtras({});
+  }, [template?.id, resetHeaderUpload]);
+
+  async function handleSend(scheduledAt?: Date) {
     if (!template) return;
 
     try {
@@ -57,7 +70,13 @@ export default function NewBroadcastPage() {
           excludeTagIds: audience.excludeTagIds,
         },
         variables,
+        headerMedia: headerUpload.media
+          ? { type: headerUpload.media.type, id: headerUpload.media.id, filename: headerUpload.media.filename }
+          : undefined,
+        extras,
+        scheduledAt,
       });
+      toast.success(scheduledAt ? 'Broadcast scheduled' : 'Broadcast is sending');
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
       // Previously swallowed with console.error, the wizard would just no-op.
@@ -100,7 +119,7 @@ export default function NewBroadcastPage() {
       }
 
       toast.success('Draft saved');
-      router.push('/broadcasts');
+      router.push('/whatsapp-marketing?tab=broadcasts');
     } catch (err: any) {
       toast.error(`Failed to save draft: ${err.message}`);
     }
@@ -109,11 +128,23 @@ export default function NewBroadcastPage() {
   return (
     <div className="wa-light mx-auto max-w-3xl space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">New Broadcast</h1>
-        <p className="mt-1 text-sm text-muted">
-          Create and send a broadcast message to your contacts.
-        </p>
+      <div className="flex items-center gap-4">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => router.push('/whatsapp-marketing?tab=broadcasts')}
+          aria-label="Back to broadcasts"
+          title="Back to broadcasts"
+          className="shrink-0 border-border"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">New Broadcast</h1>
+          <p className="mt-1 text-sm text-muted">
+            Create and send a broadcast message to your contacts.
+          </p>
+        </div>
       </div>
 
       {/* Step Indicator */}
@@ -170,7 +201,7 @@ export default function NewBroadcastPage() {
               selectedTemplate={template}
               onSelect={setTemplate}
               onNext={() => setCurrentStep(1)}
-              onBack={() => router.push('/broadcasts')}
+              onBack={() => router.push('/whatsapp-marketing?tab=broadcasts')}
             />
           )}
           {currentStep === 1 && (
@@ -186,6 +217,9 @@ export default function NewBroadcastPage() {
               template={template}
               variables={variables}
               onUpdate={setVariables}
+              headerUpload={headerUpload}
+              extras={extras}
+              onExtrasChange={setExtras}
               onNext={() => setCurrentStep(3)}
               onBack={() => setCurrentStep(1)}
             />
@@ -200,7 +234,7 @@ export default function NewBroadcastPage() {
               onSaveDraft={handleSaveDraft}
               onBack={() => setCurrentStep(2)}
               isProcessing={isProcessing}
-              progress={progress}
+              hasHeaderMedia={!!headerUpload.media}
             />
           )}
         </div>

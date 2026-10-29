@@ -25,6 +25,9 @@ import {
 } from "lucide-react";
 import { format, isToday, isYesterday, isValid } from "date-fns";
 import { customerSession, mergeInboxMessages, templatePickerProblem } from "@/lib/whatsapp/inbox-state";
+import type { HeaderMediaUpload } from "@/lib/whatsapp/use-template-header-upload";
+import type { TemplateSendExtras } from "@/lib/whatsapp/template-send-extras";
+import { checkOutboundMedia, mediaMessageText } from "@/lib/whatsapp/outbound-media";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -415,6 +418,72 @@ export function MessageThread({
     [conversation, onNewMessage, onUpdateMessage]
   );
 
+  const handleSendMedia = useCallback(
+    async (file: File, caption: string, replyToId?: string) => {
+      if (!conversation || customerSession(messagesRef.current).expired) return false;
+      const check = checkOutboundMedia(file);
+      if (!check.ok) {
+        toast.error(check.error);
+        return false;
+      }
+
+      // The bubble previews the local file until the server's proxy URL
+      // replaces it; the blob URL is released once that happens.
+      const tempId = `temp-${crypto.randomUUID()}`;
+      const localUrl = URL.createObjectURL(file);
+      onNewMessage({
+        id: tempId,
+        conversation_id: conversation.id,
+        sender_type: "agent",
+        content_type: check.kind,
+        content_text: mediaMessageText(check.kind, check.filename, caption) ?? undefined,
+        media_url: localUrl,
+        status: "sending",
+        created_at: new Date().toISOString(),
+        reply_to_message_id: replyToId,
+      });
+
+      const form = new FormData();
+      form.append("conversation_id", conversation.id);
+      form.append("file", file, check.filename);
+      if (caption) form.append("caption", caption);
+      if (replyToId) form.append("reply_to_message_id", replyToId);
+
+      try {
+        const res = await fetch("/api/whatsapp/send", { method: "POST", body: form });
+        const payload = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          const reason =
+            res.status === 413
+              ? "file is too large for the server"
+              : payload?.error || `HTTP ${res.status}`;
+          console.error("Failed to send file:", reason);
+          toast.error(`Failed to send: ${reason}`);
+          onUpdateMessage(tempId, { status: "failed" });
+          return false;
+        }
+
+        onUpdateMessage(tempId, {
+          ...(payload?.message_id ? { id: payload.message_id as string } : {}),
+          message_id: payload?.whatsapp_message_id as string | undefined,
+          media_url: (payload?.media_url as string | undefined) ?? localUrl,
+          status: "sent",
+        });
+        if (payload?.media_url) setTimeout(() => URL.revokeObjectURL(localUrl), 60_000);
+        if (activeIdRef.current === conversation.id) setReplyTo(null);
+        return true;
+      } catch (err) {
+        console.error("Failed to send file:", err);
+        const reason = err instanceof Error ? err.message : "network error";
+        toast.error(`Failed to send: ${reason}`);
+        onUpdateMessage(tempId, { status: "failed" });
+        return false;
+      }
+    },
+    [conversation, onNewMessage, onUpdateMessage]
+  );
+
   const handleStatusChange = useCallback(
     async (status: ConversationStatus) => {
       if (!conversation || headerInFlight.current) return;
@@ -467,7 +536,7 @@ export function MessageThread({
   }, []);
 
   const handleSendTemplate = useCallback(
-    async (template: MessageTemplate, params: string[]) => {
+    async (template: MessageTemplate, params: string[], headerMedia?: HeaderMediaUpload, extras?: TemplateSendExtras) => {
       if (!conversation) return false;
       const problem = templatePickerProblem(template);
       if (problem) { toast.error(problem); return false; }
@@ -482,6 +551,8 @@ export function MessageThread({
         content_type: "template",
         content_text: renderedBody,
         template_name: template.name,
+        // Same proxy URL the send API stores for photo headers.
+        media_url: headerMedia?.type === "image" ? `/api/whatsapp/media/${headerMedia.id}` : undefined,
         status: "sending",
         created_at: new Date().toISOString(),
       };
@@ -495,7 +566,12 @@ export function MessageThread({
             conversation_id: conversation.id,
             message_type: "template",
             template_name: template.name,
+            template_language: template.language,
             template_params: params,
+            ...(headerMedia
+              ? { header_media: { type: headerMedia.type, id: headerMedia.id, filename: headerMedia.filename } }
+              : {}),
+            ...(extras ? { template_extras: extras } : {}),
             content_text: renderedBody,
           }),
         });
@@ -926,6 +1002,7 @@ export function MessageThread({
         sessionExpired={sessionInfo.expired}
         loading={loading}
         onSend={handleSend}
+        onSendMedia={handleSendMedia}
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}

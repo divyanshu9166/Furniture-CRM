@@ -17,6 +17,7 @@
     "test:walkins": "tsx --test lib/walkins/*.test.ts",
     "test:email": "tsx --test lib/email-senders.test.ts lib/email-delivery.test.ts lib/email-audience.test.ts lib/email-content.test.ts lib/smtp-safety.test.ts",
     "test:whatsapp-inbox": "tsx --test lib/whatsapp/inbox-state.test.ts",
+    "test:whatsapp": "vitest run && tsx --test lib/whatsapp/inbox-state.test.ts",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate deploy",
@@ -81,6 +82,7 @@
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
   }
 }
