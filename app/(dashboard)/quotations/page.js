@@ -1139,36 +1139,36 @@ export default function QuotationsPage() {
     }
   }
 
-  // Sends the PDF itself (no text-only message) as a WhatsApp document from the
-  // store's connected WhatsApp number. WhatsApp only allows this within 24 hours of
-  // the customer's last message, so on failure the manual options are offered.
+  // Opens the phone's own share sheet with just the PDF, so it goes out from the
+  // WhatsApp installed on this phone (no Meta API, no text). Where the app/browser
+  // cannot share files, the PDF is offered for download to attach by hand.
   const handleShareQuotationWhatsApp = async quotation => {
     if (exportingQuotation) return
-    if (!quotation?.phone) {
-      notify('Customer phone number is missing', { variant: 'danger' })
-      return
-    }
-    if (!buildWhatsAppUrl(quotation.phone, 'x')) {
-      notify('Customer phone number is invalid', { variant: 'danger' })
-      return
-    }
-    if (!window.confirm(`Send quotation ${quotation.id} as a PDF to ${quotation.customer} on WhatsApp (${quotation.phone})?`)) return
-
     setExportingQuotation(true)
-    let pdf = null
     try {
       notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
-      pdf = await buildQuotationPdf(quotation)
-      await sendQuotationPdf(pdf, quotation.dbId, 'whatsapp')
-      notify(`Quotation PDF sent to ${quotation.customer} on WhatsApp`, { variant: 'success' })
-    } catch (err) {
-      console.error('Quotation WhatsApp send failed:', err)
-      notify(err?.message || 'The quotation could not be sent on WhatsApp.', { variant: 'danger' })
-      if (pdf) {
-        const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
-        setSelectedQuotation(null)
-        setPreparedShare({ pdf, file, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings), error: err?.message || '' })
+      const pdf = await buildQuotationPdf(quotation)
+      const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
+      const canShareFile = typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (!navigator.canShare || navigator.canShare({ files: [file] }))
+
+      let note = ''
+      if (canShareFile) {
+        try {
+          await navigator.share({ files: [file], title: `Quotation ${quotation.id}` })
+          return
+        } catch (err) {
+          if (err?.name === 'AbortError') return
+          // Usually the tap expired while the PDF was being built; a fresh tap on the sheet works.
+          note = 'Tap "Share PDF" to choose WhatsApp.'
+        }
+      } else {
+        note = 'This app cannot share files straight to WhatsApp. Download the PDF, then attach it in the WhatsApp chat (tap the paperclip).'
       }
+      setSelectedQuotation(null)
+      setPreparedShare({ pdf, file, id: quotation.id, phone: quotation.phone, message: '', note })
+    } catch (err) {
+      console.error('Quotation share failed:', err)
+      notify(err?.message || 'The quotation PDF could not be created. Please retry.', { variant: 'danger' })
     } finally {
       setExportingQuotation(false)
     }
@@ -1466,19 +1466,19 @@ export default function QuotationsPage() {
         </div>
       </div>
 
-      <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Send the PDF manually" size="sm">
+      <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Share quotation PDF" size="sm">
         {preparedShare && (() => {
           const whatsappUrl = buildWhatsAppUrl(preparedShare.phone, preparedShare.message)
           const canShareFile = typeof navigator !== 'undefined' && navigator.canShare?.({ files: [preparedShare.file] })
           return (
             <div className="space-y-3">
-              {preparedShare.error && <p className="text-sm text-red-700">{preparedShare.error}</p>}
-              <p className="text-sm text-muted">The PDF for {preparedShare.id} is ready. You can still send it yourself:</p>
+              <p className="text-sm text-muted">The PDF for {preparedShare.id} is ready.</p>
+              {preparedShare.note && <p className="text-sm text-foreground">{preparedShare.note}</p>}
               {canShareFile && (
                 <button
                   onClick={async () => {
                     try {
-                      await navigator.share({ files: [preparedShare.file], title: `Quotation ${preparedShare.id}`, text: preparedShare.message })
+                      await navigator.share({ files: [preparedShare.file], title: `Quotation ${preparedShare.id}` })
                       setPreparedShare(null)
                     } catch (err) {
                       if (err?.name !== 'AbortError') notify('File sharing is not available here. Download the PDF, then attach it in WhatsApp.', { variant: 'danger' })
@@ -1493,7 +1493,7 @@ export default function QuotationsPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`block text-center px-4 py-3 rounded-xl font-semibold ${canShareFile ? 'border border-border text-accent' : 'bg-accent text-white'}`}>
-                Open WhatsApp chat (attach the downloaded PDF)
+                Open customer's WhatsApp chat
               </a>
               <button
                 onClick={async () => {

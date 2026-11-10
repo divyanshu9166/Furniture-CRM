@@ -161,10 +161,10 @@ export function quotationDownloadLink(url: string, filename: string) {
 }
 
 /**
- * Sends the generated PDF to the customer from the server: as a WhatsApp
- * document or as an email attachment. Throws with a readable reason.
+ * Emails the generated PDF to the customer from the server as an attachment.
+ * Throws with a readable reason.
  */
-export async function sendQuotationPdf(file: QuotationPdf, quotationId: number, channel: 'whatsapp' | 'email') {
+export async function sendQuotationPdf(file: QuotationPdf, quotationId: number, channel: 'email') {
   const form = new FormData();
   form.set('channel', channel);
   form.set('quotationId', String(quotationId));
