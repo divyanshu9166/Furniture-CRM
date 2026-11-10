@@ -29,6 +29,7 @@ import { useAlertToast } from '@/components/AlertToastProvider'
 import { createQuotation, getQuotationStats, getQuotations, updateQuotation, updateQuotationStatus } from '@/app/actions/quotations'
 import { getProducts } from '@/app/actions/products'
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings'
+import { createQuotationPdf, downloadQuotationPdf, isEmbeddedWebView, quotationDownloadLink, uploadQuotationPdf } from '@/lib/quotations/quotation-export'
 
 const statusColors = {
   DRAFT: 'bg-gray-500/10 text-gray-700 border-gray-500/20',
@@ -99,12 +100,15 @@ function saveBankDetailsToStorage(details) {
   } catch { }
 }
 
+// Local calendar date. toISOString() is UTC, which is still yesterday in India before 5:30 am.
+const todayLocalDate = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]
+
 const createInitialForm = () => ({
   customer: '',
   phone: '',
   email: '',
   dispatchAddress: '',
-  date: new Date().toISOString().split('T')[0],
+  date: todayLocalDate(),
   validUntil: '',
   projectName: '',
   deliveryMode: 'CARGO BY ROAD',
@@ -160,7 +164,7 @@ function buildFormFromQuotation(quotation) {
     phone: quotation?.phone || '',
     email: quotation?.email || '',
     dispatchAddress: quotation?.dispatchAddress || '',
-    date: quotation?.date || new Date().toISOString().split('T')[0],
+    date: quotation?.date || todayLocalDate(),
     validUntil: quotation?.validUntil || '',
     projectName: quotation?.projectName || '',
     deliveryMode: quotation?.deliveryMode || 'CARGO BY ROAD',
@@ -682,6 +686,8 @@ export default function QuotationsPage() {
   const { notify } = useAlertToast()
   const [quotationToDraft, setQuotationToDraft] = useState(null)
   const [deletingQuotation, setDeletingQuotation] = useState(false)
+  const [exportingQuotation, setExportingQuotation] = useState(false)
+  const [preparedShare, setPreparedShare] = useState(null)
   const [quotations, setQuotations] = useState([])
   const [products, setProducts] = useState([])
   const [storeSettings, setStoreSettings] = useState(null)
@@ -1093,7 +1099,10 @@ export default function QuotationsPage() {
 
   const handlePrint = quotation => {
     const printWindow = window.open('', '_blank', 'width=900,height=1200')
-    if (!printWindow) return
+    if (!printWindow) {
+      notify('Printing is blocked in this app. Use Download PDF instead.', { variant: 'danger' })
+      return
+    }
 
     printWindow.document.write(buildPrintHtml(quotation, storeSettings))
     printWindow.document.close()
@@ -1104,106 +1113,68 @@ export default function QuotationsPage() {
     }, 300)
   }
 
-  // Loads html2pdf.js once into the main document (safe for all browsers including iOS)
-  const loadHtml2Pdf = () => new Promise((resolve, reject) => {
-    if (window.html2pdf) { resolve(window.html2pdf); return; }
-    const existing = document.querySelector('script[data-html2pdf]');
-    if (existing) {
-      // Already loading — wait for it
-      existing.addEventListener('load', () => resolve(window.html2pdf));
-      existing.addEventListener('error', reject);
-      return;
+  const buildQuotationPdf = quotation => createQuotationPdf(buildPrintHtml(quotation, storeSettings), quotation.id)
+
+  // Browsers save the PDF directly. App wrappers (WebView) cannot save blob:
+  // files, so there the PDF goes to the server and is saved from a normal link.
+  const savePdfToDevice = async pdf => {
+    if (!isEmbeddedWebView()) {
+      downloadQuotationPdf(pdf)
+      return
     }
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-    script.setAttribute('data-html2pdf', '1');
-    script.onload = () => resolve(window.html2pdf);
-    script.onerror = () => reject(new Error('Failed to load html2pdf.js'));
-    document.head.appendChild(script);
-  });
+    const hostedUrl = await uploadQuotationPdf(pdf)
+    const link = document.createElement('a')
+    link.href = quotationDownloadLink(hostedUrl, pdf.filename)
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
 
-  const handleDownload = async (quotation) => {
+  const handleDownload = async quotation => {
+    if (exportingQuotation) return
+    setExportingQuotation(true)
     try {
-      const html2pdf = await loadHtml2Pdf();
-
-      // Render into a hidden div in the MAIN document (not an iframe)
-      // This avoids all iframe sandboxing and cross-origin restrictions on mobile
-      const container = document.createElement('div');
-      container.style.cssText = 'position:fixed;left:-9999px;top:0;width:900px;background:#fff;z-index:-1;';
-      container.innerHTML = buildPrintHtml(quotation, storeSettings);
-      document.body.appendChild(container);
-
-      const element = container.querySelector('.sheet') || container;
-      const opt = {
-        margin: 0,
-        filename: `Quotation_${quotation.id}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      };
-
-      await html2pdf().set(opt).from(element).save();
-      document.body.removeChild(container);
+      notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
+      const pdf = await buildQuotationPdf(quotation)
+      await savePdfToDevice(pdf)
+      notify(isEmbeddedWebView() ? 'Download started. Check your Downloads or notifications.' : 'Quotation PDF downloaded', { variant: 'success' })
     } catch (err) {
-      console.error('PDF download failed:', err);
-      // Graceful fallback: open print dialog (works on all mobile browsers)
-      handlePrint(quotation);
+      console.error('Quotation PDF download failed:', err)
+      notify(err?.message || 'The quotation PDF could not be created. Please retry.', { variant: 'danger' })
+    } finally {
+      setExportingQuotation(false)
     }
   }
 
-
-
-  const handleShareQuotationWhatsApp = (quotation) => {
+  const handleShareQuotationWhatsApp = async quotation => {
+    if (exportingQuotation) return
     if (!quotation?.phone) {
       notify('Customer phone number is missing', { variant: 'danger' })
       return
     }
-
-    const message = buildQuotationShareMessage(quotation, storeSettings) + '\n\n*(Quotation PDF is attached)*'
-
-    // For mobile devices, try to use native Web Share API to attach the file directly
-    if (navigator.share && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-      notify('Preparing PDF for sharing...', { variant: 'info' })
-      const element = document.createElement('div')
-      element.innerHTML = buildPrintHtml(quotation, storeSettings)
-
-      const opt = {
-        margin: 0,
-        filename: 'Quotation_${quotation.id}.pdf',
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-      }
-
-      html2pdf().set(opt).from(element).outputPdf('blob').then(async (pdfBlob) => {
-        const file = new File([pdfBlob], 'Quotation_${quotation.id}.pdf', { type: 'application/pdf' })
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          try {
-            await navigator.share({
-              files: [file],
-              title: 'Quotation ${quotation.id}',
-              text: buildQuotationShareMessage(quotation, storeSettings)
-            })
-            return
-          } catch (err) {
-            console.warn('Share failed', err)
-          }
-        }
-        // Fallback if sharing fails
-        fallbackShare(quotation, message)
-      })
-    } else {
-      fallbackShare(quotation, message)
+    if (!buildWhatsAppUrl(quotation.phone, 'x')) {
+      notify('Customer phone number is invalid', { variant: 'danger' })
+      return
     }
-  }
 
-  const fallbackShare = (quotation, message) => {
-    handleDownload(quotation)
-    notify('PDF downloaded! Please attach it to the WhatsApp chat.', { variant: 'success' })
-    const url = buildWhatsAppUrl(quotation.phone, message)
-    setTimeout(() => {
-      window.open(url, '_blank', 'noopener,noreferrer')
-    }, 600)
+    setExportingQuotation(true)
+    try {
+      notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
+      const pdf = await buildQuotationPdf(quotation)
+      const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
+      // A link to the PDF is what lets WhatsApp "attach" it from an app wrapper
+      // or desktop. If the upload fails, file sharing and download still work.
+      let hostedUrl = ''
+      try { hostedUrl = await uploadQuotationPdf(pdf) } catch (err) { console.warn('Quotation PDF upload failed:', err) }
+      setSelectedQuotation(null)
+      setPreparedShare({ pdf, file, hostedUrl, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings) })
+    } catch (err) {
+      console.error('Quotation PDF share failed:', err)
+      notify(err?.message || 'The quotation PDF could not be created. Please retry.', { variant: 'danger' })
+    } finally {
+      setExportingQuotation(false)
+    }
   }
 
   const handleShareQuotationEmail = (quotation) => {
@@ -1486,6 +1457,48 @@ export default function QuotationsPage() {
           )}
         </div>
       </div>
+
+      <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Quotation PDF ready" size="sm">
+        {preparedShare && (() => {
+          const textWithLink = preparedShare.hostedUrl ? `${preparedShare.message}\n\nQuotation PDF: ${preparedShare.hostedUrl}` : preparedShare.message
+          const whatsappUrl = buildWhatsAppUrl(preparedShare.phone, textWithLink)
+          const canShareFile = typeof navigator !== 'undefined' && navigator.canShare?.({ files: [preparedShare.file] })
+          return (
+            <div className="space-y-3">
+              <p className="text-sm text-muted">The PDF for {preparedShare.id} is ready. Choose how to send it.</p>
+              {canShareFile && (
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.share({ files: [preparedShare.file], title: `Quotation ${preparedShare.id}`, text: preparedShare.message })
+                      setPreparedShare(null)
+                    } catch (err) {
+                      if (err?.name !== 'AbortError') notify('File sharing is not available here. Use the WhatsApp link or download the PDF.', { variant: 'danger' })
+                    }
+                  }}
+                  className="w-full px-4 py-3 rounded-xl bg-accent text-white font-semibold">
+                  Share PDF file
+                </button>
+              )}
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`block text-center px-4 py-3 rounded-xl font-semibold ${canShareFile ? 'border border-border text-accent' : 'bg-accent text-white'}`}>
+                {preparedShare.hostedUrl ? 'Send on WhatsApp (with PDF link)' : 'Open WhatsApp (attach the PDF yourself)'}
+              </a>
+              <button
+                onClick={async () => {
+                  try { await savePdfToDevice(preparedShare.pdf) } catch (err) { notify(err?.message || 'Download failed. Please retry.', { variant: 'danger' }) }
+                }}
+                className="w-full px-4 py-3 rounded-xl border border-border text-foreground">
+                Download PDF
+              </button>
+              {preparedShare.hostedUrl && <p className="text-[11px] text-muted">The WhatsApp message contains a link to the PDF. Anyone with the link can open it.</p>}
+            </div>
+          )
+        })()}
+      </Modal>
 
       <Modal isOpen={!!quotationToDraft} onClose={() => setQuotationToDraft(null)} title="Move Quotation to Draft" size="sm">
         {quotationToDraft && (
@@ -1979,20 +1992,26 @@ export default function QuotationsPage() {
             <div className="space-y-3">
               <h3 className="text-sm font-semibold text-foreground">Live Preview (sample-matching format)</h3>
               <div className="border border-border rounded-xl p-2 bg-surface max-h-[72vh] overflow-auto">
-                <QuotationSheetPreview quotation={previewQuotation} storeSettings={storeSettings} />
+                <div className="min-w-[440px]">
+                  <QuotationSheetPreview quotation={previewQuotation} storeSettings={storeSettings} />
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-border pt-4">
+          <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-muted">
-              Final Amount: <span className="font-semibold text-foreground">{formatCurrency(previewQuotation.grandTotal)}</span>
+              Final Amount: <span className="font-semibold text-foreground whitespace-nowrap">{formatCurrency(previewQuotation.grandTotal)}</span>
             </div>
-            <div className="ui-actions flex items-center gap-2">
+            <div className="ui-actions grid grid-cols-2 gap-2 sm:flex sm:items-center">
               <button
                 type="button"
-                onClick={() => setShowGenerator(false)}
-                className="px-4 py-2.5 rounded-xl text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                onClick={() => {
+                  setShowGenerator(false)
+                  setEditingQuotationId(null)
+                  setForm(createInitialForm())
+                }}
+                className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted hover:text-foreground hover:bg-surface-hover transition-colors sm:border-transparent"
               >
                 Cancel
               </button>
@@ -2058,7 +2077,11 @@ export default function QuotationsPage() {
                 </button>
               </div>
             </div>
-            <QuotationSheetPreview quotation={selectedQuotation} storeSettings={storeSettings} />
+            <div className="overflow-x-auto">
+              <div className="min-w-[440px]">
+                <QuotationSheetPreview quotation={selectedQuotation} storeSettings={storeSettings} />
+              </div>
+            </div>
           </div>
         )}
       </Modal>

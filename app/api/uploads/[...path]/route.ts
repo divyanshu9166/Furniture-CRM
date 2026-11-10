@@ -18,7 +18,7 @@ const MIME_TYPES: Record<string, string> = {
 // In standalone Next.js builds, process.cwd() ≠ /app — use UPLOAD_DIR env var
 // Serves files from the uploads directory
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   const { path: segments } = await params
@@ -41,14 +41,21 @@ export async function GET(
     const ext = (filePath.split('.').pop() || '').toLowerCase()
     const contentType = MIME_TYPES[ext] || 'application/octet-stream'
 
-    return new NextResponse(buffer, {
-      status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Length': String(buffer.length),
-        'Cache-Control': 'public, max-age=31536000, immutable',
-      },
-    })
+    const headers: Record<string, string> = {
+      'Content-Type': contentType,
+      'Content-Length': String(buffer.length),
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    }
+    // ?download=1 saves the file instead of showing it. App wrappers (WebView)
+    // only save files that arrive as a normal link with this header.
+    if (req.nextUrl.searchParams.get('download') === '1') {
+      const requested = req.nextUrl.searchParams.get('filename') || segments[segments.length - 1]
+      const safeName = requested.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'download'
+      headers['Content-Disposition'] = `attachment; filename="${safeName}"`
+      headers['X-Content-Type-Options'] = 'nosniff'
+    }
+
+    return new NextResponse(buffer, { status: 200, headers })
   } catch {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }

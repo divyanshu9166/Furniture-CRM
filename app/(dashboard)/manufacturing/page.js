@@ -152,6 +152,11 @@ const RM_COLUMN_ALIASES = {
   image: ['image', 'image url', 'photo', 'image link'],
 }
 
+// Cost prices keep paise (e.g. 8.8 per metre); round away float noise to 2 decimals.
+function roundToPaise(value) {
+  return Number.isFinite(value) ? Math.round(value * 100) / 100 : value
+}
+
 function mapImportColumns(headers) {
   const map = {}
   headers.forEach((header, index) => {
@@ -167,6 +172,7 @@ function mapImportColumns(headers) {
 
 // ─── CSV Export Helper ────────────────────────────────
 import { downloadBOMCSV, downloadBOMPDF } from '@/lib/manufacturing/downloads'
+import { analyzeRawMaterialImport, missingColumnMessage } from '@/lib/inventory/raw-material-import'
 // ─── Main Page ────────────────────────────────────────
 export default function ManufacturingPage() {
   const [requestedTab, setTab] = useState('production')
@@ -254,6 +260,7 @@ export default function ManufacturingPage() {
   const [rmImportLoading, setRmImportLoading] = useState(false)
   const [rmImportError, setRmImportError] = useState('')
   const [rmImportResult, setRmImportResult] = useState(null)
+  const [rmImportIssues, setRmImportIssues] = useState({ problems: [], warnings: [] })
   const [selectedRmIds, setSelectedRmIds] = useState(new Set())
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false)
   const [archiveStockedRm, setArchiveStockedRm] = useState(false)
@@ -759,6 +766,7 @@ export default function ManufacturingPage() {
     setRmImportResult(null)
     setRmImportRows([])
     setRmImportHeaders([])
+    setRmImportIssues({ problems: [], warnings: [] })
 
     try {
       const buffer = await file.arrayBuffer()
@@ -768,34 +776,36 @@ export default function ManufacturingPage() {
       const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
 
       if (rawData.length < 2) {
-        setRmImportError('File is empty or has no data rows')
+        setRmImportError(`"${file.name}" has no data rows. Put the column headers in row 1 and your materials from row 2 downwards.`)
         return
       }
 
       const headers = rawData[0].map(h => String(h))
-      const rows = rawData.slice(1).filter(row => row.some(cell => String(cell).trim()))
+      // Remember each row's line number in the file so errors can point at it.
+      const rows = rawData.slice(1)
+        .map((row, index) => { row.__rowNumber = index + 2; return row })
+        .filter(row => row.some(cell => String(cell).trim()))
       const colMap = mapImportColumns(headers)
 
       if (colMap.name === undefined) {
-        setRmImportError('Could not find product name column. Expected a header like "Product Name".')
+        setRmImportError(missingColumnMessage('PRODUCT NAME', ['Product Name', 'Name', 'Material Name', 'Raw Material'], headers))
         return
       }
 
-      if (colMap.brand === undefined) {
-        // Brand is optional in the new template.
-      }
-
       if (colMap.instock === undefined) {
-        setRmImportError('Could not find in stock column. Expected a header like "In Stock".')
+        setRmImportError(missingColumnMessage('Instock', ['Instock', 'In Stock', 'Stock Quantity', 'Quantity'], headers))
         return
       }
 
       setRmImportHeaders(headers)
       setRmImportRows(rows)
       setRmImportColMap(colMap)
+      // Check every row now, so problems show up before the user clicks Import.
+      const { problems, warnings } = analyzeRawMaterialImport(rows, colMap, headers)
+      setRmImportIssues({ problems, warnings })
     } catch (err) {
       console.error('Import error:', err)
-      setRmImportError(`Failed to parse file: ${err.message || 'Unknown error'}. Please use .xlsx, .xls, or .csv format.`)
+      setRmImportError(`The file "${file.name}" could not be read (${err.message || 'unknown error'}). Save it as .xlsx or .csv and try again.`)
     }
 
     event.target.value = ''
@@ -808,60 +818,18 @@ export default function ManufacturingPage() {
     setRmImportError('')
 
     try {
-      const parseRequiredNumber = (value) => {
-        const text = String(value ?? '').trim()
-        if (!text) return Number.NaN
-        const parsed = Number(text)
-        return Number.isFinite(parsed) ? parsed : Number.NaN
-      }
-
-      const parseNumberWithDefault = (value, defaultValue = 1) => {
-        const text = String(value ?? '').trim()
-        if (!text) return defaultValue
-        const parsed = Number(text)
-        return Number.isFinite(parsed) && parsed > 0 ? parsed : Number.NaN
-      }
-
-      const parsed = rmImportRows
-        .map(row => ({
-          name: String(row[rmImportColMap.name] ?? '').trim(),
-          brand: rmImportColMap.brand !== undefined ? String(row[rmImportColMap.brand] ?? '').trim() : '',
-          sku: rmImportColMap.sku !== undefined ? String(row[rmImportColMap.sku] ?? '').trim() : '',
-          costPrice: rmImportColMap.costPrice !== undefined ? Number(row[rmImportColMap.costPrice] ?? 0) : 0,
-          instock: rmImportColMap.instock !== undefined ? parseRequiredNumber(row[rmImportColMap.instock]) : Number.NaN,
-          size: rmImportColMap.size !== undefined ? String(row[rmImportColMap.size] ?? '').trim() : '',
-          unitSize: rmImportColMap.unitSize !== undefined ? parseNumberWithDefault(row[rmImportColMap.unitSize], 1) : 1,
-          unitOfMeasure: rmImportColMap.unitOfMeasure !== undefined ? String(row[rmImportColMap.unitOfMeasure] ?? '').trim().toUpperCase() : 'PCS',
-          reorderLevel: rmImportColMap.reorderLevel !== undefined ? Number(row[rmImportColMap.reorderLevel] ?? 5) : 5,
-          description: rmImportColMap.description !== undefined ? String(row[rmImportColMap.description] ?? '').trim() : '',
-          image: rmImportColMap.image !== undefined ? String(row[rmImportColMap.image] ?? '').trim() : '',
-        }))
-
-      // Debug: check which rows fail and why
-      const failures = []
-      parsed.forEach((row, idx) => {
-        const reasons = []
-        if (!row.name) reasons.push('missing name')
-        if (!Number.isFinite(row.instock) || row.instock < 0) reasons.push('opening quantity must be non-negative')
-        if (!Number.isFinite(row.unitSize) || row.unitSize <= 0) reasons.push('Unit Size must be a positive number')
-        if (!Number.isInteger(row.costPrice) || row.costPrice < 0) reasons.push('Cost price must be non-negative whole rupees')
-        if (!Number.isInteger(row.reorderLevel) || row.reorderLevel < 0) reasons.push('Reorder Level must be a non-negative whole number')
-        if (reasons.length > 0) {
-          failures.push(`Row ${idx + 1} (${row.name || 'unnamed'}): ${reasons.join(', ')}`)
-        }
-      })
-
-      if (failures.length > 0) {
-        setRmImportError(`Fix invalid rows before importing:\n${failures.slice(0, 10).join('\n')}`)
+      const { parsed, problems } = analyzeRawMaterialImport(rmImportRows, rmImportColMap, rmImportHeaders)
+      if (problems.length > 0) {
+        setRmImportIssues(prev => ({ ...prev, problems }))
+        setRmImportError(`${problems.length} row${problems.length === 1 ? ' has' : 's have'} problems (listed below). Nothing was imported. Fix them in your file and upload it again.`)
         setRmImportLoading(false)
         return
       }
 
       const payload = parsed
-        .filter(row => row.name && Number.isFinite(row.instock))
 
       if (payload.length === 0) {
-        setRmImportError(`All rows were invalid. Issues:\n${failures.join('\n')}`)
+        setRmImportError('There are no rows to import in this file.')
         setRmImportLoading(false)
         return
       }
@@ -871,6 +839,7 @@ export default function ManufacturingPage() {
         setRmImportResult(res.data)
         setRmImportRows([])
         setRmImportHeaders([])
+        setRmImportIssues({ problems: [], warnings: [] })
         loadData()
       } else {
         setRmImportError(res.error || 'Import failed')
@@ -887,7 +856,8 @@ export default function ManufacturingPage() {
     if (!rmGodownId) return alert('Choose the receiving godown first')
     if (rmForm.instock === '' || !Number.isFinite(Number(rmForm.instock)) || Number(rmForm.instock) < 0) return alert('Enter a valid opening quantity (zero is allowed)')
     if (!Number.isFinite(Number(rmForm.unitSize)) || Number(rmForm.unitSize) <= 0) return alert('Base units per quantity must be positive')
-    if (!Number.isInteger(Number(rmForm.costPrice || 0)) || Number(rmForm.costPrice || 0) < 0 || !Number.isInteger(Number(rmForm.reorderLevel)) || Number(rmForm.reorderLevel) < 0) return alert('Cost and minimum stock alert must be non-negative whole numbers')
+    if (!Number.isFinite(Number(rmForm.costPrice || 0)) || Number(rmForm.costPrice || 0) < 0) return alert('Cost price must be a non-negative number (paise allowed, e.g. 8.8)')
+    if (!Number.isInteger(Number(rmForm.reorderLevel)) || Number(rmForm.reorderLevel) < 0) return alert('Minimum stock alert must be a non-negative whole number')
     setSubmitting(true)
 
     let imageUrl = ''
@@ -918,7 +888,7 @@ export default function ManufacturingPage() {
       sku,
       category: 'Raw Material',
       price: 0,
-      costPrice: Number(rmForm.costPrice || 0),
+      costPrice: roundToPaise(Number(rmForm.costPrice || 0)),
       stock: Number(rmForm.instock),
       unitSize: Number(rmForm.unitSize),
       unitOfMeasure: rmForm.unitOfMeasure || 'PCS',
@@ -974,7 +944,7 @@ export default function ManufacturingPage() {
     const enteredQty = Number(rmEditForm.stockQuantity)
     const res = await updateRawMaterialInventory(id, {
       name: rmEditForm.name,
-      costPrice: Number(rmEditForm.costPrice ?? 0),
+      costPrice: roundToPaise(Number(rmEditForm.costPrice ?? 0)),
       brand: rmEditForm.brand || undefined,
       unitOfMeasure: rmEditForm.unitOfMeasure || 'PCS',
       unitSize: Number(rmEditForm.unitSize) || 1,
@@ -2207,7 +2177,7 @@ export default function ManufacturingPage() {
               <div>
                 <label className="text-[10px] text-muted block mb-1 uppercase tracking-wide">Cost price</label>
                 <input
-                  type="number" min="0"
+                  type="number" min="0" step="any"
                   value={rmForm.costPrice}
                   onChange={e => setRmForm(f => ({ ...f, costPrice: e.target.value }))}
                   placeholder="optional"
@@ -2687,7 +2657,38 @@ export default function ManufacturingPage() {
           </div>
 
           {rmImportError && (
-            <p className="text-xs text-red-400">{rmImportError}</p>
+            <p className="text-xs text-red-400 whitespace-pre-line">{rmImportError}</p>
+          )}
+
+          {rmImportIssues.problems.length > 0 && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs">
+              <p className="font-semibold text-red-300">
+                {rmImportIssues.problems.length} row{rmImportIssues.problems.length === 1 ? ' has' : 's have'} problems, so nothing can be imported yet. Fix them in your file and upload it again.
+              </p>
+              <ul className="mt-2 max-h-60 overflow-y-auto space-y-2 pr-1">
+                {rmImportIssues.problems.map(problem => (
+                  <li key={problem.rowNumber}>
+                    <span className="font-medium text-red-200">Row {problem.rowNumber}{problem.name ? ` · ${problem.name}` : ''}</span>
+                    <ul className="ml-4 list-disc text-red-300/90">
+                      {problem.issues.map((issue, index) => <li key={index}><span className="font-medium">{issue.column}:</span> {issue.message}</li>)}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {rmImportIssues.warnings.length > 0 && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
+              <p className="font-semibold text-amber-300">
+                {rmImportIssues.warnings.length} row{rmImportIssues.warnings.length === 1 ? '' : 's'} will be skipped during import:
+              </p>
+              <ul className="mt-2 max-h-40 overflow-y-auto space-y-1 pr-1 text-amber-200/90">
+                {rmImportIssues.warnings.map(warning => (
+                  <li key={warning.rowNumber}><span className="font-medium">Row {warning.rowNumber}{warning.name ? ` · ${warning.name}` : ''}:</span> {warning.message}</li>
+                ))}
+              </ul>
+            </div>
           )}
 
           {rmImportHeaders.length > 0 && (
@@ -2698,9 +2699,13 @@ export default function ManufacturingPage() {
           )}
 
           {rmImportResult && (
-            <div className="p-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 text-xs text-emerald-300">
-              Imported {rmImportResult.created} of {rmImportResult.total} rows. Skipped: {rmImportResult.skipped}
-              {rmImportResult.errors?.length > 0 && <ul className="mt-2 text-xs text-muted space-y-1">{rmImportResult.errors.slice(0, 10).map((error, index) => <li key={index}>{error.name}: {error.error}</li>)}</ul>}
+            <div className={`p-3 rounded-lg border text-xs ${rmImportResult.skipped > 0 ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'}`}>
+              <p className="font-semibold">Imported {rmImportResult.created} of {rmImportResult.total} rows.{rmImportResult.skipped > 0 ? ` ${rmImportResult.skipped} skipped:` : ''}</p>
+              {rmImportResult.errors?.length > 0 && (
+                <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1">
+                  {rmImportResult.errors.map((error, index) => <li key={index}><span className="font-medium">Row {error.row}{error.name ? ` · ${error.name}` : ''}:</span> {error.error}</li>)}
+                </ul>
+              )}
             </div>
           )}
 
@@ -2712,7 +2717,7 @@ export default function ManufacturingPage() {
             </button>
             <button
               onClick={handleRmImportSubmit}
-              disabled={rmImportLoading || rmImportRows.length === 0 || !rmImportGodownId}
+              disabled={rmImportLoading || rmImportRows.length === 0 || !rmImportGodownId || rmImportIssues.problems.length > 0}
               className="px-4 py-2 bg-accent text-white rounded-lg text-sm font-medium disabled:opacity-50">
               {rmImportLoading ? 'Importing...' : 'Import Now'}
             </button>

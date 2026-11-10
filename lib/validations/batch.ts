@@ -23,7 +23,7 @@ export const batchSchema = z.object({
   expiryDate: date.optional(),
   quantity: z.number().positive(),
   remainingQty: z.number().min(0),
-  costPrice: z.number().int().min(0).default(0),
+  costPrice: z.number().min(0).default(0),
   supplierId: z.number().int().positive().optional(),
   poId: z.number().int().positive().optional(),
 }).refine(data => data.remainingQty <= data.quantity, 'Remaining quantity cannot exceed the original quantity')

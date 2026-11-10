@@ -9,7 +9,7 @@ export const createProductSchema = z.object({
   // Optional bulk / wholesale price. Independent of `price` — never used by
   // BOM, the price calculator, quotations, orders or invoices.
   bulkPrice: z.number().int().min(0).optional(),
-  costPrice: z.number().int().min(0).default(0),
+  costPrice: z.number().min(0).default(0), // paise allowed (e.g. 8.8)
   stock: z.number().min(0).default(0),
   reorderLevel: z.number().int().min(0).default(5),
   material: z.string().optional(),

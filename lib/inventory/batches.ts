@@ -66,6 +66,6 @@ export async function recordBatchMovement(tx: Prisma.TransactionClient, ledger: 
   }
   // A receipt lot is created in the same transaction as the physical balance.
   // Operators can rename its number/add supplier and expiry, not receive twice.
-  const batch = await tx.productBatch.create({ data: { productId: ledger.productId, batchNumber: `AUTO-${ledger.id}`, quantity: remaining, remainingQty: remaining, costPrice: Math.round(costPrice), purchaseDate: new Date(`${indiaDate()}T00:00:00.000Z`) } })
+  const batch = await tx.productBatch.create({ data: { productId: ledger.productId, batchNumber: `AUTO-${ledger.id}`, quantity: remaining, remainingQty: remaining, costPrice: Math.round(costPrice * 100) / 100, purchaseDate: new Date(`${indiaDate()}T00:00:00.000Z`) } })
   await tx.batchMovement.create({ data: { stockLedgerId: ledger.id, batchId: batch.id, quantity: remaining } })
 }

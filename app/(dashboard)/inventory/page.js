@@ -1593,7 +1593,7 @@ export default function InventoryPage() {
                 </div>
                 <div>
                   <label className="text-sm text-muted mb-1 block">Cost Price</label>
-                  <input type="number" min="0" value={batchForm.costPrice} onChange={e => setBatchForm(p => ({ ...p, costPrice: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
+                  <input type="number" min="0" step="any" value={batchForm.costPrice} onChange={e => setBatchForm(p => ({ ...p, costPrice: e.target.value }))} className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50" />
                 </div>
               </div>
               <div className="ui-form-grid grid grid-cols-2 gap-4">
@@ -1983,7 +1983,7 @@ export default function InventoryPage() {
             <div className="ui-form-grid grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Cost Price (₹/unit)</label>
-                <input type="number" name="costPrice" min="0" placeholder="0" className="w-full" />
+                <input type="number" name="costPrice" min="0" step="any" placeholder="0" className="w-full" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-muted mb-1.5">Unit of Measure</label>
@@ -2454,6 +2454,7 @@ export default function InventoryPage() {
                 <label className="block text-xs font-medium text-muted mb-1.5">Cost Price (₹)</label>
                 <input
                   type="number"
+                  step="any"
                   value={editForm.costPrice || 0}
                   onChange={e => setEditForm(f => ({ ...f, costPrice: e.target.value }))}
                   className="w-full px-4 py-2.5 bg-surface border border-border rounded-xl text-sm text-foreground focus:outline-none focus:border-accent/50"

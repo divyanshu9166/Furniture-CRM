@@ -12,6 +12,8 @@ import { assignRawMaterialsToGodown, assignRawMaterialGodownSchema } from '@/lib
 import { inventoryCreationError } from '@/lib/inventory/creation-rules'
 
 export interface BulkRawMaterialRow {
+  /** Line number in the uploaded file, so errors can point at it. */
+  rowNumber?: number
   name: string
   brand?: string
   sku?: string
@@ -135,7 +137,8 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
   if (!Number.isSafeInteger(godownId) || !godownId || godownId <= 0 || !await prisma.godown.findUnique({ where: { id: godownId } })) return { success: false, error: 'Choose a valid receiving godown before importing raw materials' }
 
   const validRows = rows
-    .map(r => ({
+    .map((r, index) => ({
+      rowNumber: Number.isSafeInteger(r.rowNumber) && Number(r.rowNumber) > 0 ? Number(r.rowNumber) : index + 2,
       name: String(r.name || '').trim(),
       brand: String(r.brand || '').trim(),
       sku: String(r.sku || '').trim(),
@@ -153,9 +156,11 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
     return { success: false, error: 'No valid rows found. Product name, size, and in-stock are required.' }
   }
 
-  const existingSkus = new Set(
-    (await prisma.product.findMany({ select: { sku: true } })).map(p => p.sku)
+  // SKU -> where it already exists, so a skipped row can say exactly why.
+  const skuOwners = new Map<string, string>(
+    (await prisma.product.findMany({ select: { sku: true, name: true } })).map(p => [p.sku, `the existing item "${p.name}"`])
   )
+  const existingSkus = new Set(skuOwners.keys())
 
   let created = 0
   let skipped = 0
@@ -174,7 +179,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
     const sku = makeUniqueSku(row.sku)
     if (existingSkus.has(sku)) {
       skipped++
-      errors.push({ row: created + skipped, name: row.name, error: `SKU "${sku}" already exists; existing item was preserved` })
+      errors.push({ row: row.rowNumber, name: row.name, error: `Skipped: SKU "${sku}" is already used by ${skuOwners.get(sku)}. Existing items are never overwritten. Clear the SKU cell in your file to get an automatic SKU, or use a different SKU.` })
       continue
     }
 
@@ -197,9 +202,10 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
     if (res.success) {
       created++
       existingSkus.add(sku)
+      skuOwners.set(sku, `the item "${row.name}" imported from row ${row.rowNumber} of this file`)
     } else {
       skipped++
-      errors.push({ row: created + skipped, name: row.name, error: res.error || 'Unable to import item' })
+      errors.push({ row: row.rowNumber, name: row.name, error: `Skipped: ${res.error || 'the item could not be saved'}` })
     }
 
     counter++

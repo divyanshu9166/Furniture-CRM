@@ -1104,7 +1104,7 @@ export async function recordQualityCheck(data: unknown) {
         const revalued = remainingLots.reduce((sum, lot) => sum + lot.remainingQty * (unitCost - lot.costPrice), 0)
         const updatedStock = product.stock + delta
         const value = product.stock * product.costPrice + (delta > 0 ? delta * unitCost : delta * order.costPerUnit) + revalued
-        if (updatedStock > 0) await tx.product.update({ where: { id: product.id }, data: { costPrice: Math.max(0, Math.round(value / updatedStock)) } })
+        if (updatedStock > 0) await tx.product.update({ where: { id: product.id }, data: { costPrice: Math.max(0, Math.round(value / updatedStock * 100) / 100) } })
         if (batchIds.length) await tx.productBatch.updateMany({ where: { id: { in: batchIds }, remainingQty: { gt: 0 } }, data: { costPrice: unitCost } })
       }
       await tx.productionOrder.update({ where: { id }, data: { qualityStatus, qualityNotes, scrapQty, scrapReason, costPerUnit: unitCost, yieldRate: order.plannedQty ? Math.round(afterGood / order.plannedQty * 1000) / 10 : 0 } })

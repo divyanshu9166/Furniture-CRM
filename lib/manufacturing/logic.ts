@@ -36,5 +36,5 @@ export function productionCost(input: { material: number; labour?: number; machi
 }
 
 export function weightedCost(stock: number, oldCost: number, received: number, newCost: number) {
-  return stock + received > 0 ? Math.round((stock * oldCost + received * newCost) / (stock + received)) : oldCost
+  return stock + received > 0 ? Math.round((stock * oldCost + received * newCost) / (stock + received) * 100) / 100 : oldCost
 }

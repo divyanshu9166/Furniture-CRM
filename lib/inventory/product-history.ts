@@ -7,7 +7,7 @@ const timestamp = z.string().datetime()
 export const productHistorySchema = z.object({
   version: z.literal(1),
   ledger: z.array(z.object({ id, godownId: id, entryType: z.string().min(1), quantity: z.number(), balanceAfter: z.number(), referenceType: z.string().nullable(), referenceId: id.nullable(), notes: z.string().nullable(), createdBy: z.string().nullable(), createdAt: timestamp })).max(10000),
-  batches: z.array(z.object({ id, batchNumber: z.string().min(1), purchaseDate: timestamp, expiryDate: timestamp.nullable(), quantity: z.number().nonnegative(), remainingQty: z.number().nonnegative(), costPrice: z.number().int().nonnegative(), supplierId: id.nullable(), poId: id.nullable(), createdAt: timestamp })).max(10000),
+  batches: z.array(z.object({ id, batchNumber: z.string().min(1), purchaseDate: timestamp, expiryDate: timestamp.nullable(), quantity: z.number().nonnegative(), remainingQty: z.number().nonnegative(), costPrice: z.number().nonnegative(), supplierId: id.nullable(), poId: id.nullable(), createdAt: timestamp })).max(10000),
   movements: z.array(z.object({ id, batchId: id.nullable(), stockLedgerId: id, quantity: z.number(), createdAt: timestamp })).max(20000),
 }).superRefine((data, context) => {
   for (const key of ['ledger', 'batches', 'movements'] as const) if (new Set(data[key].map(row => row.id)).size !== data[key].length) context.addIssue({ code: 'custom', message: 'Duplicate history IDs' })

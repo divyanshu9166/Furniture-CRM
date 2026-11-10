@@ -269,7 +269,7 @@ model Product {
   hsnCode       String?
   unitOfMeasure String      @default("PCS")
   unitSize      Float       @default(1)
-  costPrice     Int         @default(0)
+  costPrice     Float       @default(0) // rupees with paise, e.g. 8.8 per metre
   stockGroupId  Int?
   stockGroup    StockGroup? @relation(fields: [stockGroupId], references: [id])
 
@@ -1421,7 +1421,7 @@ model ProductBatch {
   expiryDate   DateTime?
   quantity     Float
   remainingQty Float
-  costPrice    Int       @default(0)
+  costPrice    Float     @default(0)
   supplierId   Int?
   poId         Int?
   createdAt    DateTime  @default(now())
