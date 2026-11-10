@@ -2657,19 +2657,19 @@ export default function ManufacturingPage() {
           </div>
 
           {rmImportError && (
-            <p className="text-xs text-red-400 whitespace-pre-line">{rmImportError}</p>
+            <p className="text-xs text-red-700 whitespace-pre-line">{rmImportError}</p>
           )}
 
           {rmImportIssues.problems.length > 0 && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-xs">
-              <p className="font-semibold text-red-300">
+              <p className="font-semibold text-red-700">
                 {rmImportIssues.problems.length} row{rmImportIssues.problems.length === 1 ? ' has' : 's have'} problems, so nothing can be imported yet. Fix them in your file and upload it again.
               </p>
               <ul className="mt-2 max-h-60 overflow-y-auto space-y-2 pr-1">
                 {rmImportIssues.problems.map(problem => (
                   <li key={problem.rowNumber}>
-                    <span className="font-medium text-red-200">Row {problem.rowNumber}{problem.name ? ` · ${problem.name}` : ''}</span>
-                    <ul className="ml-4 list-disc text-red-300/90">
+                    <span className="font-medium text-red-800">Row {problem.rowNumber}{problem.name ? ` · ${problem.name}` : ''}</span>
+                    <ul className="ml-4 list-disc text-red-700">
                       {problem.issues.map((issue, index) => <li key={index}><span className="font-medium">{issue.column}:</span> {issue.message}</li>)}
                     </ul>
                   </li>
@@ -2680,10 +2680,10 @@ export default function ManufacturingPage() {
 
           {rmImportIssues.warnings.length > 0 && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs">
-              <p className="font-semibold text-amber-300">
+              <p className="font-semibold text-amber-800">
                 {rmImportIssues.warnings.length} row{rmImportIssues.warnings.length === 1 ? '' : 's'} will be skipped during import:
               </p>
-              <ul className="mt-2 max-h-40 overflow-y-auto space-y-1 pr-1 text-amber-200/90">
+              <ul className="mt-2 max-h-40 overflow-y-auto space-y-1 pr-1 text-amber-900">
                 {rmImportIssues.warnings.map(warning => (
                   <li key={warning.rowNumber}><span className="font-medium">Row {warning.rowNumber}{warning.name ? ` · ${warning.name}` : ''}:</span> {warning.message}</li>
                 ))}
@@ -2698,16 +2698,42 @@ export default function ManufacturingPage() {
             </div>
           )}
 
-          {rmImportResult && (
-            <div className={`p-3 rounded-lg border text-xs ${rmImportResult.skipped > 0 ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'}`}>
-              <p className="font-semibold">Imported {rmImportResult.created} of {rmImportResult.total} rows.{rmImportResult.skipped > 0 ? ` ${rmImportResult.skipped} skipped:` : ''}</p>
-              {rmImportResult.errors?.length > 0 && (
-                <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1">
-                  {rmImportResult.errors.map((error, index) => <li key={index}><span className="font-medium">Row {error.row}{error.name ? ` · ${error.name}` : ''}:</span> {error.error}</li>)}
-                </ul>
-              )}
-            </div>
-          )}
+          {rmImportResult && (() => {
+            const errors = rmImportResult.errors || []
+            const exists = errors.filter(error => error.kind === 'exists')
+            const duplicates = errors.filter(error => error.kind === 'duplicate')
+            const failed = errors.filter(error => error.kind !== 'exists' && error.kind !== 'duplicate')
+            const rowLine = error => <li key={`${error.row}-${error.name}`}><span className="font-medium">Row {error.row}{error.name ? ` · ${error.name}` : ''}:</span> {error.error}</li>
+            return (
+              <div className="space-y-2 text-xs">
+                <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-800">
+                  <p className="font-semibold">{rmImportResult.created} new raw material{rmImportResult.created === 1 ? '' : 's'} imported (out of {rmImportResult.total} rows in the file).</p>
+                </div>
+                {exists.length > 0 && (
+                  <div className="p-3 rounded-lg border border-border bg-surface-hover text-foreground">
+                    <p className="font-semibold">{exists.length} row{exists.length === 1 ? '' : 's'} not imported because the same SKU is already in your inventory.</p>
+                    <p className="mt-1 text-muted">Nothing is wrong. These items were added earlier and are never overwritten or duplicated.</p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-accent">Show these rows</summary>
+                      <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1 text-muted">{exists.map(rowLine)}</ul>
+                    </details>
+                  </div>
+                )}
+                {duplicates.length > 0 && (
+                  <div className="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-900">
+                    <p className="font-semibold">{duplicates.length} row{duplicates.length === 1 ? '' : 's'} skipped: the SKU repeats inside your file.</p>
+                    <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1">{duplicates.map(rowLine)}</ul>
+                  </div>
+                )}
+                {failed.length > 0 && (
+                  <div className="p-3 rounded-lg border border-red-500/30 bg-red-500/10 text-red-800">
+                    <p className="font-semibold">{failed.length} row{failed.length === 1 ? '' : 's'} could not be saved:</p>
+                    <ul className="mt-2 max-h-48 overflow-y-auto space-y-1 pr-1">{failed.map(rowLine)}</ul>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           <div className="ui-actions flex justify-end gap-2 pt-2">
             <button

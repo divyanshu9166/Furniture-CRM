@@ -159,3 +159,18 @@ export async function uploadQuotationPdf(file: QuotationPdf) {
 export function quotationDownloadLink(url: string, filename: string) {
   return `${url}?download=1&filename=${encodeURIComponent(filename)}`;
 }
+
+/**
+ * Sends the generated PDF to the customer from the server: as a WhatsApp
+ * document or as an email attachment. Throws with a readable reason.
+ */
+export async function sendQuotationPdf(file: QuotationPdf, quotationId: number, channel: 'whatsapp' | 'email') {
+  const form = new FormData();
+  form.set('channel', channel);
+  form.set('quotationId', String(quotationId));
+  form.append('file', new File([file.blob], file.filename, { type: 'application/pdf' }));
+  const response = await fetch('/api/quotations/send', { method: 'POST', body: form });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.success) throw new Error(data?.error || 'Could not send the quotation. Please retry.');
+  return data as { success: true; to: string };
+}

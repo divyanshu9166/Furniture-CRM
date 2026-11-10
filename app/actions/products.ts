@@ -164,7 +164,9 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
 
   let created = 0
   let skipped = 0
-  const errors: { row: number; name: string; error: string }[] = []
+  // kind: 'exists' = already in the system, 'duplicate' = same SKU twice in this file, 'failed' = could not be saved
+  const errors: { row: number; name: string; error: string; kind: 'exists' | 'duplicate' | 'failed' }[] = []
+  const alreadyInSystem = new Set(existingSkus)
 
   let counter = (await prisma.product.count({ where: { category: { name: 'Raw Material' } } })) + 1
 
@@ -179,7 +181,9 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
     const sku = makeUniqueSku(row.sku)
     if (existingSkus.has(sku)) {
       skipped++
-      errors.push({ row: row.rowNumber, name: row.name, error: `Skipped: SKU "${sku}" is already used by ${skuOwners.get(sku)}. Existing items are never overwritten. Clear the SKU cell in your file to get an automatic SKU, or use a different SKU.` })
+      errors.push(alreadyInSystem.has(sku)
+        ? { row: row.rowNumber, name: row.name, kind: 'exists', error: `SKU "${sku}" is already in your inventory (${skuOwners.get(sku)}). Not imported again.` }
+        : { row: row.rowNumber, name: row.name, kind: 'duplicate', error: `SKU "${sku}" was already used by ${skuOwners.get(sku)}. Clear this row's SKU cell to get an automatic SKU, or use a different SKU.` })
       continue
     }
 
@@ -205,7 +209,7 @@ export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownI
       skuOwners.set(sku, `the item "${row.name}" imported from row ${row.rowNumber} of this file`)
     } else {
       skipped++
-      errors.push({ row: row.rowNumber, name: row.name, error: `Skipped: ${res.error || 'the item could not be saved'}` })
+      errors.push({ row: row.rowNumber, name: row.name, kind: 'failed', error: res.error || 'The item could not be saved.' })
     }
 
     counter++

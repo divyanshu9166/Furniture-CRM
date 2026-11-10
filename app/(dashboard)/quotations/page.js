@@ -29,7 +29,7 @@ import { useAlertToast } from '@/components/AlertToastProvider'
 import { createQuotation, getQuotationStats, getQuotations, updateQuotation, updateQuotationStatus } from '@/app/actions/quotations'
 import { getProducts } from '@/app/actions/products'
 import { getStoreSettings, updateStoreSettings } from '@/app/actions/settings'
-import { createQuotationPdf, downloadQuotationPdf, isEmbeddedWebView, quotationDownloadLink, uploadQuotationPdf } from '@/lib/quotations/quotation-export'
+import { createQuotationPdf, downloadQuotationPdf, isEmbeddedWebView, quotationDownloadLink, sendQuotationPdf, uploadQuotationPdf } from '@/lib/quotations/quotation-export'
 
 const statusColors = {
   DRAFT: 'bg-gray-500/10 text-gray-700 border-gray-500/20',
@@ -208,14 +208,6 @@ function buildWhatsAppUrl(phone, message) {
   const normalized = normalizePhoneNumber(phone)
   if (!normalized) return ''
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`
-}
-
-function buildMailtoUrl(email, subject, body) {
-  if (!email) return ''
-  const params = new URLSearchParams()
-  if (subject) params.set('subject', subject)
-  if (body) params.set('body', body)
-  return `mailto:${email}?${params.toString()}`
 }
 
 function buildQuotationShareMessage(quotation, storeSettings) {
@@ -1147,6 +1139,9 @@ export default function QuotationsPage() {
     }
   }
 
+  // Sends the PDF itself (no text-only message) as a WhatsApp document from the
+  // store's connected WhatsApp number. WhatsApp only allows this within 24 hours of
+  // the customer's last message, so on failure the manual options are offered.
   const handleShareQuotationWhatsApp = async quotation => {
     if (exportingQuotation) return
     if (!quotation?.phone) {
@@ -1157,32 +1152,49 @@ export default function QuotationsPage() {
       notify('Customer phone number is invalid', { variant: 'danger' })
       return
     }
+    if (!window.confirm(`Send quotation ${quotation.id} as a PDF to ${quotation.customer} on WhatsApp (${quotation.phone})?`)) return
 
     setExportingQuotation(true)
+    let pdf = null
     try {
       notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
-      const pdf = await buildQuotationPdf(quotation)
-      const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
-      setSelectedQuotation(null)
-      setPreparedShare({ pdf, file, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings) })
+      pdf = await buildQuotationPdf(quotation)
+      await sendQuotationPdf(pdf, quotation.dbId, 'whatsapp')
+      notify(`Quotation PDF sent to ${quotation.customer} on WhatsApp`, { variant: 'success' })
     } catch (err) {
-      console.error('Quotation PDF share failed:', err)
-      notify(err?.message || 'The quotation PDF could not be created. Please retry.', { variant: 'danger' })
+      console.error('Quotation WhatsApp send failed:', err)
+      notify(err?.message || 'The quotation could not be sent on WhatsApp.', { variant: 'danger' })
+      if (pdf) {
+        const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
+        setSelectedQuotation(null)
+        setPreparedShare({ pdf, file, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings), error: err?.message || '' })
+      }
     } finally {
       setExportingQuotation(false)
     }
   }
 
-  const handleShareQuotationEmail = (quotation) => {
+  // Emails the PDF as an attachment through the store's SMTP settings (Settings → Email Setup).
+  const handleShareQuotationEmail = async quotation => {
+    if (exportingQuotation) return
     if (!quotation?.email) {
-      notify('Customer email is missing', { variant: 'danger' })
+      notify('Customer email is missing. Edit the quotation and add one.', { variant: 'danger' })
       return
     }
-    const subject = `Quotation ${quotation.id} from ${storeSettings?.storeName || 'Furniture Store'}`
-    const body = buildQuotationShareMessage(quotation, storeSettings)
-    const url = buildMailtoUrl(quotation.email, subject, body)
-    if (!url) return
-    window.location.href = url
+    if (!window.confirm(`Email quotation ${quotation.id} as a PDF to ${quotation.email}?`)) return
+
+    setExportingQuotation(true)
+    try {
+      notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
+      const pdf = await buildQuotationPdf(quotation)
+      const result = await sendQuotationPdf(pdf, quotation.dbId, 'email')
+      notify(`Quotation emailed to ${result.to}`, { variant: 'success' })
+    } catch (err) {
+      console.error('Quotation email failed:', err)
+      notify(err?.message || 'The quotation email could not be sent.', { variant: 'danger' })
+    } finally {
+      setExportingQuotation(false)
+    }
   }
 
   if (loading) {
@@ -1454,13 +1466,14 @@ export default function QuotationsPage() {
         </div>
       </div>
 
-      <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Quotation PDF ready" size="sm">
+      <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Send the PDF manually" size="sm">
         {preparedShare && (() => {
           const whatsappUrl = buildWhatsAppUrl(preparedShare.phone, preparedShare.message)
           const canShareFile = typeof navigator !== 'undefined' && navigator.canShare?.({ files: [preparedShare.file] })
           return (
             <div className="space-y-3">
-              <p className="text-sm text-muted">The PDF for {preparedShare.id} is ready. Choose how to send it.</p>
+              {preparedShare.error && <p className="text-sm text-red-700">{preparedShare.error}</p>}
+              <p className="text-sm text-muted">The PDF for {preparedShare.id} is ready. You can still send it yourself:</p>
               {canShareFile && (
                 <button
                   onClick={async () => {

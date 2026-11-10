@@ -68,6 +68,7 @@ export async function sendEmail(options: {
   recipientId?: number // for tracking pixel injection
   fromEmail?: string
   fromName?: string
+  attachments?: { filename: string; content: Buffer; contentType?: string }[]
 }): Promise<{ success: boolean; error?: string; messageId?: string }> {
   try {
     const config = await getSmtpConfig()
@@ -82,6 +83,7 @@ export async function sendEmail(options: {
       to,
       subject: options.subject,
       html,
+      ...(options.attachments?.length ? { attachments: options.attachments } : {}),
       })
       requireSmtpAcceptance(response)
       return response
