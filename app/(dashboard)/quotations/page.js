@@ -1163,12 +1163,8 @@ export default function QuotationsPage() {
       notify('Preparing the PDF...', { variant: 'info', duration: 2500 })
       const pdf = await buildQuotationPdf(quotation)
       const file = new File([pdf.blob], pdf.filename, { type: 'application/pdf' })
-      // A link to the PDF is what lets WhatsApp "attach" it from an app wrapper
-      // or desktop. If the upload fails, file sharing and download still work.
-      let hostedUrl = ''
-      try { hostedUrl = await uploadQuotationPdf(pdf) } catch (err) { console.warn('Quotation PDF upload failed:', err) }
       setSelectedQuotation(null)
-      setPreparedShare({ pdf, file, hostedUrl, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings) })
+      setPreparedShare({ pdf, file, id: quotation.id, phone: quotation.phone, message: buildQuotationShareMessage(quotation, storeSettings) })
     } catch (err) {
       console.error('Quotation PDF share failed:', err)
       notify(err?.message || 'The quotation PDF could not be created. Please retry.', { variant: 'danger' })
@@ -1460,8 +1456,7 @@ export default function QuotationsPage() {
 
       <Modal isOpen={!!preparedShare} onClose={() => setPreparedShare(null)} title="Quotation PDF ready" size="sm">
         {preparedShare && (() => {
-          const textWithLink = preparedShare.hostedUrl ? `${preparedShare.message}\n\nQuotation PDF: ${preparedShare.hostedUrl}` : preparedShare.message
-          const whatsappUrl = buildWhatsAppUrl(preparedShare.phone, textWithLink)
+          const whatsappUrl = buildWhatsAppUrl(preparedShare.phone, preparedShare.message)
           const canShareFile = typeof navigator !== 'undefined' && navigator.canShare?.({ files: [preparedShare.file] })
           return (
             <div className="space-y-3">
@@ -1473,7 +1468,7 @@ export default function QuotationsPage() {
                       await navigator.share({ files: [preparedShare.file], title: `Quotation ${preparedShare.id}`, text: preparedShare.message })
                       setPreparedShare(null)
                     } catch (err) {
-                      if (err?.name !== 'AbortError') notify('File sharing is not available here. Use the WhatsApp link or download the PDF.', { variant: 'danger' })
+                      if (err?.name !== 'AbortError') notify('File sharing is not available here. Download the PDF, then attach it in WhatsApp.', { variant: 'danger' })
                     }
                   }}
                   className="w-full px-4 py-3 rounded-xl bg-accent text-white font-semibold">
@@ -1485,7 +1480,7 @@ export default function QuotationsPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className={`block text-center px-4 py-3 rounded-xl font-semibold ${canShareFile ? 'border border-border text-accent' : 'bg-accent text-white'}`}>
-                {preparedShare.hostedUrl ? 'Send on WhatsApp (with PDF link)' : 'Open WhatsApp (attach the PDF yourself)'}
+                Open WhatsApp chat (attach the downloaded PDF)
               </a>
               <button
                 onClick={async () => {
@@ -1494,7 +1489,6 @@ export default function QuotationsPage() {
                 className="w-full px-4 py-3 rounded-xl border border-border text-foreground">
                 Download PDF
               </button>
-              {preparedShare.hostedUrl && <p className="text-[11px] text-muted">The WhatsApp message contains a link to the PDF. Anyone with the link can open it.</p>}
             </div>
           )
         })()}
