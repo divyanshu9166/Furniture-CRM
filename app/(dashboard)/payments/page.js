@@ -11,6 +11,7 @@ import {
   AlertCircle, CheckCheck, Zap
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import PaymentDetailsDialog, { PaymentDetailsButton } from '@/components/PaymentDetailsDialog';
 import PaymentReceiptPreview from '@/components/PaymentReceiptPreview';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import {
@@ -68,6 +69,7 @@ export default function PaymentsPage() {
   const [receiptUploading, setReceiptUploading] = useState(false);
   const [receiptError, setReceiptError] = useState('');
   const [receiptPreview, setReceiptPreview] = useState(null);
+  const [viewedPayment, setViewedPayment] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [selectedPayments, setSelectedPayments] = useState(new Set());
   const [showReconcileModal, setShowReconcileModal] = useState(false);
@@ -399,8 +401,10 @@ export default function PaymentsPage() {
                           <span className={`text-sm font-bold ${isOut ? 'text-red-500' : 'text-green-500'}`}>
                             {isOut ? '-' : '+'}{formatCurrency(p.amount)}
                           </span>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
                             <span className="text-[10px] text-muted">{new Date(p.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                            <PaymentDetailsButton payment={p} onView={setViewedPayment}
+                              className="tap-press-sm inline-flex min-h-9 items-center gap-1 rounded-lg border border-border bg-surface px-2 text-xs font-medium text-muted hover:text-accent" />
                             {p.attachment && (
                               <button type="button" onClick={() => setReceiptPreview(p.attachment)} aria-label="View payment receipt" className="text-muted hover:text-accent ml-1">
                                 <Paperclip className="w-3 h-3" />
@@ -531,13 +535,9 @@ export default function PaymentsPage() {
                       </div>
                     </div>
                     {/* Row actions */}
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
-                      {p.attachment && (
-                        <button type="button" onClick={() => setReceiptPreview(p.attachment)}
-                          className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted bg-surface border border-border">
-                          <Eye className="w-3.5 h-3.5" /> View
-                        </button>
-                      )}
+                    <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-border">
+                      <PaymentDetailsButton payment={p} onView={setViewedPayment}
+                        className="tap-press-sm flex min-h-11 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-muted hover:text-accent" />
                       {canBounce && (
                         <button onClick={() => { setSelectedPaymentForAction(p); setShowBounceModal(true); }}
                           className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-orange-600 bg-orange-500/10 border border-orange-500/20">
@@ -625,37 +625,36 @@ export default function PaymentsPage() {
                             {p.gstAmount > 0 && <div className="text-[10px] text-muted">+{formatCurrency(p.gstAmount)} GST</div>}
                           </td>
                           <td className="text-right whitespace-nowrap">
-                            <div className="relative group">
-                              <button className="p-1.5 text-muted hover:text-accent bg-surface rounded-lg">
-                                <MoreHorizontal className="w-3.5 h-3.5" />
-                              </button>
-                              <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-1 z-20">
-                                {p.attachment && (
-                                  <button type="button" onClick={() => setReceiptPreview(p.attachment)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-accent whitespace-nowrap">
-                                    <Eye className="w-3.5 h-3.5" /> View
-                                  </button>
-                                )}
-                                {!p.isReversal && p.status !== 'Bounced' && (
-                                  <>
-                                    {p.method === 'Cheque' && !p.chequeBounced && (
+                            <div className="inline-flex items-center gap-1.5">
+                              <PaymentDetailsButton payment={p} onView={setViewedPayment}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-muted hover:text-accent" />
+                              <div className="relative group">
+                                <button type="button" aria-label="More payment actions" className="p-1.5 text-muted hover:text-accent bg-surface rounded-lg">
+                                  <MoreHorizontal className="w-3.5 h-3.5" />
+                                </button>
+                                <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible transition-all p-1 z-20">
+                                  {!p.isReversal && p.status !== 'Bounced' && (
+                                    <>
+                                      {p.method === 'Cheque' && !p.chequeBounced && (
+                                        <button onClick={() => {
+                                          setSelectedPaymentForAction(p);
+                                          setShowBounceModal(true);
+                                        }} className="flex items-center gap-2 px-3 py-1.5 text-xs text-orange-600 hover:bg-orange-500/10 w-full text-left whitespace-nowrap">
+                                          <AlertCircle className="w-3.5 h-3.5" /> Mark Bounced
+                                        </button>
+                                      )}
                                       <button onClick={() => {
                                         setSelectedPaymentForAction(p);
-                                        setShowBounceModal(true);
-                                      }} className="flex items-center gap-2 px-3 py-1.5 text-xs text-orange-600 hover:bg-orange-500/10 w-full text-left whitespace-nowrap">
-                                        <AlertCircle className="w-3.5 h-3.5" /> Mark Bounced
+                                        setShowReverseModal(true);
+                                      }} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-500/10 w-full text-left whitespace-nowrap">
+                                        <RotateCcw className="w-3.5 h-3.5" /> Reverse
                                       </button>
-                                    )}
-                                    <button onClick={() => {
-                                      setSelectedPaymentForAction(p);
-                                      setShowReverseModal(true);
-                                    }} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-500/10 w-full text-left whitespace-nowrap">
-                                      <RotateCcw className="w-3.5 h-3.5" /> Reverse
-                                    </button>
-                                  </>
-                                )}
-                                <button onClick={() => handleDelete(p.id)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-500/10 w-full text-left whitespace-nowrap">
-                                  <Trash2 className="w-3.5 h-3.5" /> Delete
-                                </button>
+                                    </>
+                                  )}
+                                  <button onClick={() => handleDelete(p.id)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-red-600 hover:bg-red-500/10 w-full text-left whitespace-nowrap">
+                                    <Trash2 className="w-3.5 h-3.5" /> Delete
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -1131,6 +1130,10 @@ export default function PaymentsPage() {
           </div>
         </div>
       </Modal>
+      {viewedPayment && !receiptPreview && (
+        <PaymentDetailsDialog payment={viewedPayment}
+          onClose={() => setViewedPayment(null)} onViewReceipt={setReceiptPreview} />
+      )}
       {receiptPreview && (
         <PaymentReceiptPreview key={receiptPreview} receiptUrl={receiptPreview}
           onClose={() => setReceiptPreview(null)} />

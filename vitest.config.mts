@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     include: [
+      'lib/payment-details.test.ts',
       "lib/section-access.test.ts",
       'lib/whatsapp/**/*.test.ts', 'lib/wa-dashboard/**/*.test.ts', 'lib/automations/**/*.test.ts'],
     exclude: ['lib/whatsapp/inbox-state.test.ts'],
