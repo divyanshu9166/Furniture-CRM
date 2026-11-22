@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { deriveBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
 
 /** Small payload the detail page polls while a broadcast is scheduled or sending. */

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { prisma } from '@/lib/db'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'

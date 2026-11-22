@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { markConversationRead } from '@/lib/whatsapp/read-receipts'
 
 export async function PATCH(

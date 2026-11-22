@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 
 export async function POST(request: Request) {
   try {

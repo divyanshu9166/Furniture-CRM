@@ -19,7 +19,7 @@
  */
 
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { SignJWT } from 'jose'
 
 const SESSION_SECRET = process.env.SESSION_SECRET ?? ''

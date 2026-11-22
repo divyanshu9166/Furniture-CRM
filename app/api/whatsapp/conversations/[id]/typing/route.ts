@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { markConversationRead } from '@/lib/whatsapp/read-receipts'
 
 /**

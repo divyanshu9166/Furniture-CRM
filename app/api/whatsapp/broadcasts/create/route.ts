@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { parseHeaderMedia } from '@/lib/whatsapp/template-header'
 import { enqueueBroadcastSend } from '@/lib/whatsapp/broadcast-queue'

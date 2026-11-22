@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 
 // Lists broadcasts for the Broadcasts tab. Sending happens in the queue
 // worker (lib/queues/broadcast-send-worker.ts), started by

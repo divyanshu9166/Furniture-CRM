@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeTemplateStatus, templateStatusReason } from '@/lib/whatsapp/template-status'
 

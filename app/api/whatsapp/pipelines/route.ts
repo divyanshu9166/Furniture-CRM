@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { DEFAULT_STAGES } from '@/lib/whatsapp/pipeline-rules'
 import { ensureDefaultPipeline } from '@/lib/whatsapp/pipeline-leads'
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { parseDealDate, statusForStageMove } from '@/lib/whatsapp/pipeline-rules'
 
 const DEAL_STATUSES = new Set(['open', 'won', 'lost'])

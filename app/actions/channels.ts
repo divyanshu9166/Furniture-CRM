@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
+import { resolveWorkspaceUserId } from '@/lib/workspace'
 import { encrypt } from '@/lib/whatsapp/encryption'
 import type { Contact } from '@prisma/client'
 
@@ -51,12 +52,14 @@ export async function upsertChannelConfig(data: {
   // For IG/FB, mirror the credentials into the dedicated config tables that the
   // unified webhook + inbox read. Do this before saving ChannelConfig so a
   // validation error (e.g. missing token) surfaces to the user.
+  // Saved under the shared workspace owner, so Managers see the same connection.
+  const workspaceUserId = await resolveWorkspaceUserId(String(session.user.id), session.user.role)
   if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && enabled) {
-    const syncError = await syncSocialConfig(channel, enabled, config, String(session.user.id))
+    const syncError = await syncSocialConfig(channel, enabled, config, workspaceUserId)
     if (syncError) return { success: false, error: syncError }
   } else if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && !enabled) {
     // Disconnect: flip status in the dedicated table too.
-    await disconnectSocialConfig(channel, String(session.user.id))
+    await disconnectSocialConfig(channel, workspaceUserId)
   }
 
   const result = await prisma.channelConfig.upsert({

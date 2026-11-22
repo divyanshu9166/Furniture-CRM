@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { parseStoredButtons } from '@/lib/whatsapp/template-submission'
 
 const CATEGORY_VALUES = new Set(['Marketing', 'Utility', 'Authentication'])

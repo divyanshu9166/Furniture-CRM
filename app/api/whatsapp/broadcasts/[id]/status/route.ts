@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { recalculateBroadcastStats } from '@/lib/whatsapp/broadcast-stats'
 
 // Scheduling and sending belong to /broadcasts/create and the queue worker,

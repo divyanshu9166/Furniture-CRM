@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { DEFAULT_SYSTEM_PROMPT } from '@/lib/ai-agent/system-prompt'
 
 /**

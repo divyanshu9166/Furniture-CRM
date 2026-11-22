@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 

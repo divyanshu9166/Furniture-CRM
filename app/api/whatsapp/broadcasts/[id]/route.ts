@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
-import { getSession } from '@/lib/session'
+import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { removeBroadcastSendJob } from '@/lib/whatsapp/broadcast-queue'
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {

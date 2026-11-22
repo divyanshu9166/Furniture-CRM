@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth-helpers'
+import { getWorkspaceSession as getSession } from '@/lib/workspace'
 import { importWhatsAppLeads } from '@/lib/whatsapp/pipeline-leads'
 
 // Adds every WhatsApp contact who has messaged but never had a deal to the
