@@ -15,9 +15,9 @@ import Modal from '@/components/Modal';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import {getCustomOrders as getCustomOrdersAction, createCustomOrder as createCustomOrderAction, updateCustomOrderStatus as updateCustomOrderStatusAction, scheduleVisit as scheduleVisitAction, updateMeasurements as updateMeasurementsAction, updateMeasurementsWithPhotos as updateMeasurementsWithPhotosAction, updateReferenceImages as updateReferenceImagesAction, addTimelineEntry as addTimelineEntryAction, sendProgressNotification as sendProgressNotificationAction} from '@/app/actions/custom-orders';
 import {moveCustomOrderToDraft as moveCustomOrderToDraftAction} from '@/app/actions/drafts';
-import {getStaff as getStaffAction} from '@/app/actions/staff';
+import {getStaffDirectory as getStaffAction} from '@/app/actions/staff';
 import {getProducts as getProductsAction} from '@/app/actions/products';
-import {getChannelConfigs as getChannelConfigsAction} from '@/app/actions/channels';
+import { getCustomOrderWhatsAppStatus } from '@/app/actions/custom-orders';
 import {searchContacts as searchContactsAction, getCustomerProfile as getCustomerProfileAction} from '@/app/actions/invoices';
 import ReturningCustomerCard from '@/components/ReturningCustomerCard';
 
@@ -62,7 +62,7 @@ const sendProgressNotification = safeAction(sendProgressNotificationAction);
 const moveCustomOrderToDraft = safeAction(moveCustomOrderToDraftAction);
 const getStaff = safeAction(getStaffAction);
 const getProducts = safeAction(getProductsAction);
-const getChannelConfigs = safeAction(getChannelConfigsAction);
+const getWhatsAppStatus = safeAction(getCustomOrderWhatsAppStatus);
 const searchContacts = safeAction(searchContactsAction);
 const getCustomerProfile = safeAction(getCustomerProfileAction);
 
@@ -342,15 +342,8 @@ export default function CustomOrdersPage() {
     setWaConfig(null);
     setShowNotify(true);
     // Check WhatsApp config
-    const configRes = await getChannelConfigs();
-    if (configRes.success) {
-      const wa = configRes.data.find(c => c.channel === 'WhatsApp');
-      setWaConfig({
-        configured: !!(wa?.enabled && wa?.config?.phoneNumberId && wa?.config?.apiToken),
-        hasTemplate: !!wa?.config?.templateName,
-        templateName: wa?.config?.templateName || null,
-      });
-    }
+    const configRes = await getWhatsAppStatus();
+    if (configRes.success) setWaConfig(configRes.data);
   };
 
   const handleSendNotification = async () => {

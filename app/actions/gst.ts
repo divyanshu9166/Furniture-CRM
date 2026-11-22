@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -16,12 +18,14 @@ function recordedGstContact<T extends { name: string; address?: string | null; g
 // ─── HSN MASTER ──────────────────────────────────────
 
 export async function getHsnCodes() {
+  await requireSection("gst", "billing");
   const codes = await prisma.hsnCode.findMany({ orderBy: { code: 'asc' } })
   return { success: true, data: codes }
 }
 
 export async function createHsnCode(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createHsnCodeSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const code = await prisma.hsnCode.create({ data: parsed.data })
@@ -30,7 +34,8 @@ export async function createHsnCode(data: unknown) {
 }
 
 export async function deleteHsnCode(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   await prisma.hsnCode.delete({ where: { id } })
   revalidatePath('/gst')
   return { success: true }
@@ -51,7 +56,8 @@ function periodRange(period: string) {
 // ─── GSTR-1 (Outward Supplies) ───────────────────────
 
 export async function generateGSTR1(period: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const { from, to } = periodRange(period)
 
@@ -198,7 +204,8 @@ export async function generateGSTR1(period: string) {
 // ─── GSTR-2 (Inward Supplies / ITC) ─────────────────
 
 export async function generateGSTR2(period: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const { from, to } = periodRange(period)
 
@@ -272,7 +279,8 @@ export async function generateGSTR2(period: string) {
 // ─── GSTR-3B (Summary Return — all tables) ──────────
 
 export async function generateGSTR3B(period: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const [gstr1Rec, gstr2Rec] = await Promise.all([
     prisma.gSTReturn.findFirst({ where: { returnType: 'GSTR1', period } }),
@@ -358,7 +366,8 @@ export async function generateGSTR3B(period: string) {
 // ─── GSTR-9 (Annual Return) ──────────────────────────
 
 export async function generateGSTR9(year: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
 
   // Aggregate all monthly GSTR-1 and GSTR-2 data for the financial year
   // Financial year: Apr year-1 to Mar year (e.g. FY 2024-25: Apr 2024 to Mar 2025)
@@ -432,18 +441,21 @@ export async function generateGSTR9(year: number) {
 // ─── RETURNS MANAGEMENT ──────────────────────────────
 
 export async function getGSTReturns() {
+  await requireSection("gst");
   const returns = await prisma.gSTReturn.findMany({ orderBy: [{ period: 'desc' }, { returnType: 'asc' }] })
   return { success: true, data: returns }
 }
 
 export async function markReturnFiled(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   await prisma.gSTReturn.update({ where: { id }, data: { status: 'FILED', filedAt: new Date() } })
   revalidatePath('/gst')
   return { success: true }
 }
 
 export async function getReturnByTypePeriod(returnType: string, period: string) {
+  await requireSection("gst");
   const ret = await prisma.gSTReturn.findFirst({ where: { returnType, period } })
   return { success: true, data: ret }
 }
@@ -451,6 +463,7 @@ export async function getReturnByTypePeriod(returnType: string, period: string) 
 // ─── E-WAY BILLS ─────────────────────────────────────
 
 export async function getEWayBills() {
+  await requireSection("gst");
   const bills = await prisma.eWayBill.findMany({
     include: { invoice: { select: { displayId: true, total: true, date: true, contact: { select: { name: true } } } } },
     orderBy: { createdAt: 'desc' },
@@ -459,7 +472,8 @@ export async function getEWayBills() {
 }
 
 export async function createEWayBill(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createEWayBillSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -476,7 +490,8 @@ export async function createEWayBill(data: unknown) {
 }
 
 export async function cancelEWayBill(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("gst");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await prisma.eWayBill.update({ where: { id }, data: { status: 'CANCELLED' } })
   revalidatePath('/gst')
   return { success: true }

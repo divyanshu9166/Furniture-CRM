@@ -8,7 +8,9 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('./', import.meta.url)) },
   },
   test: {
-    include: ['lib/whatsapp/**/*.test.ts', 'lib/wa-dashboard/**/*.test.ts', 'lib/automations/**/*.test.ts'],
+    include: [
+      "lib/section-access.test.ts",
+      'lib/whatsapp/**/*.test.ts', 'lib/wa-dashboard/**/*.test.ts', 'lib/automations/**/*.test.ts'],
     exclude: ['lib/whatsapp/inbox-state.test.ts'],
     env: {
       // Throwaway test-only values; never real credentials.

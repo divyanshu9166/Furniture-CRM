@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createLeadSchema, updateLeadStatusSchema, addFollowUpSchema } from '@/lib/validations/lead'
@@ -7,12 +9,12 @@ import type { LeadStatus } from '@prisma/client'
 import { moveLeadToDraft } from './drafts'
 
 const statusMap: Record<string, LeadStatus> = {
-  'New': 'NEW',
-  'Contacted': 'CONTACTED',
+  New: 'NEW',
+  Contacted: 'CONTACTED',
   'Showroom Visit': 'SHOWROOM_VISIT',
-  'Quotation': 'QUOTATION',
-  'Won': 'WON',
-  'Lost': 'LOST',
+  Quotation: 'QUOTATION',
+  Won: 'WON',
+  Lost: 'LOST',
 }
 
 const statusDisplayMap: Record<LeadStatus, string> = {
@@ -25,6 +27,7 @@ const statusDisplayMap: Record<LeadStatus, string> = {
 }
 
 export async function getLeads(status?: string) {
+  await requireSection("leads");
   const where = status && statusMap[status] ? { status: statusMap[status] } : {}
 
   const leads = await prisma.lead.findMany({
@@ -58,6 +61,7 @@ export async function getLeads(status?: string) {
 }
 
 export async function getLead(id: number) {
+  await requireSection("leads");
   const lead = await prisma.lead.findUnique({
     where: { id },
     include: { contact: true, followUps: true, assignedTo: true },
@@ -67,6 +71,7 @@ export async function getLead(id: number) {
 }
 
 export async function createLead(data: unknown) {
+  await requireSection("leads", "walkins");
   const parsed = createLeadSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -96,6 +101,7 @@ export async function createLead(data: unknown) {
 }
 
 export async function updateLeadStatus(data: unknown) {
+  await requireSection("leads");
   const parsed = updateLeadStatusSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -111,6 +117,7 @@ export async function updateLeadStatus(data: unknown) {
 export async function updateLead(id: number, data: Partial<{
   interest: string; budget: string; notes: string; source: string;
 }>) {
+  await requireSection("leads");
   const lead = await prisma.lead.update({
     where: { id },
     data,
@@ -121,10 +128,12 @@ export async function updateLead(id: number, data: Partial<{
 }
 
 export async function deleteLead(id: number) {
+  await requireSection("leads");
   return moveLeadToDraft(id)
 }
 
 export async function addFollowUp(data: unknown) {
+  await requireSection("leads");
   const parsed = addFollowUpSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -143,6 +152,7 @@ export async function addFollowUp(data: unknown) {
 }
 
 export async function getLeadPipelineCounts() {
+  await requireSection("leads");
   const counts = await prisma.lead.groupBy({
     by: ['status'],
     _count: true,

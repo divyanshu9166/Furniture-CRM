@@ -1,11 +1,14 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createCallLogSchema } from '@/lib/validations/call'
 import type { CallDirection, CallStatus } from '@prisma/client'
 
 export async function getCallLogs() {
+  await requireSection("calls");
   const calls = await prisma.callLog.findMany({
     include: { contact: true, transcript: true },
     orderBy: { date: 'desc' },
@@ -40,6 +43,7 @@ export async function getCallLogs() {
 }
 
 export async function createCallLog(data: unknown) {
+  await requireSection("calls");
   const parsed = createCallLogSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -73,6 +77,7 @@ export async function createCallLog(data: unknown) {
 }
 
 export async function getCallStats() {
+  await requireSection("calls");
   const [total, completed, missed, totalDuration, aiHandled] = await Promise.all([
     prisma.callLog.count(),
     prisma.callLog.count({ where: { status: 'COMPLETED' } }),
@@ -95,6 +100,7 @@ export async function getCallStats() {
 
 export async function initiateAICall(phoneNumber: string, reason: string, customerName: string = '') {
   try {
+    await requireSection("calls");
     const LIVEKIT_URL = process.env.LIVEKIT_URL
     const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY
     const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET
@@ -123,6 +129,7 @@ export async function initiateAICall(phoneNumber: string, reason: string, custom
 }
 
 export async function getAIAgentStatus() {
+  await requireSection("calls");
   const livekitConfigured = !!(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET)
   const hasSarvam = !!process.env.SARVAM_API_KEY
   const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)

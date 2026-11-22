@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 
 function getPercentChange(current: number, previous: number) {
@@ -18,6 +20,8 @@ const leadStatusLabel: Record<string, string> = {
 }
 
 export async function getDashboardStats() {
+  const { user } = await requireSection("dashboard");
+  const can = (section: Parameters<typeof requireSection>[number]) => user.sections.includes(section);
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   const todayEnd = new Date()
@@ -199,36 +203,36 @@ export async function getDashboardStats() {
   return {
     success: true,
     data: {
-      leadsToday,
-      appointmentsToday,
-      activeOrders,
-      totalRevenue: totalRevenue._sum.amount || 0,
-      recentLeads: recentLeads.map(l => ({
+      leadsToday: can("leads") ? leadsToday : 0,
+      appointmentsToday: can("appointments") ? appointmentsToday : 0,
+      activeOrders: can("orders") ? activeOrders : 0,
+      totalRevenue: can("orders") ? totalRevenue._sum.amount || 0 : 0,
+      recentLeads: (can("leads") ? recentLeads : []).map(l => ({
         id: l.id,
         name: l.contact.name,
         interest: l.interest,
         status: l.status,
         source: l.source,
       })),
-      upcomingAppointments: upcomingAppointments.map(a => ({
+      upcomingAppointments: (can("appointments") ? upcomingAppointments : []).map(a => ({
         id: a.id,
         customer: a.contact.name,
         date: a.date.toISOString().split('T')[0],
         time: a.time,
         purpose: a.purpose,
       })),
-      bestSellers: bestSellers.map(p => ({
+      bestSellers: (can("inventory") ? bestSellers : []).map(p => ({
         name: p.name,
         sold: p.sold,
       })),
-      lowStockItems: lowStockProducts.map((p: any) => ({
+      lowStockItems: (can("inventory") ? lowStockProducts : []).map((p: any) => ({
         id: p.id,
         name: p.name,
         category: categoriesMap[p.categoryId] || '',
         stock: p.stock,
         image: p.image,
       })),
-      fieldVisits: fieldVisitActivity.map(v => ({
+      fieldVisits: (can("custom-orders") ? fieldVisitActivity : []).map(v => ({
         id: v.id,
         displayId: v.displayId,
         staffName: v.staff.name,
@@ -245,30 +249,30 @@ export async function getDashboardStats() {
         hasNotes: !!v.staffNotes,
       })),
       kpis: {
-        revenueMtd: revenueMtdValue,
-        revenueChangePct: getPercentChange(revenueMtdValue, revenuePrevMtdValue),
-        leadsMtd,
-        leadsChangePct: getPercentChange(leadsMtd, leadsPrevMtd),
-        conversionRate: conversionMtd,
-        conversionChangePct: Math.round((conversionMtd - conversionPrevMtd) * 10) / 10,
-        avgOrderValue: avgOrderValueMtd,
-        avgOrderValueChangePct: getPercentChange(avgOrderValueMtd, avgOrderValuePrevMtd),
-        pendingCollections: pendingCollections._sum.balanceDue || 0,
-        pendingInvoices: pendingCollections._count.id || 0,
-        overdueInvoices: overdueInvoices.length,
+        revenueMtd: can("billing") ? revenueMtdValue : 0,
+        revenueChangePct: can("billing") ? getPercentChange(revenueMtdValue, revenuePrevMtdValue) : 0,
+        leadsMtd: can("leads") ? leadsMtd : 0,
+        leadsChangePct: can("leads") ? getPercentChange(leadsMtd, leadsPrevMtd) : 0,
+        conversionRate: can("leads") ? conversionMtd : 0,
+        conversionChangePct: can("leads") ? Math.round((conversionMtd - conversionPrevMtd) * 10) / 10 : 0,
+        avgOrderValue: can("billing") ? avgOrderValueMtd : 0,
+        avgOrderValueChangePct: can("billing") ? getPercentChange(avgOrderValueMtd, avgOrderValuePrevMtd) : 0,
+        pendingCollections: can("billing") ? pendingCollections._sum.balanceDue || 0 : 0,
+        pendingInvoices: can("billing") ? pendingCollections._count.id || 0 : 0,
+        overdueInvoices: can("billing") ? overdueInvoices.length : 0,
       },
-      pipeline: leadStatusOrder.map(status => ({
+      pipeline: (can("leads") ? leadStatusOrder : []).map(status => ({
         key: status,
         label: leadStatusLabel[status],
         count: statusCountMap[status] || 0,
       })),
-      channelPerformance,
+      channelPerformance: can("leads") ? channelPerformance : [],
       actionCenter: {
-        pendingFollowUps: dueFollowUps.length,
-        overdueInvoices: overdueInvoices.length,
-        dueAppointmentsToday: appointmentsToday,
-        lowStockCritical,
-        followUpItems: dueFollowUps.map(f => ({
+        pendingFollowUps: can("follow-ups") ? dueFollowUps.length : 0,
+        overdueInvoices: can("billing") ? overdueInvoices.length : 0,
+        dueAppointmentsToday: can("appointments") ? appointmentsToday : 0,
+        lowStockCritical: can("inventory") ? lowStockCritical : 0,
+        followUpItems: (can("follow-ups") ? dueFollowUps : []).map(f => ({
           id: f.id,
           customer: f.lead.contact.name,
           phone: f.lead.contact.phone,
@@ -276,7 +280,7 @@ export async function getDashboardStats() {
           dueDate: f.date.toISOString().split('T')[0],
           assignedTo: f.lead.assignedTo?.name || null,
         })),
-        overdueInvoicesList: overdueInvoices.map(inv => ({
+        overdueInvoicesList: (can("billing") ? overdueInvoices : []).map(inv => ({
           id: inv.id,
           displayId: inv.displayId,
           customer: inv.contact.name,

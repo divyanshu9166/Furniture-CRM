@@ -22,7 +22,7 @@ import {getInvoices as getInvoicesAction, getInvoice as getInvoiceAction, create
 import {getHsnCodes as getHsnCodesAction} from '@/app/actions/gst';
 import {moveInvoiceToDraft as moveInvoiceToDraftAction} from '@/app/actions/drafts';
 import {getProducts as getProductsAction} from '@/app/actions/products';
-import {getStaff as getStaffAction} from '@/app/actions/staff';
+import {getStaffDirectory as getStaffAction} from '@/app/actions/staff';
 import {getStoreSettings as getStoreSettingsAction} from '@/app/actions/settings';
 import { invoiceGstWarnings } from '@/lib/billing/invoice-document';
 import { createInvoicePdf, downloadInvoicePdf, printInvoice } from '@/lib/billing/invoice-export';

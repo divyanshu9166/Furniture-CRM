@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -62,15 +64,6 @@ const campaignSchema = z.object({
   }
 })
 
-async function hasMarketingAccess() {
-  try {
-    await requireRole('ADMIN', 'MANAGER')
-    return true
-  } catch {
-    return false
-  }
-}
-
 async function campaignSender(selected?: string) {
   const config = await getSmtpConfig()
   if (!config) {
@@ -83,9 +76,9 @@ async function campaignSender(selected?: string) {
 
 async function triggerAvailable(tx: Prisma.TransactionClient, triggerType: string, excludeId?: number) {
   await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`email-trigger:${triggerType}`}))`
-  return !await tx.emailCampaign.findFirst({ where: {
+  return !(await tx.emailCampaign.findFirst({ where: {
     isAutomated: true, triggerType, status: 'SCHEDULED', ...(excludeId ? { id: { not: excludeId } } : {}),
-  }, select: { id: true } })
+  }, select: { id: true } }));
 }
 
 const validId = (id: number) => Number.isSafeInteger(id) && id > 0 && id <= 2147483647
@@ -106,7 +99,7 @@ function campaignData(data: z.infer<typeof campaignSchema>, sender: { fromEmail:
 // ─── EMAIL TEMPLATES ────────────────────────────────
 
 export async function getEmailTemplates() {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: [] }
+  await requireSection("email-marketing");
 
   const templates = await prisma.emailTemplate.findMany({
     orderBy: { updatedAt: 'desc' },
@@ -130,7 +123,8 @@ export async function getEmailTemplates() {
 }
 
 export async function createEmailTemplate(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const parsed = templateSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -140,7 +134,8 @@ export async function createEmailTemplate(data: unknown) {
 }
 
 export async function updateEmailTemplate(id: number, data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(id)) return { success: false, error: 'Invalid template' }
   const parsed = templateSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -152,7 +147,8 @@ export async function updateEmailTemplate(id: number, data: unknown) {
 }
 
 export async function deleteEmailTemplate(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(id)) return { success: false, error: 'Invalid template' }
   const usedCount = await prisma.emailCampaign.count({ where: { templateId: id } })
   if (usedCount > 0) return { success: false, error: `Template is used by ${usedCount} campaign(s). Remove them first.` }
@@ -166,7 +162,7 @@ export async function deleteEmailTemplate(id: number) {
 // ─── EMAIL CAMPAIGNS ────────────────────────────────
 
 export async function getEmailCampaigns() {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: [] }
+  await requireSection("email-marketing");
 
   const campaigns = await prisma.emailCampaign.findMany({
     orderBy: { createdAt: 'desc' },
@@ -212,7 +208,8 @@ export async function getEmailCampaigns() {
 }
 
 export async function createEmailCampaign(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const parsed = campaignSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
@@ -237,7 +234,8 @@ export async function createEmailCampaign(data: unknown) {
 }
 
 export async function updateEmailCampaign(id: number, data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(id)) return { success: false, error: 'Invalid campaign' }
   const parsed = campaignSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -277,7 +275,8 @@ export async function updateEmailCampaign(id: number, data: unknown) {
 }
 
 export async function deleteEmailCampaign(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(id)) return { success: false, error: 'Invalid campaign' }
   const result = await prisma.$transaction(async tx => {
     await tx.$queryRaw`SELECT id FROM "EmailCampaign" WHERE id = ${id} FOR UPDATE`
@@ -295,7 +294,7 @@ export async function deleteEmailCampaign(id: number) {
 // ─── AUDIENCE / RECIPIENTS ──────────────────────────
 
 export async function getAudienceStats() {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: null }
+  await requireSection("email-marketing");
 
   const [total, withEmail, subscribed, leads, customers] = await Promise.all([
     prisma.contact.count(),
@@ -312,7 +311,7 @@ export async function getAudienceStats() {
 }
 
 export async function getAudiencePreview(audience: string) {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: null }
+  await requireSection("email-marketing");
   if (!['all', 'leads', 'customers'].includes(audience)) return { success: false, error: 'Invalid audience', data: null }
 
   const where: Record<string, unknown> = { email: { not: null }, emailSubscribed: true }
@@ -343,10 +342,10 @@ export async function getAudiencePreview(audience: string) {
 
 /** Searchable, paginated picker. No credential exposure or Contact mutation. */
 export async function searchCampaignContacts(input: unknown) {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
   const parsed = z.object({ search: z.string().trim().max(100).default(''), page: z.number().int().min(1).max(10000).default(1) }).safeParse(input)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
+    await requireSection("email-marketing");
     const { search, page } = parsed.data
     const where = { email: { not: null }, ...(search ? { OR: [{ name: { contains: search, mode: 'insensitive' as const } }, { email: { contains: search, mode: 'insensitive' as const } }] } : {}) }
     const [contacts, total] = await Promise.all([
@@ -358,8 +357,8 @@ export async function searchCampaignContacts(input: unknown) {
 }
 
 export async function previewCampaignRecipients(audience: unknown, filter?: unknown) {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
   try {
+    await requireSection("email-marketing");
     // Preview does not authorize delivery; save/send still enforce confirmation.
     const draft = filter && typeof filter === 'object' && !Array.isArray(filter) ? { ...filter, consentConfirmed: true } : filter
     const resolved = await resolveCampaignAudience(audience, draft)
@@ -370,7 +369,8 @@ export async function previewCampaignRecipients(audience: unknown, filter?: unkn
 // ─── SEND CAMPAIGN (populate recipients + send emails) ────────────
 
 export async function sendEmailCampaign(campaignId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!Number.isInteger(campaignId) || campaignId <= 0) return { success: false, error: 'Invalid campaign' }
   const result = await deliverEmailCampaign(campaignId)
   revalidatePath('/email-marketing')
@@ -399,7 +399,7 @@ export async function sendSmtpTestEmail(config: Record<string, unknown>, toEmail
 }
 
 export async function getEmailConfigStatus() {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
+  await requireSection("email-marketing");
 
   try {
     const config = await getSmtpConfig()
@@ -422,6 +422,7 @@ export async function getEmailConfigStatus() {
 
 export async function getEmailSendingSafety() {
   try {
+    await requireSection("email-marketing");
     const session = await requireRole('ADMIN', 'MANAGER')
     const config = await getSmtpConfig()
     if (!config) return { success: false, error: 'Save SMTP settings before reviewing sending safety.' }
@@ -458,7 +459,7 @@ export async function reportEmailProviderSuspension(input: unknown) {
 // ─── CAMPAIGN ANALYTICS ─────────────────────────────
 
 export async function getCampaignAnalytics(campaignId: number) {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required' }
+  await requireSection("email-marketing");
   if (!validId(campaignId)) return { success: false, error: 'Invalid campaign' }
 
   const campaign = await prisma.emailCampaign.findUnique({
@@ -567,7 +568,7 @@ export async function recordEmailEvent(recipientId: number, type: 'open' | 'clic
 // ─── AUTOMATED CAMPAIGN HELPERS ─────────────────────
 
 export async function getAutomatedCampaigns() {
-  if (!await hasMarketingAccess()) return { success: false, error: 'Manager access required', data: [] }
+  await requireSection("email-marketing");
 
   const campaigns = await prisma.emailCampaign.findMany({
     where: { isAutomated: true },
@@ -591,7 +592,8 @@ export async function getAutomatedCampaigns() {
 }
 
 export async function setEmailAutomationActive(campaignId: number, active: boolean) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(campaignId) || typeof active !== 'boolean') return { success: false, error: 'Invalid automation' }
   try {
     const result = await prisma.$transaction(async tx => {
@@ -616,7 +618,8 @@ export async function setEmailAutomationActive(campaignId: number, active: boole
 }
 
 export async function duplicateCampaign(campaignId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("email-marketing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!validId(campaignId)) return { success: false, error: 'Invalid campaign' }
 
   const original = await prisma.emailCampaign.findUnique({ where: { id: campaignId } })

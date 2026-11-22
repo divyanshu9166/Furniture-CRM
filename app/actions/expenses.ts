@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -34,6 +36,7 @@ const DEFAULT_CATEGORIES = [
 // ─── SEED DEFAULT CATEGORIES ──────────────────────────
 
 export async function seedExpenseCategories() {
+  await requireSection("expenses");
   let created = 0
   for (const cat of DEFAULT_CATEGORIES) {
     const exists = await prisma.expenseCategory.findFirst({ where: { name: cat.name } })
@@ -49,6 +52,7 @@ export async function seedExpenseCategories() {
 // ─── CATEGORIES ───────────────────────────────────────
 
 export async function getExpenseCategories() {
+  await requireSection("expenses");
   const categories = await prisma.expenseCategory.findMany({
     where: { isActive: true },
     orderBy: { sortOrder: 'asc' },
@@ -60,6 +64,7 @@ export async function getExpenseCategories() {
 }
 
 export async function createExpenseCategory(data: unknown) {
+  await requireSection("expenses");
   const parsed = createCategorySchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -76,12 +81,14 @@ export async function createExpenseCategory(data: unknown) {
 }
 
 export async function updateCategoryBudget(id: number, budget: number) {
+  await requireSection("expenses");
   await prisma.expenseCategory.update({ where: { id }, data: { budget } })
   revalidatePath('/expenses')
   return { success: true }
 }
 
 export async function deleteExpenseCategory(id: number) {
+  await requireSection("expenses");
   const cat = await prisma.expenseCategory.findUnique({ where: { id }, include: { _count: { select: { expenses: true } } } })
   if (!cat) return { success: false, error: 'Category not found' }
   if (cat._count.expenses > 0) {
@@ -97,6 +104,7 @@ export async function deleteExpenseCategory(id: number) {
 // ─── EXPENSES ─────────────────────────────────────────
 
 export async function getExpenses(fromDate?: string, toDate?: string) {
+  await requireSection("expenses");
   const where: Record<string, unknown> = {}
   if (fromDate && toDate) {
     where.date = {
@@ -141,6 +149,7 @@ export async function getExpenses(fromDate?: string, toDate?: string) {
 }
 
 export async function createExpense(data: unknown) {
+  await requireSection("expenses");
   const parsed = createExpenseSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -178,6 +187,7 @@ export async function createExpense(data: unknown) {
 
 export async function updateExpense(id: number, data: unknown) {
   try {
+    await requireSection("expenses");
     await requireRole('ADMIN')
   } catch {
     return { success: false, error: 'Admin access required to edit expenses' }
@@ -229,16 +239,19 @@ export async function updateExpense(id: number, data: unknown) {
 }
 
 export async function deleteExpense(id: number) {
+  await requireSection("expenses");
   return moveExpenseToDraft(id)
 }
 
 export async function approveExpense(id: number, approvedBy: string) {
+  await requireSection("expenses");
   await prisma.expense.update({ where: { id }, data: { status: 'Approved', approvedBy } })
   revalidatePath('/expenses')
   return { success: true }
 }
 
 export async function rejectExpense(id: number) {
+  await requireSection("expenses");
   await prisma.expense.update({ where: { id }, data: { status: 'Rejected' } })
   revalidatePath('/expenses')
   return { success: true }
@@ -247,6 +260,7 @@ export async function rejectExpense(id: number) {
 // ─── RECURRING EXPENSES ───────────────────────────────
 
 export async function getRecurringExpenses() {
+  await requireSection("expenses");
   const recurring = await prisma.recurringExpense.findMany({
     include: { category: true },
     orderBy: { createdAt: 'desc' },
@@ -272,6 +286,7 @@ export async function getRecurringExpenses() {
 }
 
 export async function createRecurringExpense(data: unknown) {
+  await requireSection("expenses");
   const parsed = createRecurringSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -287,6 +302,7 @@ export async function createRecurringExpense(data: unknown) {
 }
 
 export async function toggleRecurringExpense(id: number) {
+  await requireSection("expenses");
   const rec = await prisma.recurringExpense.findUnique({ where: { id } })
   if (!rec) return { success: false, error: 'Not found' }
   await prisma.recurringExpense.update({ where: { id }, data: { isActive: !rec.isActive } })
@@ -295,6 +311,7 @@ export async function toggleRecurringExpense(id: number) {
 }
 
 export async function deleteRecurringExpense(id: number) {
+  await requireSection("expenses");
   await prisma.recurringExpense.delete({ where: { id } })
   revalidatePath('/expenses')
   return { success: true }
@@ -303,6 +320,7 @@ export async function deleteRecurringExpense(id: number) {
 // ─── DAILY CASH REGISTER ──────────────────────────────
 
 export async function getCashRegister(date: string) {
+  await requireSection("expenses");
   const dateOnly = new Date(date + 'T00:00:00')
   let register = await prisma.dailyCashRegister.findUnique({ where: { date: dateOnly } })
   if (!register) {
@@ -333,6 +351,7 @@ export async function getCashRegister(date: string) {
 }
 
 export async function updateCashRegister(data: unknown) {
+  await requireSection("expenses");
   const parsed = cashRegisterSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -360,6 +379,7 @@ export async function updateCashRegister(data: unknown) {
 // ─── ANALYTICS & REPORTS ──────────────────────────────
 
 export async function getExpenseSummary(fromDate: string, toDate: string) {
+  await requireSection("expenses");
   const from = new Date(fromDate + 'T00:00:00')
   const to = new Date(toDate + 'T23:59:59')
 
@@ -455,6 +475,7 @@ export async function getExpenseSummary(fromDate: string, toDate: string) {
 // ─── BUDGET VS ACTUAL ─────────────────────────────────
 
 export async function getBudgetVsActual(month: string) {
+  await requireSection("expenses");
   // month = "YYYY-MM"
   const from = new Date(month + '-01T00:00:00')
   const to = new Date(from)

@@ -3,7 +3,24 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
-import { notifyManagers } from '@/lib/notify'
+import { notifyManagers } from '@/lib/notify';
+import { getSectionSession, requireSection } from "@/lib/section-access";
+import type { Section } from "@/lib/section-catalog";
+
+const alertSection = {
+  stock_alert: "inventory",
+  field_visit: "custom-orders",
+  purchase_order: "purchases",
+  financial_alert: "financials",
+} satisfies Record<string, Section>;
+
+async function alertTypes() {
+  const session = await getSectionSession();
+  if (!session) throw new Error("Unauthorized");
+  return Object.entries(alertSection)
+    .filter(([, section]) => session.sections.includes(section))
+    .map(([type]) => type);
+}
 
 type NotificationItem = {
   id: string
@@ -16,6 +33,10 @@ type NotificationItem = {
 }
 
 export async function getTopNotifications() {
+  const session = await getSectionSession();
+  if (!session) throw new Error("Unauthorized");
+  const can = (section: Section) => session.sections.includes(section);
+  const alertWhere = { read: false, type: { in: await alertTypes() } };
   const now = new Date()
   const followUpWhere = {
     sent: false,
@@ -37,7 +58,7 @@ export async function getTopNotifications() {
     unreadNotifications,
     unreadNotificationsCount,
   ] = await Promise.all([
-    prisma.conversation.findMany({
+    can("social-inbox") ? prisma.conversation.findMany({
       where: { unread: { gt: 0 } },
       orderBy: { date: 'desc' },
       take: 8,
@@ -49,8 +70,8 @@ export async function getTopNotifications() {
         lastMessage: true,
         date: true,
       },
-    }),
-    prisma.followUp.findMany({
+    }) : [],
+    can("follow-ups") ? prisma.followUp.findMany({
       where: followUpWhere,
       orderBy: { date: 'asc' },
       take: 8,
@@ -61,27 +82,27 @@ export async function getTopNotifications() {
           },
         },
       },
-    }),
-    prisma.invoice.findMany({
+    }) : [],
+    can("billing") ? prisma.invoice.findMany({
       where: overdueInvoiceWhere,
       orderBy: { dueDate: 'asc' },
       take: 8,
       include: {
         contact: { select: { name: true } },
       },
-    }),
-    prisma.conversation.aggregate({
+    }) : [],
+    can("social-inbox") ? prisma.conversation.aggregate({
       where: { unread: { gt: 0 } },
       _sum: { unread: true },
-    }),
-    prisma.followUp.count({ where: followUpWhere }),
-    prisma.invoice.count({ where: overdueInvoiceWhere }),
+    }) : { _sum: { unread: 0 } },
+    can("follow-ups") ? prisma.followUp.count({ where: followUpWhere }) : 0,
+    can("billing") ? prisma.invoice.count({ where: overdueInvoiceWhere }) : 0,
     prisma.notification.findMany({
-      where: { read: false },
+      where: alertWhere,
       orderBy: { createdAt: 'desc' },
       take: 8,
     }),
-    prisma.notification.count({ where: { read: false } }),
+    prisma.notification.count({ where: alertWhere }),
   ])
 
   const conversationItems: NotificationItem[] = unreadConversations.map(c => ({
@@ -141,6 +162,7 @@ export async function getTopNotifications() {
 }
 
 export async function markConversationNotificationRead(conversationId: number) {
+  await requireSection("social-inbox");
   await prisma.conversation.update({
     where: { id: conversationId },
     data: { unread: 0 },
@@ -151,6 +173,7 @@ export async function markConversationNotificationRead(conversationId: number) {
 }
 
 export async function markAllConversationNotificationsRead() {
+  await requireSection("social-inbox");
   await prisma.conversation.updateMany({
     where: { unread: { gt: 0 } },
     data: { unread: 0 },
@@ -161,8 +184,8 @@ export async function markAllConversationNotificationsRead() {
 }
 
 export async function markNotificationRead(notificationId: number) {
-  await prisma.notification.update({
-    where: { id: notificationId },
+  await prisma.notification.updateMany({
+    where: { id: notificationId, type: { in: await alertTypes() } },
     data: { read: true },
   })
 
@@ -171,7 +194,7 @@ export async function markNotificationRead(notificationId: number) {
 
 export async function markAllAlertNotificationsRead() {
   await prisma.notification.updateMany({
-    where: { read: false },
+    where: { read: false, type: { in: await alertTypes() } },
     data: { read: true },
   })
 

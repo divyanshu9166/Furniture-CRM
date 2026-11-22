@@ -5,15 +5,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
+import { getSocialInboxScope } from '@/lib/workspace'
 import { prisma } from '@/lib/db'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { sendTextMessage } from '@/lib/social/messenger-api'
-
-async function getUserId(): Promise<string | null> {
-  const session = await getSession()
-  return session?.id ? String(session.id) : null
-}
+import { sendTextMessage } from '@/lib/social/messenger-api';
 
 // ── GET — load messages ─────────────────────────────────────────────────────
 
@@ -21,13 +16,13 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const scope = await getSocialInboxScope()
+  if (!scope) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: conversationId } = await params
 
   const conversation = await prisma.socialConversation.findFirst({
-    where: { id: conversationId, user_id: userId },
+    where: { id: conversationId, OR: scope },
   })
   if (!conversation) {
     return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
@@ -54,8 +49,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const scope = await getSocialInboxScope()
+  if (!scope) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: conversationId } = await params
   const { text } = await req.json()
@@ -64,7 +59,7 @@ export async function POST(
   }
 
   const conversation = await prisma.socialConversation.findFirst({
-    where: { id: conversationId, user_id: userId },
+    where: { id: conversationId, OR: scope },
     include: { contact: true },
   })
   if (!conversation) {
@@ -72,7 +67,8 @@ export async function POST(
   }
 
   const platform = conversation.platform as 'facebook' | 'instagram'
-  const recipientId = conversation.contact.platform_id
+  const recipientId = conversation.contact.platform_id;
+  const userId = conversation.user_id;
 
   // Load the correct config
   let pageAccessToken: string

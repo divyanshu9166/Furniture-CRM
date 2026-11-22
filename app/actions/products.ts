@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createProductSchema, updateProductSchema, updateStockSchema } from '@/lib/validations/product'
@@ -37,6 +39,9 @@ const toRequiredNumber = (value: unknown) => {
 }
 
 export async function getProducts() {
+  const { user } = await requireSection("inventory", "manufacturing", "staff-portal", "billing", "custom-orders", "orders", "purchases", "quotations", "godowns");
+  const fullCatalog = user.sections.some(section => ["inventory", "manufacturing", "staff-portal", "purchases", "godowns"].includes(section));
+  const showCost = user.sections.some(section => ["inventory", "manufacturing", "purchases"].includes(section));
   await requireAuth()
   const products = await prisma.product.findMany({
     include: {
@@ -49,7 +54,7 @@ export async function getProducts() {
 
   return {
     success: true,
-    data: products.map(p => {
+    data: products.filter(p => fullCatalog || !["Raw Material", "Consumable"].includes(canonicalInventoryCategory(p.category.name))).map(p => {
       const isRawMaterial = canonicalInventoryCategory(p.category.name) === 'Raw Material'
       const isConsumable = canonicalInventoryCategory(p.category.name) === 'Consumable'
       return {
@@ -65,7 +70,7 @@ export async function getProducts() {
         isSellable: !isRawMaterial && !isConsumable,
         price: p.price,
         bulkPrice: p.bulkPrice,
-        costPrice: p.costPrice,
+        costPrice: showCost ? p.costPrice : null,
         brand: p.brand,
         hsnCode: p.hsnCode,
         unitOfMeasure: p.unitOfMeasure,
@@ -86,6 +91,7 @@ export async function getProducts() {
 }
 
 export async function getProduct(id: number) {
+  await requireSection("inventory");
   await requireAuth()
   const product = await prisma.product.findUnique({
     where: { id },
@@ -97,7 +103,8 @@ export async function getProduct(id: number) {
 }
 
 export async function createProduct(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -114,7 +121,8 @@ export async function createProduct(data: unknown) {
 }
 
 export async function createInventoryItem(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const error = inventoryCreationError(parsed.data.category)
@@ -123,7 +131,8 @@ export async function createInventoryItem(data: unknown) {
 }
 
 export async function createRawMaterial(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   if (parsed.data.category !== 'Raw Material' || !parsed.data.godownId) return { success: false, error: 'Choose a receiving godown for this raw material' }
@@ -131,7 +140,8 @@ export async function createRawMaterial(data: unknown) {
 }
 
 export async function bulkImportRawMaterials(rows: BulkRawMaterialRow[], godownId?: number) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No raw materials to import' }
   if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
   if (!Number.isSafeInteger(godownId) || !godownId || godownId <= 0 || !await prisma.godown.findUnique({ where: { id: godownId } })) return { success: false, error: 'Choose a valid receiving godown before importing raw materials' }
@@ -243,7 +253,8 @@ export interface BulkProductRow {
 }
 
 export async function bulkImportProducts(rows: BulkProductRow[]) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   if (!Array.isArray(rows) || rows.length === 0) return { success: false, error: 'No products to import' }
   if (rows.length > 1000 || rows.some(row => !row || typeof row !== 'object')) return { success: false, error: 'Use at most 1000 valid rows per import' }
   if (rows.some(row => canonicalInventoryCategory(String(row.category || '')) === 'Raw Material')) return { success: false, error: 'Import raw materials from Manufacturing / Raw Materials, where you can choose the receiving godown.' }
@@ -331,7 +342,8 @@ export async function updateProduct(id: number, data: Partial<{
   material: string; brand: string; color: string; description: string; image: string; unitSize: number; unitOfMeasure: string;
   stockGroupId: number | null;
 }>) {
-  try { await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER', 'STAFF') } catch { return { success: false, error: 'Access denied' } }
   if (!Number.isSafeInteger(id) || id <= 0) return { success: false, error: 'Invalid product' }
   const parsed = updateProductSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -345,6 +357,7 @@ export async function updateProduct(id: number, data: Partial<{
 }
 
 export async function updateRawMaterialInventory(id: number, metadata: unknown, adjustment: unknown) {
+  await requireSection("manufacturing");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER', 'STAFF')).user.name } catch { return { success: false, error: 'Access denied' } }
   const fields = updateProductSchema.safeParse(metadata)
@@ -370,6 +383,7 @@ export async function updateRawMaterialInventory(id: number, metadata: unknown, 
 }
 
 export async function updateStock(data: unknown) {
+  await requireSection("inventory");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER', 'STAFF')).user.name } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateStockSchema.safeParse(data)
@@ -400,11 +414,13 @@ export async function updateStock(data: unknown) {
 }
 
 export async function getCategories() {
+  await requireSection("inventory", "manufacturing");
   await requireAuth()
   return prisma.category.findMany({ orderBy: { name: 'asc' } })
 }
 
 export async function reconcileInventoryStock(id: number, basis: 'PRODUCT' | 'LOCATIONS', expectedProduct: number, expectedLocations: number) {
+  await requireSection("inventory");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   if (!['PRODUCT', 'LOCATIONS'].includes(basis)) return { success: false, error: 'Choose the balance to use' }
@@ -418,11 +434,13 @@ export async function reconcileInventoryStock(id: number, basis: 'PRODUCT' | 'LO
 }
 
 export async function getWarehouses() {
+  await requireSection("inventory");
   await requireAuth()
   return prisma.warehouse.findMany({ orderBy: { name: 'asc' } })
 }
 
 export async function getLowStockProducts() {
+  await requireSection("inventory");
   await requireAuth()
   const products = await prisma.product.findMany({
     where: {},
@@ -442,16 +460,19 @@ export async function getLowStockProducts() {
 }
 
 export async function deleteProduct(id: number) {
+  await requireSection("inventory");
   return moveProductToDraft(id)
 }
 
 export async function deleteRawMaterial(id: number) {
+  await requireSection("manufacturing");
   // Permission and canonical-category checks run inside the shared deletion
   // workflow, with the category checked after locking the product.
   return moveProductToDraft(id, 'Raw Material')
 }
 
 export async function bulkAssignRawMaterialGodown(input: unknown) {
+  await requireSection("manufacturing");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   const parsed = assignRawMaterialGodownSchema.safeParse(input)

@@ -1,5 +1,6 @@
 import { getSession as getCustomSession } from './session'
-import type { UserRole } from '@prisma/client'
+import type { UserRole } from '@prisma/client';
+import { getSectionSession } from "./section-access";
 
 export async function getSession() {
   const session = await getCustomSession()
@@ -17,11 +18,12 @@ export async function getSession() {
 }
 
 export async function requireAuth() {
-  const session = await getSession()
-  if (!session?.user) {
+  const account = await getSectionSession()
+  if (!account) {
     throw new Error('Unauthorized')
   }
-  return session
+  const { id, email, name, role, staffId } = account;
+  return { user: { id, email, name, role, staffId } };
 }
 
 export async function requireRole(...roles: UserRole[]) {

@@ -1,5 +1,7 @@
 'use server'
-import { inventoryError, inventoryTransaction, lockProducts, moveTotalStock } from '@/lib/inventory/stock'
+import { requireSection } from "@/lib/section-access";
+import {
+  inventoryError, inventoryTransaction, lockProducts, moveTotalStock } from '@/lib/inventory/stock'
 
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
@@ -115,10 +117,20 @@ const mapStaffForPortal = (s: any) => ({
     date: su.date.toISOString().split('T')[0],
     time: su.time,
   })),
-})
+});
+
+// Shared assignment picker: don't expose payroll, credentials, or attendance.
+export async function getStaffDirectory() {
+  await requireSection("billing", "custom-orders", "walkins", "follow-ups");
+  return { success: true, data: await prisma.staff.findMany({
+    where: { status: "Active" },
+    select: { id: true, name: true, role: true, status: true },
+    orderBy: { name: "asc" },
+  }) };
+}
 
 export async function getStaff() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: [] } }
+  try { await requireSection("staff") } catch { return { success: false, error: 'Manager access required', data: [] } }
   const staff = await prisma.staff.findMany({
     include: staffPortalInclude,
     orderBy: { name: 'asc' },
@@ -131,6 +143,7 @@ export async function getStaff() {
 }
 
 export async function getStaffPortalProfile(staffId: number) {
+  await requireSection("staff-portal");
   let session
   try { session = await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
 
@@ -150,7 +163,7 @@ export async function getStaffPortalProfile(staffId: number) {
 }
 
 export async function getStaffMember(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("staff") } catch { return { success: false, error: 'Manager access required' } }
   const staff = await prisma.staff.findUnique({
     where: { id },
     include: {
@@ -165,6 +178,7 @@ export async function getStaffMember(id: number) {
 }
 
 export async function createStaff(data: unknown) {
+  await requireSection("staff");
   let session
   try { session = await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const parsed = createStaffSchema.safeParse(data)
@@ -224,7 +238,8 @@ export async function createStaff(data: unknown) {
 }
 
 export async function assignStaffLogin(staffId: number, loginUsername: string, loginPassword: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("staff");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
 
   const username = loginUsername.trim()
   const password = loginPassword.trim()
@@ -261,7 +276,8 @@ export async function assignStaffLogin(staffId: number, loginUsername: string, l
 }
 
 export async function verifyStaffPortalPassword(staffId: number, password: string) {
-  try { await requireStaffScope(staffId, false) } catch { return { success: false, error: 'Forbidden' } }
+  try { await requireSection("staff-portal");
+    await requireStaffScope(staffId, false) } catch { return { success: false, error: 'Forbidden' } }
 
   const pass = password.trim()
   if (!pass) return { success: false, error: 'Password is required' }
@@ -281,6 +297,7 @@ export async function verifyStaffPortalPassword(staffId: number, password: strin
 }
 
 export async function updateStaffMember(data: unknown) {
+  await requireSection("staff");
   let session
   try { session = await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
 
@@ -376,7 +393,8 @@ export async function updateStaffTarget(staffId: number, data: {
   commissionEarned: number
   commissionPending: number
 }) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("staff");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   if (!Number.isInteger(staffId) || staffId <= 0 || !Object.values(data).every(value => Number.isFinite(value) && value >= 0) || data.commissionRate > 100) {
     return { success: false, error: 'Invalid target or commission values' }
   }
@@ -406,7 +424,8 @@ function getDistance(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 export async function clockIn(staffId: number, gps?: { lat: number; lng: number }) {
-  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  try { await requireSection("staff-portal");
+    await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   const { today, time } = getISTDate()
 
   // 1. Check if already clocked in
@@ -461,7 +480,8 @@ export async function clockIn(staffId: number, gps?: { lat: number; lng: number 
 }
 
 export async function clockOut(staffId: number, gps?: { lat: number; lng: number }) {
-  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
+  try { await requireSection("staff-portal");
+    await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   const { today, time } = getISTDate()
 
   const existing = await prisma.attendance.findUnique({
@@ -519,7 +539,8 @@ export async function clockOut(staffId: number, gps?: { lat: number; lng: number
 }
 
 export async function getMonthAttendance(staffId: number, year: number, month: number) {
-  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+  try { await requireSection("staff", "staff-portal");
+    await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) return { success: false, error: 'Invalid month', data: [] }
   // month is 1-based (1 = January)
   const startDate = new Date(year, month - 1, 1)
@@ -546,7 +567,8 @@ export async function getMonthAttendance(staffId: number, year: number, month: n
 }
 
 export async function getAttendance(staffId: number, days: number = 30) {
-  try { await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+  try { await requireSection("staff", "staff-portal");
+    await requireStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   if (!Number.isInteger(days) || days < 1 || days > 366) return { success: false, error: 'Invalid date range', data: [] }
   const since = new Date()
   since.setDate(since.getDate() - days)
@@ -560,7 +582,7 @@ export async function getAttendance(staffId: number, days: number = 30) {
 }
 
 export async function getDailyAttendanceReport() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: null } }
+  try { await requireSection("staff") } catch { return { success: false, error: 'Manager access required', data: null } }
   const { today } = getISTDate()
 
   const allStaff = await prisma.staff.findMany({
@@ -600,6 +622,7 @@ export async function getDailyAttendanceReport() {
 }
 
 export async function staffStockUpdate(data: unknown) {
+  await requireSection("staff-portal", "inventory");
   const parsed = staffStockUpdateSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const { staffId, productId, action, quantity } = parsed.data

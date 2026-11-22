@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -16,6 +18,7 @@ export interface BulkContactRow {
 
 export async function bulkImportContacts(rows: BulkContactRow[]) {
   try {
+    await requireSection("marketing");
     await requireRole('ADMIN', 'MANAGER')
   } catch {
     return { success: false, error: 'Manager access required' }

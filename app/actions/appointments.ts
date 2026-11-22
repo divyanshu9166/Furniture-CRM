@@ -1,10 +1,13 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createAppointmentSchema } from '@/lib/validations/appointment'
 
 export async function getAppointments() {
+  await requireSection("appointments");
   const appointments = await prisma.appointment.findMany({
     include: { contact: true },
     orderBy: { date: 'desc' },
@@ -26,6 +29,7 @@ export async function getAppointments() {
 }
 
 export async function createAppointment(data: unknown) {
+  await requireSection("appointments");
   const parsed = createAppointmentSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -51,6 +55,7 @@ export async function createAppointment(data: unknown) {
 }
 
 export async function updateAppointmentStatus(id: number, status: string) {
+  await requireSection("appointments");
   const appointment = await prisma.appointment.update({
     where: { id },
     data: { status },
@@ -61,5 +66,6 @@ export async function updateAppointmentStatus(id: number, status: string) {
 }
 
 export async function cancelAppointment(id: number) {
+  await requireSection("appointments");
   return updateAppointmentStatus(id, 'Cancelled')
 }

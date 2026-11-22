@@ -4,20 +4,15 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
-import { prisma } from '@/lib/db'
-
-async function getUserId(): Promise<string | null> {
-  const session = await getSession()
-  return session?.id ? String(session.id) : null
-}
+import { getSocialInboxScope } from '@/lib/workspace'
+import { prisma } from '@/lib/db';
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const scope = await getSocialInboxScope()
+  if (!scope) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: conversationId } = await params
 
@@ -34,7 +29,7 @@ export async function PATCH(
   }
 
   const conversation = await prisma.socialConversation.findFirst({
-    where: { id: conversationId, user_id: userId },
+    where: { id: conversationId, OR: scope },
   })
   if (!conversation) {
     return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })

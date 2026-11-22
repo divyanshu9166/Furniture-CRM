@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFile, stat } from 'node:fs/promises'
-import { getUploadFilePath } from '@/lib/r2'
+import { getUploadFilePath } from '@/lib/r2';
+import { getSectionSession } from "@/lib/section-access";
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,6 +12,8 @@ const MIME_TYPES: Record<string, string> = {
   png: 'image/png',
   webp: 'image/webp',
   gif: 'image/gif',
+  heic: "image/heic",
+  heif: "image/heif",
   svg: 'image/svg+xml',
   pdf: 'application/pdf',
 }
@@ -25,10 +28,17 @@ export async function GET(
   const relativePath = segments.join('/')
 
   // Security: block path traversal
-  if (relativePath.includes('..') || relativePath.startsWith('/')) {
+  if (segments.some(segment => !/^[A-Za-z0-9_.-]+$/.test(segment) || segment === "." || segment === "..")) {
     return NextResponse.json({ error: 'Invalid path' }, { status: 400 })
   }
 
+  const receipt = segments[0] === "receipts";
+  if (receipt) {
+    const session = await getSectionSession();
+    if (!session?.sections.includes("payments")) {
+      return NextResponse.json({ error: "Receipt access denied" }, { status: session ? 403 : 401 });
+    }
+  }
   const filePath = getUploadFilePath(relativePath)
 
   try {
@@ -44,7 +54,8 @@ export async function GET(
     const headers: Record<string, string> = {
       'Content-Type': contentType,
       'Content-Length': String(buffer.length),
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': receipt ? "private, no-store" : 'public, max-age=31536000, immutable',
+      "X-Content-Type-Options": "nosniff",
     }
     // ?download=1 saves the file instead of showing it. App wrappers (WebView)
     // only save files that arrive as a normal link with this header.

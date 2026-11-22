@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
@@ -36,7 +38,8 @@ export async function adjustGodownStock(
   }
 ) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("godowns", "inventory");
+    const session = await requireRole('ADMIN', 'MANAGER')
   assertId(productId); assertId(godownId)
   if (!['IN', 'OUT', 'ADJUSTMENT'].includes(entryType) || !Number.isFinite(quantity) || quantity === 0) throw new Error('Invalid manual stock adjustment')
   if ((entryType === 'IN' && quantity < 0) || (entryType === 'OUT' && quantity > 0)) throw new Error('Adjustment direction does not match quantity')
@@ -52,7 +55,8 @@ export async function adjustGodownStock(
  */
 export async function getOrCreateDefaultGodown() {
   try {
-  await requireRole('ADMIN', 'MANAGER')
+  await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER')
   return inventoryTransaction(prisma, defaultGodown)
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
@@ -60,6 +64,7 @@ export async function getOrCreateDefaultGodown() {
 // ─── STOCK LEDGER ────────────────────────────────────────
 
 export async function getStockLedger(filters?: { productId?: number; godownId?: number; limit?: number; cursor?: number }) {
+  await requireSection("godowns", "inventory");
   await requireAuth()
   const parsed = z.object({ productId: z.number().int().positive().optional(), godownId: z.number().int().positive().optional(), cursor: z.number().int().positive().optional(), limit: z.number().int().positive().max(1000).optional() }).safeParse(filters || {})
   if (!parsed.success) return { success: false, error: 'Invalid ledger filters', data: [], nextCursor: null }
@@ -85,6 +90,7 @@ export async function getStockLedger(filters?: { productId?: number; godownId?: 
 // ─── GODOWN STOCK SUMMARY ────────────────────────────────
 
 export async function getGodownStockSummary() {
+  await requireSection("godowns");
   await requireAuth()
   const godowns = await prisma.godown.findMany({
     include: {
@@ -112,6 +118,7 @@ export async function getGodownStockSummary() {
 // Diagnostic read only: matching recorded totals does not prove physical stock.
 export async function getGodownStockAudit() {
   try {
+    await requireSection("godowns");
     await requireRole('ADMIN', 'MANAGER')
     const data = await inventoryTransaction(prisma, async tx => buildStockAudit(await tx.product.findMany({
       select: { id: true, name: true, sku: true, stock: true, unitSize: true, unitOfMeasure: true, godownStocks: { select: { godownId: true, quantity: true } }, batches: { select: { remainingQty: true } } },
@@ -124,6 +131,7 @@ export async function getGodownStockAudit() {
 // ─── BRANCHES ────────────────────────────────────────
 
 export async function getBranches() {
+  await requireSection("godowns");
   await requireAuth()
   const branches = await prisma.branch.findMany({
     orderBy: { name: 'asc' },
@@ -137,7 +145,8 @@ export async function getBranches() {
 
 export async function createBranch(data: unknown) {
   try {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+    await requireSection("godowns");
+    try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = createBranchSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -149,7 +158,8 @@ export async function createBranch(data: unknown) {
 
 export async function updateBranch(id: number, data: unknown) {
   try {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+    await requireSection("godowns");
+    try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = updateBranchSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -162,7 +172,8 @@ export async function updateBranch(id: number, data: unknown) {
 
 export async function deleteBranch(id: number) {
   try {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+    await requireSection("godowns");
+    try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   assertId(id)
   await inventoryTransaction(prisma, tx => removeBranch(tx, id))
   revalidatePath('/godowns')
@@ -173,6 +184,7 @@ export async function deleteBranch(id: number) {
 // ─── GODOWNS ─────────────────────────────────────────
 
 export async function getGodowns() {
+  await requireSection("godowns", "inventory", "manufacturing", "orders", "purchases");
   await requireAuth()
   const godowns = await prisma.godown.findMany({
     orderBy: { name: 'asc' },
@@ -185,7 +197,8 @@ export async function getGodowns() {
 }
 
 export async function createGodown(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createGodownSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -197,7 +210,8 @@ export async function createGodown(data: unknown) {
 }
 
 export async function updateGodown(id: number, data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateGodownSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -209,7 +223,8 @@ export async function updateGodown(id: number, data: unknown) {
 }
 
 export async function deleteGodown(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   try {
   await inventoryTransaction(prisma, tx => removeGodown(tx, id))
   refreshGodownConsumers()
@@ -218,7 +233,8 @@ export async function deleteGodown(id: number) {
 }
 
 export async function setDefaultGodown(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   try {
   await inventoryTransaction(prisma, tx => chooseDefaultGodown(tx, id))
   refreshGodownConsumers()
@@ -229,6 +245,7 @@ export async function setDefaultGodown(id: number) {
 // ─── GODOWN STOCK ─────────────────────────────────────
 
 export async function getGodownStock(godownId?: number) {
+  await requireSection("godowns", "inventory", "manufacturing");
   await requireAuth()
   if (godownId !== undefined && !z.number().int().positive().safeParse(godownId).success) return { success: false, error: 'Invalid godown filter', data: [] }
   const stocks = await prisma.godownStock.findMany({
@@ -243,7 +260,8 @@ export async function getGodownStock(godownId?: number) {
 }
 
 export async function updateGodownStock(productId: number, godownId: number, quantity: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const { updateStock } = await import('./products')
   return updateStock({ id: productId, godownId, stock: quantity, mode: 'SET' })
 }
@@ -253,7 +271,8 @@ export async function updateGodownStock(productId: number, godownId: number, qua
  * it is ADD, not a relocation. Existing stock moves through transfer actions.
  */
 export async function assignStockToGodown(productId: number, godownId: number, quantity: number, notes?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const { updateStock } = await import('./products')
   return updateStock({ id: productId, godownId, stock: quantity, mode: 'ADD', notes: notes || 'New stock received into godown' })
 }
@@ -261,6 +280,7 @@ export async function assignStockToGodown(productId: number, godownId: number, q
 // ─── INTER-GODOWN TRANSFERS ──────────────────────────
 
 export async function getTransfers() {
+  await requireSection("godowns");
   await requireAuth()
   const transfers = await prisma.godownTransfer.findMany({
     orderBy: [{ date: 'desc' }, { id: 'desc' }],
@@ -274,6 +294,7 @@ export async function getTransfers() {
 }
 
 export async function createTransfer(data: unknown) {
+  await requireSection("godowns");
   let requestedBy: string
   try { requestedBy = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Access denied' } }
   const parsed = createTransferSchema.safeParse(data)
@@ -287,6 +308,7 @@ export async function createTransfer(data: unknown) {
 }
 
 export async function completeTransfer(id: number, _approvedBy?: string) {
+  await requireSection("godowns");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Access denied' } }
 
@@ -300,6 +322,7 @@ export async function completeTransfer(id: number, _approvedBy?: string) {
 
 export async function cancelTransfer(id: number) {
   try {
+    await requireSection("godowns");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, tx => cancelPendingTransfer(tx, id))
     refreshGodownConsumers()
@@ -314,7 +337,8 @@ export async function cancelTransfer(id: number) {
  * Ensures all products have their stock allocated in the default godown.
  */
 export async function migrateExistingStockToGodowns() {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("godowns");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
 
   try {
   const result = await inventoryTransaction(prisma, async tx => {

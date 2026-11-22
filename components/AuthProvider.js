@@ -16,7 +16,7 @@ export default function AuthProvider({ children }) {
 
   const fetchSession = async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await fetch('/api/auth/me', { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setSession(data);
@@ -33,6 +33,9 @@ export default function AuthProvider({ children }) {
 
   useEffect(() => {
     fetchSession();
+    const onFocus = () => fetchSession();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const value = {

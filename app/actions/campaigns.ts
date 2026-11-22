@@ -1,11 +1,13 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { requireRole } from '@/lib/auth-helpers'
 
 export async function getCampaigns() {
   try {
-    await requireRole('ADMIN', 'MANAGER')
+    await requireSection("marketing")
   } catch {
     return { success: false, error: 'Manager access required', data: [] }
   }

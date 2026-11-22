@@ -103,7 +103,7 @@ export function useRealtime({
       // 2. Open socket with the JWT in the handshake.
       // `auth` is a callback (not a static object) so socket.io re-calls it
       // on every reconnect attempt — this means a fresh token is fetched
-      // automatically, preventing auth failures when the 1h JWT expires.
+      // automatically, so access is checked again when a ticket expires.
       const socket = io(WS_URL, {
         auth: async (cb: (data: Record<string, unknown>) => void) => {
           let freshToken = token; // use the already-fetched token on first connect
@@ -112,7 +112,7 @@ export function useRealtime({
             if (res.ok) {
               const body = await res.json();
               freshToken = body.token as string;
-            }
+            } else if (res.status === 401 || res.status === 403) freshToken = "";
           } catch {
             // keep using the current token if refresh fails
           }
@@ -135,6 +135,7 @@ export function useRealtime({
       socket.on("disconnect", (reason) => {
         setIsConnected(false);
         console.log("[use-realtime] disconnected:", reason);
+        if (reason === "io server disconnect" && !cancelled) socket.connect();
       });
 
       socket.on("connect_error", (err) => {

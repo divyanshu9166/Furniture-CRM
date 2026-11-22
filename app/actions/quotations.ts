@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { requireAuth } from '@/lib/auth-helpers'
 import { validateSellableItems } from '@/lib/inventory/products'
@@ -182,6 +184,7 @@ function formatQuotation(quotation: QuotationWithRelations) {
 }
 
 export async function getQuotations() {
+  await requireSection("quotations");
   const quotations = await prisma.quotation.findMany({
     include: {
       contact: true,
@@ -197,6 +200,7 @@ export async function getQuotations() {
 }
 
 export async function getQuotation(id: number) {
+  await requireSection("quotations");
   const quotation = await prisma.quotation.findUnique({
     where: { id },
     include: {
@@ -210,7 +214,8 @@ export async function getQuotation(id: number) {
 }
 
 export async function createQuotation(data: unknown) {
-  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("quotations");
+    await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = createQuotationSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const inventoryError = await validateSellableItems(prisma, parsed.data.items.flatMap(item => item.productId ? [item.productId] : []))
@@ -380,7 +385,8 @@ export async function createQuotation(data: unknown) {
 }
 
 export async function updateQuotation(data: unknown) {
-  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("quotations");
+    await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateQuotationSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const inventoryError = await validateSellableItems(prisma, parsed.data.items.flatMap(item => item.productId ? [item.productId] : []))
@@ -551,6 +557,7 @@ export async function updateQuotation(data: unknown) {
 }
 
 export async function updateQuotationStatus(data: unknown) {
+  await requireSection("quotations");
   const parsed = updateQuotationStatusSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -564,6 +571,7 @@ export async function updateQuotationStatus(data: unknown) {
 }
 
 export async function getQuotationStats() {
+  await requireSection("quotations");
   const [total, draft, sent, approved, rejected, totalValue] = await Promise.all([
     prisma.quotation.count(),
     prisma.quotation.count({ where: { status: 'DRAFT' } }),

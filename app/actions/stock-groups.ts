@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
@@ -13,6 +15,7 @@ const createStockGroupSchema = z.object({
 
 export async function getStockGroups() {
   try {
+    await requireSection("inventory");
     await requireAuth()
     const groups = await prisma.stockGroup.findMany({
       orderBy: { name: 'asc' },
@@ -29,7 +32,8 @@ export async function getStockGroups() {
 }
 
 export async function createStockGroup(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   try {
     const parsed = createStockGroupSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -60,7 +64,8 @@ export async function createStockGroup(data: unknown) {
 }
 
 export async function updateStockGroup(id: number, data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   try {
     if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'Invalid stock group' }
     const parsed = createStockGroupSchema.safeParse(data)
@@ -112,7 +117,8 @@ export async function updateStockGroup(id: number, data: unknown) {
 }
 
 export async function deleteStockGroup(id: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("inventory");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   try {
     if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'Invalid stock group' }
 

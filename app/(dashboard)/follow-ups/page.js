@@ -6,7 +6,7 @@ import {
     XCircle, RotateCcw, Trash2, Pencil, AlertTriangle, User, Tag, Settings2, RefreshCw, Send,
 } from 'lucide-react';
 import {getFollowUps as getFollowUpsAction, createFollowUp as createFollowUpAction, updateFollowUp as updateFollowUpAction, updateFollowUpStatus as updateFollowUpStatusAction, deleteFollowUp as deleteFollowUpAction, getFollowUpCounts as getFollowUpCountsAction, getReminderConfig as getReminderConfigAction, getFollowUpReminderTemplates as getFollowUpReminderTemplatesAction, updateReminderConfig as updateReminderConfigAction, runFollowUpRemindersNow as runFollowUpRemindersNowAction} from '@/app/actions/follow-ups';
-import {getStaff as getStaffAction} from '@/app/actions/staff';
+import {getStaffDirectory as getStaffAction} from '@/app/actions/staff';
 import { dueLabel, dueBucket, daysUntil } from '@/lib/follow-ups';
 import { LEAD_SOURCE_OPTIONS } from '@/lib/lead-sources';
 import { FOLLOW_UP_PRIORITIES } from '@/lib/validations/follow-up';

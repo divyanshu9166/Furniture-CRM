@@ -12,7 +12,7 @@
  *
  * Security:
  *   - This route is session-gated: unauthenticated requests get 401.
- *   - The JWT expires in 1 hour. The frontend re-fetches transparently
+ *   - The JWT expires in 5 minutes. The frontend re-fetches transparently
  *     on each socket reconnect (socket.io reconnects pass a fresh token).
  *   - The same SESSION_SECRET signs both the session cookie and the JWT,
  *     so no extra key management is required.
@@ -20,11 +20,17 @@
 
 import { NextResponse } from 'next/server'
 import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
-import { SignJWT } from 'jose'
+import { SignJWT } from 'jose';
+import { getSectionSession } from "@/lib/section-access";
 
 const SESSION_SECRET = process.env.SESSION_SECRET ?? ''
 
 export async function GET() {
+  const account = await getSectionSession();
+  if (!account) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!account.sections.includes("whatsapp-marketing")) {
+    return NextResponse.json({ error: "Section access denied" }, { status: 403 });
+  }
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -37,7 +43,7 @@ export async function GET() {
   const token = await new SignJWT({ id: session.id, email: session.email })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
-    .setExpirationTime('1h')
+    .setExpirationTime("5m")
     .sign(secret)
 
   return NextResponse.json({ token })

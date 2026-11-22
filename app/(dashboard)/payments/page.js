@@ -11,6 +11,7 @@ import {
   AlertCircle, CheckCheck, Zap
 } from 'lucide-react';
 import Modal from '@/components/Modal';
+import PaymentReceiptPreview from '@/components/PaymentReceiptPreview';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import {
   getDailyPayments,
@@ -66,6 +67,7 @@ export default function PaymentsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [receiptUploading, setReceiptUploading] = useState(false);
   const [receiptError, setReceiptError] = useState('');
+  const [receiptPreview, setReceiptPreview] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [selectedPayments, setSelectedPayments] = useState(new Set());
   const [showReconcileModal, setShowReconcileModal] = useState(false);
@@ -400,9 +402,9 @@ export default function PaymentsPage() {
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] text-muted">{new Date(p.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             {p.attachment && (
-                              <a href={p.attachment} target="_blank" rel="noreferrer" className="text-muted hover:text-accent ml-1">
+                              <button type="button" onClick={() => setReceiptPreview(p.attachment)} aria-label="View payment receipt" className="text-muted hover:text-accent ml-1">
                                 <Paperclip className="w-3 h-3" />
-                              </a>
+                              </button>
                             )}
                             <button onClick={() => handleDelete(p.id)} disabled={deletingId === p.id} className="ml-1 text-muted hover:text-red-500 disabled:opacity-50">
                               {deletingId === p.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
@@ -531,10 +533,10 @@ export default function PaymentsPage() {
                     {/* Row actions */}
                     <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border">
                       {p.attachment && (
-                        <a href={p.attachment} target="_blank" rel="noreferrer"
+                        <button type="button" onClick={() => setReceiptPreview(p.attachment)}
                           className="tap-press-sm flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted bg-surface border border-border">
                           <Eye className="w-3.5 h-3.5" /> View
-                        </a>
+                        </button>
                       )}
                       {canBounce && (
                         <button onClick={() => { setSelectedPaymentForAction(p); setShowBounceModal(true); }}
@@ -629,9 +631,9 @@ export default function PaymentsPage() {
                               </button>
                               <div className="absolute right-0 top-full mt-1 bg-background border border-border rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all p-1 z-20">
                                 {p.attachment && (
-                                  <a href={p.attachment} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-accent whitespace-nowrap">
+                                  <button type="button" onClick={() => setReceiptPreview(p.attachment)} className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted hover:text-accent whitespace-nowrap">
                                     <Eye className="w-3.5 h-3.5" /> View
-                                  </a>
+                                  </button>
                                 )}
                                 {!p.isReversal && p.status !== 'Bounced' && (
                                   <>
@@ -1109,9 +1111,9 @@ export default function PaymentsPage() {
               </label>
               {form.attachment && (
                 <div className="ui-actions flex gap-2">
-                  <a href={form.attachment} target="_blank" rel="noreferrer" className="p-2 border border-border rounded-xl hover:bg-surface text-accent">
+                  <button type="button" onClick={() => setReceiptPreview(form.attachment)} aria-label="View uploaded receipt" className="p-2 border border-border rounded-xl hover:bg-surface text-accent">
                     <Eye className="w-4 h-4" />
-                  </a>
+                  </button>
                   <button onClick={() => setForm(f => ({ ...f, attachment: '' }))} className="p-2 border border-border rounded-xl hover:bg-red-500/10 text-red-500">
                     <X className="w-4 h-4" />
                   </button>
@@ -1129,6 +1131,10 @@ export default function PaymentsPage() {
           </div>
         </div>
       </Modal>
+      {receiptPreview && (
+        <PaymentReceiptPreview key={receiptPreview} receiptUrl={receiptPreview}
+          onClose={() => setReceiptPreview(null)} />
+      )}
     </div>
   );
 }

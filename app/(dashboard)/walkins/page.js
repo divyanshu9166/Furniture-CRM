@@ -11,7 +11,7 @@ import Modal from '@/components/Modal';
 import { getWalkins, createWalkin, updateWalkinStatus } from '@/app/actions/walkins';
 import { createLead } from '@/app/actions/leads';
 import { moveWalkinToDraft } from '@/app/actions/drafts';
-import { getStaff } from '@/app/actions/staff';
+import { getStaffDirectory as getStaff } from '@/app/actions/staff';
 import { useAlertToast } from '@/components/AlertToastProvider';
 import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';

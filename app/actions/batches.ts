@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
@@ -9,6 +11,7 @@ import { ageInDays, agingBracket } from '@/lib/inventory/aging'
 import { indiaDate } from '@/lib/inventory/batches'
 
 export async function getBatches(productId?: number) {
+  await requireSection("inventory");
   await requireAuth()
   const batches = await prisma.productBatch.findMany({
     where: productId ? { productId } : undefined,
@@ -55,14 +58,18 @@ async function saveBatch(data: unknown, id?: number) {
   } catch (error) { return { success: false, error: inventoryError(error) } }
 }
 
-export async function createBatch(data: unknown) { return saveBatch(data) }
+export async function createBatch(data: unknown) {
+  await requireSection("inventory");
+  return saveBatch(data) }
 
 export async function updateBatch(id: number, data: unknown) {
+  await requireSection("inventory");
   if (!Number.isSafeInteger(id) || id <= 0) return { success: false, error: 'Invalid batch' }
   return saveBatch(data, id)
 }
 
 export async function getAgingAnalysis() {
+  await requireSection("inventory");
   await requireAuth()
   return inventoryTransaction(prisma, async tx => {
     const products = await tx.product.findMany({

@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
+import { requireSection, requireSectionAdmin } from "@/lib/section-access";
 import { resolveWorkspaceUserId } from '@/lib/workspace'
 import { encrypt } from '@/lib/whatsapp/encryption'
 import type { Contact } from '@prisma/client'
@@ -15,6 +16,7 @@ const SOCIAL_WEBHOOK_CHANNELS = new Set(['Instagram', 'Facebook'])
 // ─── GET ALL CHANNEL CONFIGS ────────────────────────
 
 export async function getChannelConfigs() {
+  await requireSectionAdmin();
   const configs = await prisma.channelConfig.findMany({
     orderBy: { channel: 'asc' },
   })
@@ -53,13 +55,15 @@ export async function upsertChannelConfig(data: {
   // unified webhook + inbox read. Do this before saving ChannelConfig so a
   // validation error (e.g. missing token) surfaces to the user.
   // Saved under the shared workspace owner, so Managers see the same connection.
-  const workspaceUserId = await resolveWorkspaceUserId(String(session.user.id), session.user.role)
-  if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && enabled) {
-    const syncError = await syncSocialConfig(channel, enabled, config, workspaceUserId)
+  if (SOCIAL_WEBHOOK_CHANNELS.has(channel)) {
+    const owner = await resolveWorkspaceUserId(String(session.user.id), session.user.role,
+      channel === "Facebook" ? "facebook" : "instagram")
+  if (enabled) {
+    const syncError = await syncSocialConfig(channel, enabled, config, owner)
     if (syncError) return { success: false, error: syncError }
-  } else if (SOCIAL_WEBHOOK_CHANNELS.has(channel) && !enabled) {
-    // Disconnect: flip status in the dedicated table too.
-    await disconnectSocialConfig(channel, workspaceUserId)
+  } else {
+      await disconnectSocialConfig(channel, owner)
+  }
   }
 
   const result = await prisma.channelConfig.upsert({
@@ -181,6 +185,7 @@ async function disconnectSocialConfig(channel: string, userId: string) {
 // ─── TOGGLE CHANNEL ────────────────────────────────
 
 export async function toggleChannel(channel: string, enabled: boolean) {
+  await requireSectionAdmin();
   const existing = await prisma.channelConfig.findUnique({ where: { channel } })
   if (!existing) return { success: false, error: 'Channel not configured yet. Save settings first.' }
 
@@ -197,6 +202,7 @@ export async function toggleChannel(channel: string, enabled: boolean) {
 // ─── GET CHANNEL CONFIG (for webhook routes) ───────
 
 export async function getChannelConfig(channel: string) {
+  await requireSectionAdmin();
   const config = await prisma.channelConfig.findUnique({ where: { channel } })
   if (!config || !config.enabled) return null
   return {
@@ -217,6 +223,7 @@ export async function createOrUpdateConversation(data: {
   customerPhone?: string
   message: string
 }) {
+  await requireSection("social-inbox");
   const { channel, externalId, customerName, customerPhone, message } = data
   const now = new Date()
   const time = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
@@ -281,6 +288,7 @@ export async function createOrUpdateConversation(data: {
 // ─── SEND OUTBOUND MESSAGE ─────────────────────────
 
 export async function sendOutboundMessage(conversationId: number, text: string) {
+  await requireSection("social-inbox");
   const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } })
   if (!conversation) return { success: false, error: 'Conversation not found' }
 
@@ -335,7 +343,7 @@ async function sendWhatsAppMessage(config: Record<string, string>, to: string, t
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${config.apiToken}`,
+        Authorization: `Bearer ${config.apiToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -363,7 +371,7 @@ async function sendInstagramMessage(config: Record<string, string>, recipientId:
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${config.accessToken}`,
+        Authorization: `Bearer ${config.accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -389,7 +397,7 @@ async function sendFacebookMessage(config: Record<string, string>, recipientId: 
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${config.accessToken}`,
+        Authorization: `Bearer ${config.accessToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

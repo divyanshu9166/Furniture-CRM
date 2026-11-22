@@ -1,12 +1,15 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import { revalidatePath } from 'next/cache'
 import { readWalkinRequirements, saveWalkinRequirements, saveRequirementsSchema, RequirementsChangedError } from '@/lib/walkins/requirements'
 
 export async function getWalkinRequirements() {
-  try { await requireAuth() } catch { return { success: false, error: 'Please sign in to view requirements' } }
+  try { await requireSection("walkins");
+    await requireAuth() } catch { return { success: false, error: 'Please sign in to view requirements' } }
   try {
     return { success: true, data: await readWalkinRequirements(prisma) }
   } catch {
@@ -15,7 +18,8 @@ export async function getWalkinRequirements() {
 }
 
 export async function updateWalkinRequirements(input: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Admin or manager access required' } }
+  try { await requireSection("walkins");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Admin or manager access required' } }
   const parsed = saveRequirementsSchema.safeParse(input)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {

@@ -77,12 +77,13 @@ io.use((socket, next) => {
   try {
     const decoded = jwt.verify(token, SESSION_SECRET)
 
-    if (typeof decoded !== 'object' || !decoded || !decoded.id) {
+    if (typeof decoded !== 'object' || !decoded || !decoded.id || !Number.isFinite(decoded.exp)) {
       return next(new Error('Invalid token payload'))
     }
 
     // Attach verified identity to the socket for downstream use
-    socket.data.userId = String(decoded.id)
+    socket.data.userId = String(decoded.id);
+    socket.data.expiresAt = decoded.exp * 1000;
     next()
   } catch (err) {
     console.warn('[ws-server] auth failed:', err.message)
@@ -96,11 +97,14 @@ io.on('connection', (socket) => {
   const userId = socket.data.userId
 
   // Join the user-private room — all events for this user are emitted here
-  socket.join(`user:${userId}`)
+  socket.join(`user:${userId}`);
+  // An already-open connection must not outlive its authorization ticket.
+  const expiry = setTimeout(() => socket.disconnect(true), Math.max(0, socket.data.expiresAt - Date.now()));
 
   console.log(`[ws] connected  user:${userId}  socket:${socket.id}`)
 
   socket.on('disconnect', (reason) => {
+    clearTimeout(expiry);
     console.log(`[ws] disconnected user:${userId}  reason:${reason}`)
   })
 

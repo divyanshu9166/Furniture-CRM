@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { requireAuth } from '@/lib/auth-helpers'
 import { revalidatePath } from 'next/cache'
@@ -59,7 +61,8 @@ async function adjustGodownStockWithTx(tx: any, params: {
 
 export async function moveCustomOrderToDraft(orderId: number) {
   try {
-  await requireRole('ADMIN', 'MANAGER')
+  await requireSection("custom-orders");
+    await requireRole('ADMIN', 'MANAGER')
   const order = await prisma.customOrder.findUnique({
     where: { id: orderId },
     include: {
@@ -125,6 +128,7 @@ export async function moveCustomOrderToDraft(orderId: number) {
 // ─── MOVE SELF VISIT TO DRAFT ─────────────────────────
 
 export async function moveSelfVisitToDraft(visitId: number) {
+  await requireSection("staff-portal");
   let session
   try { session = await requireAuth() } catch { return { success: false, error: 'Unauthorized' } }
   const visit = await prisma.fieldVisit.findUnique({
@@ -179,6 +183,7 @@ export async function moveSelfVisitToDraft(visitId: number) {
 // ─── MOVE LEAD TO DRAFT ─────────────────────────────
 
 export async function moveLeadToDraft(leadId: number) {
+  await requireSection("leads");
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
     include: {
@@ -238,6 +243,7 @@ export async function moveLeadToDraft(leadId: number) {
 // ─── MOVE WALK-IN TO DRAFT ─────────────────────────
 
 export async function moveWalkinToDraft(walkinId: number) {
+  await requireSection("walkins");
   const walkin = await prisma.walkin.findUnique({
     where: { id: walkinId },
     include: { contact: true, assignedTo: { select: { name: true } } },
@@ -289,6 +295,7 @@ export async function moveWalkinToDraft(walkinId: number) {
 // ─── MOVE APPOINTMENT TO DRAFT ──────────────────────
 
 export async function moveAppointmentToDraft(appointmentId: number) {
+  await requireSection("appointments");
   const appointment = await prisma.appointment.findUnique({
     where: { id: appointmentId },
     include: { contact: true },
@@ -334,7 +341,8 @@ export async function moveAppointmentToDraft(appointmentId: number) {
 // ─── MOVE ORDER TO DRAFT ────────────────────────────
 
 export async function moveOrderToDraft(orderId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("orders");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   try {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -430,6 +438,7 @@ export async function moveOrderToDraft(orderId: number) {
 // ─── MOVE QUOTATION TO DRAFT ────────────────────────
 
 export async function moveQuotationToDraft(quotationId: number) {
+  await requireSection("quotations");
   const quotation = await prisma.quotation.findUnique({
     where: { id: quotationId },
     include: { contact: true, items: true },
@@ -505,7 +514,8 @@ export async function moveQuotationToDraft(quotationId: number) {
 
 export async function moveInvoiceToDraft(invoiceId: number) {
   try {
-  await requireRole('ADMIN', 'MANAGER')
+  await requireSection("billing");
+    await requireRole('ADMIN', 'MANAGER')
   const invoice = await prisma.invoice.findUnique({
     where: { id: invoiceId },
     include: {
@@ -632,7 +642,8 @@ export async function moveInvoiceToDraft(invoiceId: number) {
 // ─── MOVE PURCHASE ORDER TO DRAFT ───────────────────
 
 export async function movePurchaseOrderToDraft(poId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("purchases");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   try {
 
   const po = await prisma.purchaseOrder.findUnique({
@@ -760,6 +771,7 @@ export async function movePurchaseOrderToDraft(poId: number) {
 // ─── MOVE EXPENSE TO DRAFT ──────────────────────────
 
 export async function moveExpenseToDraft(expenseId: number) {
+  await requireSection("expenses");
   const expense = await prisma.expense.findUnique({
     where: { id: expenseId },
     include: { category: true, staff: { select: { name: true } } },
@@ -823,6 +835,7 @@ export async function moveExpenseToDraft(expenseId: number) {
 // ─── MOVE PRODUCT TO DRAFT ──────────────────────────
 
 export async function moveProductToDraft(productId: number, expectedCategory?: 'Raw Material') {
+  await requireSection("inventory", "manufacturing");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   try {
@@ -837,6 +850,7 @@ export async function moveProductToDraft(productId: number, expectedCategory?: '
 }
 
 export async function moveProductsToDraft(productIds: unknown, expectedCategory?: 'Raw Material', options?: { archiveStocked?: boolean }) {
+  await requireSection("inventory", "manufacturing");
   let actor: string
   try { actor = (await requireRole('ADMIN', 'MANAGER')).user.name } catch { return { success: false, error: 'Manager access required' } }
   const parsed = z.array(z.number().int().positive()).min(1).max(1000).safeParse(productIds)
@@ -853,7 +867,7 @@ export async function moveProductsToDraft(productIds: unknown, expectedCategory?
 // ─── GET ALL DRAFTS ────────────────────────────────────
 
 export async function getDrafts() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required', data: [] } }
+  try { await requireSection("drafts") } catch { return { success: false, error: 'Manager access required', data: [] } }
   // Auto-purge expired drafts first
   await prisma.draft.deleteMany({
     where: { expiresAt: { lt: new Date() } },
@@ -881,7 +895,8 @@ export async function getDrafts() {
 // ─── RESTORE CUSTOM ORDER FROM DRAFT ───────────────────
 
 export async function restoreFromDraft(draftId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("drafts");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   try {
   const draft = await prisma.draft.findUnique({ where: { id: draftId } })
   if (!draft) return { success: false, error: 'Draft not found' }
@@ -1754,7 +1769,8 @@ export async function restoreFromDraft(draftId: number) {
 // ─── PERMANENTLY DELETE A DRAFT ────────────────────────
 
 export async function permanentlyDeleteDraft(draftId: number) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("drafts");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   await prisma.draft.delete({ where: { id: draftId } })
   revalidatePath('/drafts')
   return { success: true }

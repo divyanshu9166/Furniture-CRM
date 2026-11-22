@@ -14,38 +14,36 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
+import { getSocialInboxScope } from '@/lib/workspace'
 import { prisma } from '@/lib/db'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { getUserProfile, type SocialPlatform } from '@/lib/social/messenger-api'
-
-async function getUserId(): Promise<string | null> {
-  const session = await getSession()
-  return session?.id ? String(session.id) : null
-}
+import { getUserProfile, type SocialPlatform } from '@/lib/social/messenger-api';
 
 export async function POST(req: NextRequest) {
-  const userId = await getUserId()
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { searchParams } = new URL(req.url)
-  const platformParam = searchParams.get('platform') as SocialPlatform | null
-  const platforms: SocialPlatform[] = platformParam
+  const { searchParams } = new URL(req.url);
+  const platformParam = searchParams.get("platform");
+  if (platformParam !== null && platformParam !== "facebook" && platformParam !== "instagram") {
+    return NextResponse.json({ error: "Unknown social platform" }, { status: 400 });
+  }
+  const scope = await getSocialInboxScope(platformParam
     ? [platformParam]
-    : ['facebook', 'instagram']
+    : undefined);
+  if (!scope) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Resolve a Page Access Token per platform once.
   const tokens: Partial<Record<SocialPlatform, string>> = {}
 
-  const fbConfig = platforms.includes('facebook')
-    ? await prisma.fbConfig.findUnique({ where: { user_id: userId } })
+  const fb = scope.find(pair => pair.platform === 'facebook');
+  const fbConfig = fb
+    ? await prisma.fbConfig.findUnique({ where: { user_id: fb.user_id } })
     : null
   if (fbConfig?.page_access_token) {
     try { tokens.facebook = decrypt(fbConfig.page_access_token) } catch { /* ignore */ }
   }
 
-  const igConfig = platforms.includes('instagram')
-    ? await prisma.igConfig.findUnique({ where: { user_id: userId } })
+  const ig = scope.find(pair => pair.platform === 'instagram');
+  const igConfig = ig
+    ? await prisma.igConfig.findUnique({ where: { user_id: ig.user_id } })
     : null
   if (igConfig?.page_access_token) {
     try { tokens.instagram = decrypt(igConfig.page_access_token) } catch { /* ignore */ }
@@ -53,11 +51,8 @@ export async function POST(req: NextRequest) {
 
   // Find contacts whose name is missing or equals the raw platform_id.
   const candidates = await prisma.socialContact.findMany({
-    where: {
-      user_id: userId,
-      platform: { in: platforms },
-    },
-  })
+    where: { OR: scope },
+    })
 
   let updated = 0
   let skipped = 0

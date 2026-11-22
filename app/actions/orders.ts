@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createOrderSchema, updateOrderStatusSchema } from '@/lib/validations/order'
@@ -9,6 +11,7 @@ import { defaultGodown, inventoryError, inventoryTransaction, moveStock } from '
 import { isManualCategory } from '@/lib/inventory/category'
 
 export async function getOrders(source?: string) {
+  await requireSection("orders");
   const where = source && source !== 'All'
     ? { source: source.toUpperCase() as OrderSource }
     : {}
@@ -38,6 +41,7 @@ export async function getOrders(source?: string) {
 }
 
 export async function getOrder(id: number) {
+  await requireSection("orders");
   const order = await prisma.order.findUnique({
     where: { id },
     include: { contact: true, product: true },
@@ -47,7 +51,8 @@ export async function getOrder(id: number) {
 }
 
 export async function createOrder(data: unknown) {
-  try { await requireAuth() } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("orders");
+    await requireAuth() } catch { return { success: false, error: 'Access denied' } }
   const parsed = createOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -153,6 +158,7 @@ export async function createOrder(data: unknown) {
 }
 
 export async function updateOrderStatus(data: unknown) {
+  await requireSection("orders");
   const parsed = updateOrderStatusSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -174,6 +180,7 @@ export async function updateOrderStatus(data: unknown) {
 }
 
 export async function getOrdersBySource() {
+  await requireSection("orders");
   const counts = await prisma.order.groupBy({
     by: ['source'],
     _count: true,

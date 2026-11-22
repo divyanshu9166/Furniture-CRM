@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getSession } from '@/lib/session'
-import { prisma } from '@/lib/db'
+import { prisma } from '@/lib/db';
+import { allowedSections, type SectionOverrides } from "@/lib/section-catalog";
 
 export async function GET() {
   try {
@@ -21,9 +22,14 @@ export async function GET() {
             role: true,
             staffId: true,
             createdAt: true,
+            isActive: true,
+            sectionAccess: { select: { overrides: true },
+        },
           },
         })
-      : null
+      : null;
+
+    if (!user?.isActive) return NextResponse.json(null, { status: 401 });
 
     // Sync profile to WhatsApp CRM profiles table (non-critical, never crash auth)
     if (user) {
@@ -48,6 +54,7 @@ export async function GET() {
     }
 
     return NextResponse.json({
+      sections: allowedSections(user.role, (user.sectionAccess?.overrides ?? {}) as SectionOverrides),
       user: {
         id: user ? String(user.id) : session.id,
         email: user?.email ?? session.email,

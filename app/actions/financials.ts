@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -93,7 +95,8 @@ function calcAgingRisk(totalOutstanding: number, over90Amount: number, topItems:
 }
 
 export async function seedChartOfAccounts() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
+  try { await requireSection("financials");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Manager access required' } }
   const existing = await prisma.ledgerAccount.count()
   if (existing > 0) return { success: true, message: 'Chart of accounts already exists' }
 
@@ -115,6 +118,7 @@ export async function seedChartOfAccounts() {
 }
 
 export async function getAccounts() {
+  await requireSection("financials");
   const groups = await prisma.accountGroup.findMany({
     include: { accounts: { orderBy: { code: 'asc' } } },
     orderBy: { name: 'asc' },
@@ -123,7 +127,8 @@ export async function getAccounts() {
 }
 
 export async function createAccount(data: unknown) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("financials");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = createAccountSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -138,7 +143,7 @@ export async function createAccount(data: unknown) {
 // ─── PROFIT & LOSS (CORRECTED) ────────────────────────
 
 export async function getProfitAndLoss(fromDate: string, toDate: string, compareFrom?: string, compareTo?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   if (!parseDateRange(fromDate, toDate)) {
     return { success: false, error: 'Invalid date range' }
@@ -241,7 +246,7 @@ export async function getProfitAndLoss(fromDate: string, toDate: string, compare
 // ─── BALANCE SHEET ────────────────────────────────────
 
 export async function getBalanceSheet(asOfDate: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const asOf = parseAsOfDate(asOfDate)
   if (!asOf) return { success: false, error: 'Invalid as-of date' }
@@ -336,7 +341,7 @@ export async function getBalanceSheet(asOfDate: string) {
 // ─── CASH FLOW ────────────────────────────────────────
 
 export async function getCashFlow(fromDate: string, toDate: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const range = parseDateRange(fromDate, toDate)
   if (!range) return { success: false, error: 'Invalid date range' }
@@ -404,7 +409,7 @@ export async function getCashFlow(fromDate: string, toDate: string) {
 }
 
 export async function getExecutiveSummary(fromDate: string, toDate: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const range = parseDateRange(fromDate, toDate)
   if (!range) return { success: false, error: 'Invalid date range' }
@@ -505,7 +510,7 @@ export async function getExecutiveSummary(fromDate: string, toDate: string) {
 // ─── TRIAL BALANCE ────────────────────────────────────
 
 export async function getTrialBalance(asOfDate: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const asOf = parseAsOfDate(asOfDate)
   if (!asOf) return { success: false, error: 'Invalid as-of date' }
@@ -586,7 +591,7 @@ export async function getTrialBalance(asOfDate: string) {
 // ─── RECEIVABLES AGING ────────────────────────────────
 
 export async function getReceivablesAging() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -638,7 +643,7 @@ export async function getReceivablesAging() {
 // ─── PAYABLES AGING ──────────────────────────────────
 
 export async function getPayablesAging() {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -698,7 +703,7 @@ export async function getPayablesAging() {
 // ─── JOURNAL ENTRIES ─────────────────────────────────
 
 export async function getJournalEntries(fromDate?: string, toDate?: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("financials") } catch { return { success: false, error: 'Access denied' } }
 
   const where: Record<string, unknown> = {}
   if (fromDate && toDate) {
@@ -722,7 +727,8 @@ export async function getJournalEntries(fromDate?: string, toDate?: string) {
 }
 
 export async function createManualJournal(data: unknown) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("financials");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = createJournalSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -767,7 +773,8 @@ export async function createManualJournal(data: unknown) {
 }
 
 export async function voidJournalEntry(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("financials");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const entry = await prisma.journalEntry.findUnique({ where: { id }, select: { status: true } })
   if (!entry) return { success: false, error: 'Journal entry not found' }
   if (entry.status === 'VOIDED') return { success: false, error: 'Already voided' }

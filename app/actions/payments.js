@@ -1,5 +1,7 @@
 'use server';
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db';
 import { revalidatePath } from 'next/cache';
 import crypto from 'crypto';
@@ -14,6 +16,7 @@ const generateReferenceHash = (method, reference) => {
 
 export async function getDailyPayments(filters = {}) {
   try {
+    await requireSection("payments");
     const { startDate, endDate, method, type, search, status, reconciled } = filters;
     const where = {};
 
@@ -69,6 +72,7 @@ export async function getDailyPayments(filters = {}) {
 
 export async function createDailyPayment(data) {
   try {
+    await requireSection("payments");
     // Validation: Amount must be positive integer
     const amount = parseInt(data.amount);
     if (!amount || amount <= 0) return { success: false, error: 'Invalid amount. Must be greater than 0.' };
@@ -180,6 +184,7 @@ export async function createDailyPayment(data) {
 
 export async function deleteDailyPayment(id) {
   try {
+    await requireSection("payments");
     await prisma.dailyPayment.delete({ where: { id: parseInt(id) } });
     revalidatePath('/payments');
     return { success: true };
@@ -192,6 +197,7 @@ export async function deleteDailyPayment(id) {
 // NEW: Reverse a payment (creates audit trail)
 export async function reversePayment(id, reason = '') {
   try {
+    await requireSection("payments");
     const original = await prisma.dailyPayment.findUnique({ where: { id: parseInt(id) } });
     if (!original) return { success: false, error: 'Payment not found' };
     if (original.isReversal) return { success: false, error: 'Cannot reverse an already reversed payment' };
@@ -241,6 +247,7 @@ export async function reversePayment(id, reason = '') {
 // NEW: Mark cheque as bounced
 export async function markChequeBounced(id, bounceReason = '') {
   try {
+    await requireSection("payments");
     const payment = await prisma.dailyPayment.findUnique({ where: { id: parseInt(id) } });
     if (!payment) return { success: false, error: 'Payment not found' };
     if (payment.method !== 'Cheque') return { success: false, error: 'Only cheque payments can be marked as bounced' };
@@ -269,6 +276,7 @@ export async function markChequeBounced(id, bounceReason = '') {
 // NEW: Reconcile payments (batch mark as reconciled)
 export async function reconcilePayments(paymentIds, bankRefNumbers = {}) {
   try {
+    await requireSection("payments");
     if (!Array.isArray(paymentIds) || paymentIds.length === 0) {
       return { success: false, error: 'No payments selected for reconciliation' };
     }
@@ -298,6 +306,7 @@ export async function reconcilePayments(paymentIds, bankRefNumbers = {}) {
 // NEW: Get payment reconciliation summary
 export async function getReconciliationSummary(filters = {}) {
   try {
+    await requireSection("payments");
     const { startDate, endDate, method } = filters;
     const where = {};
 
@@ -359,6 +368,7 @@ export async function getReconciliationSummary(filters = {}) {
 
 export async function getDailyCashRegister(date) {
   try {
+    await requireSection("payments");
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(date);
@@ -418,6 +428,7 @@ export async function getDailyCashRegister(date) {
 
 export async function updateOpeningCash(date, openingCash) {
   try {
+    await requireSection("payments");
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
 

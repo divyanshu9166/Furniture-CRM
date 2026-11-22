@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { notifyManagers } from '@/lib/notify'
@@ -38,7 +40,7 @@ const statusMap: Record<string, CustomOrderStatus> = {
   'Measurement Scheduled': 'MEASUREMENT_SCHEDULED',
   'In Production': 'IN_PRODUCTION',
   'Quality Check': 'QUALITY_CHECK',
-  'Delivered': 'DELIVERED',
+  Delivered: 'DELIVERED',
 }
 
 const statusDisplay: Record<CustomOrderStatus, string> = {
@@ -61,9 +63,21 @@ async function requireStaffPortalScope(staffId: number) {
 
 // ─── GET ALL CUSTOM ORDERS ──────────────────────────────
 
+export async function getCustomOrderWhatsAppStatus() {
+  await requireSection("custom-orders");
+  const wa = await prisma.channelConfig.findUnique({ where: { channel: "WhatsApp" } });
+  const config = wa?.config as Record<string, string> | undefined;
+  return { success: true, data: {
+    configured: Boolean(wa?.enabled && config?.phoneNumberId && config?.apiToken),
+    hasTemplate: Boolean(config?.templateName),
+    templateName: config?.templateName || null,
+  } };
+}
+
 export async function getCustomOrders() {
   try {
-  const session = await requireAuth()
+    await requireSection("custom-orders");
+    const session = await requireAuth()
   const manager = ['ADMIN', 'MANAGER'].includes(session.user.role)
   if (!manager && !session.user.staffId) return { success: false, error: 'Access denied', data: [] }
   const orders = await prisma.customOrder.findMany({
@@ -168,7 +182,8 @@ export async function getCustomOrders() {
 
 export async function createCustomOrder(data: unknown) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("custom-orders");
+    const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = createCustomOrderSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const order = await inventoryTransaction(prisma, tx => createCustom(tx, parsed.data, session.user.name))
@@ -182,7 +197,8 @@ export async function createCustomOrder(data: unknown) {
 
 export async function updateCustomOrderStatus(id: number, status: string) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("custom-orders");
+    const session = await requireRole('ADMIN', 'MANAGER')
   const dbStatus = statusMap[status]
   if (!dbStatus) return { success: false, error: 'Invalid status' }
   await inventoryTransaction(prisma, tx => transitionCustom(tx, id, dbStatus, session.user.name))
@@ -196,7 +212,8 @@ export async function updateCustomOrderStatus(id: number, status: string) {
 
 export async function assignStaff(orderId: number, staffId: number) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("custom-orders");
+    const session = await requireRole('ADMIN', 'MANAGER')
   assertId(staffId)
   await inventoryTransaction(prisma, async tx => {
     await lockedCustomOrder(tx, orderId)
@@ -215,7 +232,8 @@ export async function assignStaff(orderId: number, staffId: number) {
 
 export async function scheduleVisit(data: unknown) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("custom-orders");
+    const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = scheduleVisitSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const visit = await inventoryTransaction(prisma, tx => scheduleCustomVisit(tx, parsed.data, session.user.name))
@@ -229,7 +247,8 @@ export async function scheduleVisit(data: unknown) {
 
 export async function updateMeasurements(data: unknown) {
   try {
-  const editor = await orderEditor()
+    await requireSection("custom-orders");
+    const editor = await orderEditor()
   const parsed = updateMeasurementsSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   await inventoryTransaction(prisma, tx => measureCustom(tx, parsed.data, [], editor.actor, editor.staffId))
@@ -243,7 +262,8 @@ export async function updateMeasurements(data: unknown) {
 
 export async function updateMeasurementsWithPhotos(customOrderId: number, measurements: MeasurementsInput, photoUrls: string[]) {
   try {
-  const editor = await orderEditor()
+    await requireSection("custom-orders");
+    const editor = await orderEditor()
   const parsed = updateMeasurementsSchema.safeParse({ customOrderId, measurements })
   const photos = photoUrlsSchema.safeParse(photoUrls)
   if (!parsed.success || !photos.success) return { success: false, error: 'Invalid measurements or image URLs' }
@@ -258,7 +278,8 @@ export async function updateMeasurementsWithPhotos(customOrderId: number, measur
 
 export async function updateFieldVisit(data: unknown) {
   try {
-  const editor = await orderEditor()
+    await requireSection("staff-portal", "custom-orders");
+    const editor = await orderEditor()
   const parsed = updateVisitSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const visit = await inventoryTransaction(prisma, tx => changeVisit(tx, parsed.data, editor.actor, editor.staffId))
@@ -281,7 +302,8 @@ export async function updateFieldVisit(data: unknown) {
 
 export async function addTimelineEntry(data: unknown) {
   try {
-  const session = await requireRole('ADMIN', 'MANAGER')
+    await requireSection("custom-orders");
+    const session = await requireRole('ADMIN', 'MANAGER')
   const parsed = addTimelineEntrySchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const entry = await inventoryTransaction(prisma, async tx => {
@@ -298,7 +320,8 @@ export async function addTimelineEntry(data: unknown) {
 
 export async function updateReferenceImages(orderId: number, imageUrls: string[]) {
   try {
-  const editor = await orderEditor()
+    await requireSection("custom-orders");
+    const editor = await orderEditor()
   const parsed = photoUrlsSchema.safeParse(imageUrls)
   if (!parsed.success) return { success: false, error: 'Invalid image URLs' }
   await inventoryTransaction(prisma, async tx => {
@@ -315,7 +338,8 @@ export async function updateReferenceImages(orderId: number, imageUrls: string[]
 
 export async function getStaffVisits(staffId: number) {
   try {
-  try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+    await requireSection("staff-portal", "custom-orders");
+    try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId },
     include: {
@@ -383,7 +407,8 @@ export async function logSelfVisit(data: {
   photoUrls?: string[]
 }) {
   try {
-  const { staffId, customer, address, type, notes, measurements, photoUrls } = data
+    await requireSection("staff-portal");
+    const { staffId, customer, address, type, notes, measurements, photoUrls } = data
   try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden' } }
   if (!Number.isInteger(staffId) || staffId <= 0 || !customer.trim() || !address.trim() || !type.trim()) {
     return { success: false, error: 'Customer, address and visit type are required' }
@@ -427,7 +452,8 @@ export async function logSelfVisit(data: {
 
 export async function getSelfVisits(staffId: number) {
   try {
-  try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+    await requireSection("staff-portal");
+    try { await requireStaffPortalScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const visits = await prisma.fieldVisit.findMany({
     where: { staffId, customOrderId: null },
     orderBy: { date: 'desc' },
@@ -457,7 +483,8 @@ export async function getSelfVisits(staffId: number) {
 
 export async function updateSelfVisitPhotos(visitId: number, newUrls: string[]) {
   try {
-  const visit = await prisma.fieldVisit.findUnique({ where: { id: visitId } })
+    await requireSection("staff-portal");
+    const visit = await prisma.fieldVisit.findUnique({ where: { id: visitId } })
   if (!visit) return { success: false, error: 'Visit not found' }
   try { await requireStaffPortalScope(visit.staffId) } catch { return { success: false, error: 'Forbidden' } }
   if (!Array.isArray(newUrls) || newUrls.length === 0 || newUrls.some(url => typeof url !== 'string' || !url)) {
@@ -486,7 +513,8 @@ export async function sendProgressNotification(data: {
   channels: ('whatsapp' | 'email')[]
 }) {
   try {
-  await requireRole('ADMIN', 'MANAGER')
+  await requireSection("custom-orders");
+    await requireRole('ADMIN', 'MANAGER')
   const parsed = z.object({ orderId: z.number().int().positive(), message: z.string().trim().min(1).max(2000), channels: z.array(z.enum(['whatsapp', 'email'])).min(1).max(2) }).safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const { orderId, message, channels } = parsed.data
@@ -650,7 +678,8 @@ export async function sendProgressNotification(data: {
 
 export async function getCustomOrderStats() {
   try {
-  await requireRole('ADMIN', 'MANAGER')
+  await requireSection("custom-orders");
+    await requireRole('ADMIN', 'MANAGER')
   const orders = await prisma.customOrder.findMany({
     select: { status: true, quotedPrice: true, advancePaid: true },
   })

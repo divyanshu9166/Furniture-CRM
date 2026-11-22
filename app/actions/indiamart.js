@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -149,6 +151,7 @@ async function ensureIndiaMartConfig() {
 
 export async function getIndiaMartConfig() {
   try {
+    await requireSection("indiamart-leads");
     const [config, totalSynced, totalImported] = await Promise.all([
       ensureIndiaMartConfig(),
       prisma.indiaMartLead.count(),
@@ -228,6 +231,7 @@ export async function saveIndiaMartConfig(input) {
 
 export async function getIndiaMartLeads(limit = 100) {
   try {
+    await requireSection("indiamart-leads");
     if (!hasIndiaMartPrismaModels()) {
       return { success: false, error: PRISMA_INDIAMART_SCHEMA_ERROR }
     }
@@ -272,6 +276,7 @@ export async function getIndiaMartLeads(limit = 100) {
 
 export async function syncIndiaMartPullLeads() {
   try {
+    await requireSection("indiamart-leads");
     await requireRole('ADMIN')
   } catch {
     return { success: false, error: 'Admin access required' }

@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { requireAuth, requireRole } from '@/lib/auth-helpers'
 import { inventoryError, inventoryTransaction } from '@/lib/inventory/stock'
@@ -16,6 +18,7 @@ import type { InvoiceSnapshot } from '@/lib/billing/invoice-document'
 // ─── GET ALL INVOICES ──────────────────────────────────
 
 export async function getInvoices() {
+  await requireSection("billing");
   await requireAuth()
   const invoices = await prisma.invoice.findMany({
     include: {
@@ -99,6 +102,7 @@ export async function getInvoices() {
 // ─── GET SINGLE INVOICE ────────────────────────────────
 
 export async function getInvoice(id: number) {
+  await requireSection("billing");
   await requireAuth()
   const invoice = await prisma.invoice.findUnique({
     where: { id },
@@ -126,40 +130,47 @@ async function billingAction<T>(roles: ('ADMIN' | 'MANAGER' | 'STAFF')[], operat
 }
 
 export async function createInvoice(data: unknown) {
+  await requireSection("billing");
   const parsed = createInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   return billingAction(['ADMIN', 'MANAGER', 'STAFF'], actor => inventoryTransaction(prisma, tx => saveInvoice(tx, parsed.data, actor)))
 }
 
 export async function updateInvoice(invoiceId: number, data: unknown) {
+  await requireSection("billing");
   const parsed = updateInvoiceSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   return billingAction(['ADMIN'], actor => inventoryTransaction(prisma, tx => saveInvoice(tx, parsed.data, actor, invoiceId)))
 }
 
 export async function recordPayment(data: unknown) {
+  await requireSection("billing");
   const parsed = recordPaymentSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   return billingAction(['ADMIN', 'MANAGER', 'STAFF'], () => inventoryTransaction(prisma, tx => addInvoicePayment(tx, parsed.data)))
 }
 
 export async function cancelInvoice(invoiceId: number) {
+  await requireSection("billing");
   return billingAction(['ADMIN', 'MANAGER'], actor => inventoryTransaction(prisma, tx => voidInvoice(tx, invoiceId, actor)))
 }
 
 export async function createCreditNote(data: unknown) {
+  await requireSection("billing");
   const parsed = createCreditNoteSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   return billingAction(['ADMIN', 'MANAGER'], () => inventoryTransaction(prisma, tx => creditInvoice(tx, parsed.data)))
 }
 
 export async function finalizeHeldInvoice(invoiceId: number) {
+  await requireSection("billing");
   return billingAction(['ADMIN', 'MANAGER', 'STAFF'], actor => inventoryTransaction(prisma, tx => finalizeInvoice(tx, invoiceId, actor)))
 }
 
 // ─── SEARCH CONTACTS (for auto-complete) ───────────────
 
 export async function searchContacts(query: string) {
+  await requireSection("billing", "orders", "custom-orders");
   await requireAuth()
   if (!query || query.length < 2) return { success: true, data: [] }
 
@@ -190,7 +201,7 @@ export async function searchContacts(query: string) {
 // ─── GET CUSTOMER PROFILE (returning customer detection) ──
 
 export async function getCustomerProfile(phone: string, contactId?: number) {
-  await requireAuth()
+  const { user } = await requireSection("billing", "orders", "custom-orders")
   const selectFields = {
     id: true,
     name: true,
@@ -229,7 +240,11 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
     })
   }
 
-  if (!contact) return { success: true, data: null }
+  if (!contact) return { success: true, data: null };
+
+  if (!user.sections.includes("billing")) contact.invoices = [];
+  if (!user.sections.includes("orders")) contact.orders = [];
+  if (!user.sections.includes("custom-orders")) contact.customOrders = [];
 
   const totalInvoiceValue = contact.invoices.reduce((s, i) => s + Math.max(0, i.total - i.creditNotes.reduce((n, credit) => n + credit.amount, 0)), 0)
   const totalOrderValue   = contact.orders.reduce((s, o) => s + o.amount, 0)
@@ -268,6 +283,7 @@ export async function getCustomerProfile(phone: string, contactId?: number) {
 // ─── GET INVOICE STATS ─────────────────────────────────
 
 export async function getInvoiceStats() {
+  await requireSection("billing");
   await requireAuth()
   const { day: today, todayStart, monthStart, lastMonthStart } = indiaBillingPeriods()
   const invoices = await prisma.invoice.findMany({

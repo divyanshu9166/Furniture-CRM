@@ -9,7 +9,7 @@ import { prisma } from '@/lib/db'
 import { decrypt, encrypt } from '@/lib/whatsapp/encryption'
 
 async function getCurrentUserId(): Promise<string | null> {
-  const session = await getSession()
+  const session = await getSession("instagram")
   return session?.id ? String(session.id) : null
 }
 

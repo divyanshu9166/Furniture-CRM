@@ -10,7 +10,8 @@ import * as audience from './email-audience'
 import * as emailErrors from './email-errors'
 import * as crypto from 'node:crypto'
 import { createSmtpSafety, type SafetyRepository, type SafetyState } from './smtp-safety'
-import * as smtpSafety from './smtp-safety'
+import * as smtpSafety from './smtp-safety';
+import { allowedSections, type Section } from "./section-catalog";
 
 // Execute the actual delivery modules with isolated dependencies. Never import
 // the real database client, connect to SMTP, or send a customer email in tests.
@@ -343,6 +344,11 @@ function settingsHarness() {
     } },
     '@prisma/client': { Prisma: { dmmf: { datamodel: { models: [{ name: 'StoreSettings', fields: [{ name: 'paymentQr' }, { name: 'whatsappNumber' }] }] } } } },
     'next/cache': { revalidatePath() {} }, zod: { z },
+    "@/lib/section-access": {
+      requireSection: async (...sections: Section[]) => {
+        if (!sections.some(section => allowedSections(role).includes(section))) throw new Error("Forbidden");
+      },
+    },
     '@/lib/auth-helpers': { requireRole: async (...roles: string[]) => { if (!roles.includes(role)) throw new Error('Forbidden') } },
     '@/lib/email-senders': senders,
   })
@@ -394,6 +400,12 @@ function campaignActionsHarness(safetyBlocked = false) {
     '@/lib/db': { prisma },
     '@/lib/email-events': { recordEmailEvent: async () => ({ success: true }) },
     'next/cache': { revalidatePath() {} }, zod: { z },
+    "@/lib/section-access": {
+      requireSection: async (...sections: Section[]) => {
+        if (!sections.some(section => allowedSections(role).includes(section))) throw new Error("Forbidden");
+        return { user: { name: "Signed-in Admin", role } };
+      },
+    },
     '@/lib/auth-helpers': { requireRole: async (...roles: string[]) => { if (!roles.includes(role)) throw new Error('Forbidden'); return { user: { name: 'Signed-in Admin', role } } } },
     '@/lib/email': { getSmtpConfig: async () => ({ ...config }),
       testSmtpConnection: async (value: unknown) => { tests.push(value); return { success: true } },

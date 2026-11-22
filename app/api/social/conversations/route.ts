@@ -12,22 +12,20 @@ import { getWorkspaceSessionFlat as getSession } from '@/lib/workspace'
 import { prisma } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
-  const session = await getSession()
-  const userId = session?.id ? String(session.id) : null
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   const { searchParams } = new URL(req.url)
   const platform = searchParams.get('platform') // facebook | instagram
   const status = searchParams.get('status')     // open | resolved | archived | null (all)
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '50', 10), 100)
 
-  if (!platform || !['facebook', 'instagram'].includes(platform)) {
+  if (platform !== 'facebook' && platform !== "instagram") {
     return NextResponse.json({ error: 'platform must be facebook or instagram' }, { status: 400 })
   }
 
+  const session = await getSession(platform);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const conversations = await prisma.socialConversation.findMany({
     where: {
-      user_id: userId,
+      user_id: session.id,
       platform,
       ...(status ? { status } : {}),
     },

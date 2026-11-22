@@ -5,7 +5,9 @@ import { Prisma } from '@prisma/client'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireRole } from '@/lib/auth-helpers'
-import { formatSmtpError, prepareSmtpConfig, senderAliasesSchema, senderEmailSchema } from '@/lib/email-senders'
+import { requireSection } from "@/lib/section-access";
+import {
+  formatSmtpError, prepareSmtpConfig, senderAliasesSchema, senderEmailSchema } from '@/lib/email-senders'
 
 const updateSettingsSchema = z.object({
   storeName: z.string().min(1).optional(),
@@ -215,6 +217,7 @@ export async function updateStoreSettings(data: unknown) {
 }
 
 export async function getMarketplaceChannels() {
+  await requireSection("orders");
   const channels = await prisma.marketplaceChannel.findMany({
     orderBy: { name: 'asc' },
   })
@@ -235,6 +238,7 @@ export async function getMarketplaceChannels() {
 }
 
 export async function updateMarketplaceChannel(id: number, data: { connected?: boolean; sellerId?: string }) {
+  await requireRole("ADMIN");
   const channel = await prisma.marketplaceChannel.update({
     where: { id },
     data,
@@ -245,6 +249,7 @@ export async function updateMarketplaceChannel(id: number, data: { connected?: b
 }
 
 export async function getStoreCampaigns() {
+  await requireSection("staff");
   const campaigns = await prisma.storeCampaign.findMany({
     orderBy: { createdAt: 'desc' },
   })
@@ -279,6 +284,7 @@ const MFG_PERMISSION_KEYS = [
 // flags to decide which tabs/buttons to show to STAFF. Enforcement still happens
 // server-side in the manufacturing actions.
 export async function getManufacturingPermissions() {
+  await requireSection("manufacturing");
   const { getManufacturingPermissionFlags } = await import('@/lib/manufacturing-permissions')
   const flags = await getManufacturingPermissionFlags()
   return { success: true, data: flags }

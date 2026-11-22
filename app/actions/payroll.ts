@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/auth-helpers'
@@ -11,7 +13,7 @@ import { z } from 'zod'
 // (Like Keka / GreytHR's "Attendance Summary" pre-payroll screen)
 
 export async function getAttendanceSummaryForPayroll(period: string) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const [year, month] = period.split('-').map(Number)
   const monthStart = new Date(year, month - 1, 1)
@@ -161,7 +163,7 @@ function overtimeHoursFromAttendance(entries: { status: string; hours: number | 
 // ─── PRE-PAYROLL READINESS ──────────────────────────
 
 export async function getPayrollReadiness(period?: string) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required' } }
 
   const targetPeriod = period || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
   const [year, month] = targetPeriod.split('-').map(Number)
@@ -245,7 +247,7 @@ export async function getPayrollReadiness(period?: string) {
 // ─── STAFF PAYROLL SETTINGS ──────────────────────────
 
 export async function getStaffForPayroll() {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const staff = await prisma.staff.findMany({
     where: { status: 'Active' },
@@ -263,7 +265,8 @@ export async function getStaffForPayroll() {
 }
 
 export async function updateStaffPayrollInfo(data: unknown) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = updateStaffPayrollSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -288,7 +291,7 @@ const loanSchema = z.object({
 })
 
 export async function getStaffLoans(staffId?: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const loans = await prisma.staffLoan.findMany({
     where: staffId ? { staffId } : undefined,
@@ -299,7 +302,8 @@ export async function getStaffLoans(staffId?: number) {
 }
 
 export async function createStaffLoan(data: unknown) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = loanSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -319,7 +323,8 @@ export async function createStaffLoan(data: unknown) {
 }
 
 export async function closeStaffLoan(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   await prisma.staffLoan.update({ where: { id }, data: { status: 'Closed', remainingAmount: 0 } })
   revalidatePath('/payroll')
   return { success: true }
@@ -328,6 +333,7 @@ export async function closeStaffLoan(id: number) {
 // ─── GENERATE PAYROLL ────────────────────────────────
 
 export async function generatePayroll(data: unknown) {
+  await requireSection("payroll");
   let session
   try { session = await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const parsed = generatePayrollSchema.safeParse(data)
@@ -524,7 +530,7 @@ export async function generatePayroll(data: unknown) {
 // ─── PAYROLL RUNS ────────────────────────────────────
 
 export async function getPayrollHistory() {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const runs = await prisma.payrollRun.findMany({
     orderBy: { period: 'desc' },
@@ -534,7 +540,7 @@ export async function getPayrollHistory() {
 }
 
 export async function getPayrollRun(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required' } }
 
   const run = await prisma.payrollRun.findUnique({
     where: { id },
@@ -559,7 +565,7 @@ export async function getPayrollRun(id: number) {
 }
 
 export async function getAllPayslips(period?: string) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required', data: [] } }
+  try { await requireSection("payroll") } catch { return { success: false, error: 'Admin access required', data: [] } }
 
   const payslips = await prisma.payslip.findMany({
     where: period ? { payrollRun: { period } } : undefined,
@@ -585,7 +591,8 @@ export async function getAllPayslips(period?: string) {
 }
 
 export async function approvePayroll(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   const run = await prisma.payrollRun.findUnique({ where: { id }, select: { status: true } })
   if (!run) return { success: false, error: 'Payroll run not found' }
   if (run.status !== 'DRAFT') return { success: false, error: `Cannot approve a ${run.status} payroll` }
@@ -596,7 +603,8 @@ export async function approvePayroll(id: number) {
 }
 
 export async function markPayrollPaid(id: number) {
-  try { await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
+  try { await requireSection("payroll");
+    await requireRole('ADMIN') } catch { return { success: false, error: 'Admin access required' } }
   if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'Invalid payroll run' }
 
   const paid = await prisma.$transaction(async (tx) => {

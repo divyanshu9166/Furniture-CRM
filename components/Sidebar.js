@@ -42,6 +42,7 @@ import { useSession } from '@/components/AuthProvider';
 import { useSidebarContext } from './SidebarContext';
 import { getStoreSettings } from '@/app/actions/settings';
 import { getIndiaMartConfig } from '@/app/actions/indiamart';
+import { sectionForPath } from "@/lib/section-catalog";
 
 // role: which roles can see this item. undefined = all authenticated users
 const navItems = [
@@ -115,11 +116,13 @@ export default function Sidebar() {
 
   const roleLabel = userRole === 'ADMIN' ? 'Administrator' : userRole === 'MANAGER' ? 'Manager' : 'Staff';
 
-  // Filter nav items by role
+  // Use the same section policy as the server. Wait for it before showing links.
   const visibleNav = navItems.filter(item => {
-    if (!item.roles) return true;
+    if (!session?.user) return false;
+    if (item.href === "/settings") return userRole === "ADMIN";
+    if (item.href === "/staff-portal" && userRole === "ADMIN") return false;
     if (item.href === '/indiamart-leads' && !indiaMartEnabled) return false;
-    return item.roles.includes(userRole);
+    return session.sections?.includes(sectionForPath(item.href));
   });
 
   return (

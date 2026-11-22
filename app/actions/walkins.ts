@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { createWalkinSchema } from '@/lib/validations/walkin'
@@ -8,8 +10,11 @@ import { requireAuth } from '@/lib/auth-helpers'
 import { assertWalkinRequirement, RequirementsChangedError } from '@/lib/walkins/requirements'
 
 const statusMap: Record<string, WalkinStatus> = {
-  'Browsing': 'BROWSING', 'Interested': 'INTERESTED',
-  'Follow-up': 'FOLLOW_UP', 'Converted': 'CONVERTED', 'Left': 'LEFT',
+  Browsing: 'BROWSING',
+  Interested: 'INTERESTED',
+  'Follow-up': 'FOLLOW_UP',
+  Converted: 'CONVERTED',
+  Left: 'LEFT',
 }
 const statusDisplay: Record<WalkinStatus, string> = {
   BROWSING: 'Browsing', INTERESTED: 'Interested',
@@ -17,6 +22,7 @@ const statusDisplay: Record<WalkinStatus, string> = {
 }
 
 export async function getWalkins() {
+  await requireSection("walkins");
   const walkins = await prisma.walkin.findMany({
     include: { contact: true, assignedTo: true },
     orderBy: { date: 'desc' },
@@ -43,7 +49,8 @@ export async function getWalkins() {
 }
 
 export async function createWalkin(data: unknown) {
-  try { await requireAuth() } catch { return { success: false, error: 'Please sign in to register a walk-in' } }
+  try { await requireSection("walkins");
+    await requireAuth() } catch { return { success: false, error: 'Please sign in to register a walk-in' } }
   const parsed = createWalkinSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -77,6 +84,7 @@ export async function createWalkin(data: unknown) {
 }
 
 export async function updateWalkinStatus(id: number, status: string) {
+  await requireSection("walkins");
   const dbStatus = statusMap[status]
   if (!dbStatus) return { success: false, error: 'Invalid status' }
 

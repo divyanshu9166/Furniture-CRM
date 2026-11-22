@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { inventoryError, inventoryTransaction } from '@/lib/inventory/stock'
 import { activeStaff, billingContact } from '@/lib/commerce/documents'
 import { assertNoOpenFollowUp, lockedFollowUp, OPEN_FOLLOW_UPS } from '@/lib/commerce/follow-ups'
@@ -68,7 +70,8 @@ function serialize(f: any) {
 }
 
 export async function getFollowUps(status?: string) {
-    if (!await canManageFollowUps()) return accessDenied()
+  await requireSection("follow-ups");
+  if (!(await canManageFollowUps())) return accessDenied()
     const where =
         status && ['PENDING', 'REMINDED', 'CONTACTED', 'CONVERTED', 'LOST'].includes(status)
             ? { status: status as any }
@@ -86,7 +89,8 @@ export async function getFollowUps(status?: string) {
 }
 
 export async function getFollowUpCounts() {
-    if (!await canManageFollowUps()) return accessDenied()
+  await requireSection("follow-ups");
+  if (!(await canManageFollowUps())) return accessDenied()
     // Due buckets only consider PENDING (un-reminded) entries — once a
     // reminder has fired (REMINDED) the date is no longer "due".
     const rows = await prisma.followUpEntry.findMany({
@@ -117,7 +121,8 @@ export async function getFollowUpCounts() {
 
 export async function createFollowUp(data: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = createFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -143,7 +148,8 @@ export async function createFollowUp(data: unknown) {
 
 export async function convertLeadToFollowUp(data: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("leads");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = convertLeadToFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -172,7 +178,8 @@ export async function convertLeadToFollowUp(data: unknown) {
 
 export async function updateFollowUp(data: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = updateFollowUpSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -207,7 +214,8 @@ export async function updateFollowUp(data: unknown) {
 
 export async function updateFollowUpStatus(data: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = updateFollowUpStatusSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -225,7 +233,8 @@ export async function updateFollowUpStatus(data: unknown) {
 
 export async function deleteFollowUp(id: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = followUpIdSchema.safeParse(id)
     if (!parsed.success) return { success: false, error: 'Invalid follow-up ID' }
     await inventoryTransaction(prisma, async tx => {
@@ -240,7 +249,8 @@ export async function deleteFollowUp(id: unknown) {
 // ─── Scheduled WhatsApp reminder config + manual run ───────────────
 
 export async function getReminderConfig() {
-    if (!await canManageFollowUps()) return accessDenied()
+  await requireSection("follow-ups");
+  if (!(await canManageFollowUps())) return accessDenied()
     const config = await getFollowUpReminderConfig()
     return {
         success: true,
@@ -253,14 +263,16 @@ export async function getReminderConfig() {
 }
 
 export async function getFollowUpReminderTemplates() {
-    if (!await canManageFollowUps()) return accessDenied()
+  await requireSection("follow-ups");
+  if (!(await canManageFollowUps())) return accessDenied()
     const catalog = await getReminderTemplateCatalog()
     return { success: true, data: catalog.templates, reason: catalog.reason }
 }
 
 export async function updateReminderConfig(data: unknown) {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const parsed = reminderConfigSchema.safeParse(data)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -308,7 +320,8 @@ export async function updateReminderConfig(data: unknown) {
 
 export async function runFollowUpRemindersNow() {
     try {
-    if (!await canManageFollowUps()) return accessDenied()
+    await requireSection("follow-ups");
+    if (!(await canManageFollowUps())) return accessDenied()
     const summary = await runFollowUpReminders()
     revalidatePath('/follow-ups')
     return { success: true, data: summary }

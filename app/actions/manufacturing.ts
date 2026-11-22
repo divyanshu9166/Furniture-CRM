@@ -1,5 +1,7 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 import { unstable_noStore } from 'next/cache'
@@ -122,6 +124,7 @@ async function updateProductionTimeVarianceWithTx(tx: Prisma.TransactionClient, 
 // ─── WORK CENTERS ────────────────────────────────────
 
 export async function getWorkCenters() {
+  await requireSection("manufacturing");
   await requireAuth()
   const centers = await prisma.workCenter.findMany({
     orderBy: { name: 'asc' },
@@ -134,7 +137,8 @@ export async function getWorkCenters() {
 
 export async function createWorkCenter(data: unknown) {
   try {
-  try { await requireManufacturingPermission('staffCreateWorkCenter') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireManufacturingPermission('staffCreateWorkCenter') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createWorkCenterSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -149,7 +153,8 @@ export async function createWorkCenter(data: unknown) {
 
 export async function updateWorkCenterStatus(id: number, status: string) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   if (!Number.isSafeInteger(id) || id <= 0 || !['Active', 'Maintenance', 'Inactive'].includes(status)) return { success: false, error: 'Invalid work center status' }
   await prisma.workCenter.update({ where: { id }, data: { status } })
   revalidatePath('/manufacturing')
@@ -159,7 +164,8 @@ export async function updateWorkCenterStatus(id: number, status: string) {
 
 export async function deleteWorkCenter(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const center = await prisma.workCenter.findUnique({ where: { id }, include: { _count: { select: { productionOrders: true } } } })
   if (!center) return { success: false, error: 'Not found' }
   if (center._count.productionOrders > 0) return { success: false, error: 'Cannot delete: work center has production orders' }
@@ -172,6 +178,7 @@ export async function deleteWorkCenter(id: number) {
 // ─── BILL OF MATERIALS ───────────────────────────────
 
 export async function getBOMs() {
+  await requireSection("manufacturing");
   await requireAuth()
   const boms = await prisma.billOfMaterials.findMany({
     orderBy: { name: 'asc' },
@@ -192,7 +199,8 @@ export async function getBOMs() {
 
 export async function createBOM(data: unknown) {
   try {
-  try { await requireManufacturingPermission('staffCreateBom') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireManufacturingPermission('staffCreateBom') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createBOMSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const bom = await inventoryTransaction(prisma, async tx => {
@@ -211,7 +219,8 @@ export async function createBOM(data: unknown) {
 
 export async function toggleBOMStatus(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await inventoryTransaction(prisma, async tx => {
     const bom = await lockBom(tx, id)
     await tx.billOfMaterials.update({ where: { id }, data: { isActive: !bom.isActive } })
@@ -223,7 +232,8 @@ export async function toggleBOMStatus(id: number) {
 
 export async function deleteBOM(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await inventoryTransaction(prisma, async tx => {
     await lockBom(tx, id)
     if (await tx.productionOrder.count({ where: { bomId: id } })) throw new Error('Cannot delete BOM with production history')
@@ -236,6 +246,7 @@ export async function deleteBOM(id: number) {
 
 export async function getPermanentBomCleanupPreview(bomId: number) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN')
     const data = await inventoryTransaction(prisma, tx => previewPermanentBomCleanup(tx, bomId))
     return { success: true, data }
@@ -244,6 +255,7 @@ export async function getPermanentBomCleanupPreview(bomId: number) {
 
 export async function permanentlyDeleteBOM(input: unknown) {
   try {
+    await requireSection("manufacturing");
     const session = await requireRole('ADMIN')
     const parsed = permanentBomCleanupSchema.safeParse(input)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -255,7 +267,8 @@ export async function permanentlyDeleteBOM(input: unknown) {
 
 export async function addBOMItem(data: unknown) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = addBOMItemSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const item = await inventoryTransaction(prisma, async tx => {
@@ -271,7 +284,8 @@ export async function addBOMItem(data: unknown) {
 
 export async function updateBOMItem(data: unknown) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateBOMItemSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const item = await inventoryTransaction(prisma, async tx => {
@@ -289,7 +303,8 @@ export async function updateBOMItem(data: unknown) {
 
 export async function removeBOMItem(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await inventoryTransaction(prisma, async tx => {
     const old = await tx.bomItem.findUnique({ where: { id } })
     if (!old) throw new Error('BOM item not found')
@@ -304,7 +319,8 @@ export async function removeBOMItem(id: number) {
 
 export async function addBOMStep(data: unknown) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = addBOMStepSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const step = await inventoryTransaction(prisma, async tx => {
@@ -320,7 +336,8 @@ export async function addBOMStep(data: unknown) {
 
 export async function updateBOMStep(data: unknown) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = updateBOMStepSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   const step = await inventoryTransaction(prisma, async tx => {
@@ -338,7 +355,8 @@ export async function updateBOMStep(data: unknown) {
 
 export async function removeBOMStep(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await inventoryTransaction(prisma, async tx => {
     const old = await tx.bomStep.findUnique({ where: { id } })
     if (!old) throw new Error('BOM step not found')
@@ -353,6 +371,7 @@ export async function removeBOMStep(id: number) {
 }
 
 export async function exportBOM(id: number) {
+  await requireSection("manufacturing");
   await requireAuth()
   const bom = await prisma.billOfMaterials.findUnique({
     where: { id },
@@ -375,6 +394,7 @@ export async function exportBOM(id: number) {
 // ─── BOM TEMPLATES ───────────────────────────────────
 
 export async function getBomTemplates() {
+  await requireSection("manufacturing");
   await requireAuth()
   const templates = await prisma.bomTemplate.findMany({ orderBy: { name: 'asc' } })
   return { success: true, data: templates }
@@ -382,7 +402,8 @@ export async function getBomTemplates() {
 
 export async function createBomTemplate(data: unknown) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = createBomTemplateSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -397,7 +418,8 @@ export async function createBomTemplate(data: unknown) {
 
 export async function deleteBomTemplate(id: number) {
   try {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+    await requireSection("manufacturing");
+    try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   await prisma.bomTemplate.delete({ where: { id } })
   revalidatePath('/manufacturing')
   return { success: true }
@@ -407,7 +429,8 @@ export async function deleteBomTemplate(id: number) {
 // ─── MRP ANALYSIS ────────────────────────────────────
 
 export async function getMRPAnalysis(bomId: number, qty: number) {
-  try { await requireManufacturingPermission('staffMrpPlanner') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireManufacturingPermission('staffMrpPlanner') } catch { return { success: false, error: 'Access denied' } }
   if (!Number.isSafeInteger(bomId) || bomId <= 0 || !Number.isSafeInteger(qty) || qty <= 0) return { success: false, error: 'Select a BOM and positive whole production quantity' }
   const bom = await prisma.billOfMaterials.findUnique({
     where: { id: bomId },
@@ -511,6 +534,7 @@ export async function getMRPAnalysis(bomId: number, qty: number) {
 const PRIORITY_SORT = priorityRank
 
 export async function getProductionOrders() {
+  await requireSection("manufacturing");
   await requireAuth()
   unstable_noStore()
   const orders = await prisma.productionOrder.findMany({
@@ -562,6 +586,7 @@ export async function getProductionOrders() {
 }
 
 export async function getAssignableStaff() {
+  await requireSection("manufacturing");
   await requireAuth()
   const staff = await prisma.staff.findMany({
     where: { status: 'Active' },
@@ -572,6 +597,7 @@ export async function getAssignableStaff() {
 }
 
 export async function getManufacturingCustomOrders() {
+  await requireSection("manufacturing");
   await requireAuth()
   const orders = await prisma.customOrder.findMany({
     where: { status: { not: 'DELIVERED' } },
@@ -599,6 +625,7 @@ export async function getManufacturingCustomOrders() {
 }
 
 export async function getScrapInventory() {
+  await requireSection("manufacturing");
   await requireAuth()
   const entries = await prisma.scrapInventory.findMany({
     orderBy: { createdAt: 'desc' },
@@ -619,7 +646,8 @@ export async function getScrapInventory() {
 export async function updateScrapDisposition(scrapId: number, action: 'REUSE' | 'DISPOSE') {
   // Scrap disposition (returning stock / writing off waste) is a manager action,
   // not a toggleable staff permission.
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
 
   const scrap = await prisma.scrapInventory.findUnique({ where: { id: scrapId } })
   if (!scrap) return { success: false, error: 'Scrap lot not found' }
@@ -665,7 +693,8 @@ export async function updateScrapDisposition(scrapId: number, action: 'REUSE' | 
 }
 
 export async function getCustomOrderInventory() {
-  try { await requireManufacturingPermission('staffCustomInventory') } catch { return { success: true, data: [] } }
+  try { await requireSection("manufacturing");
+    await requireManufacturingPermission('staffCustomInventory') } catch { return { success: true, data: [] } }
   const entries = await prisma.customOrderInventory.findMany({
     orderBy: { createdAt: 'desc' },
     include: {
@@ -678,6 +707,7 @@ export async function getCustomOrderInventory() {
 }
 
 export async function createProductionOrder(data: unknown) {
+  await requireSection("manufacturing");
   let actor: string
   try { actor = (await requireManufacturingPermission('staffCreateProductionOrder')).user.name } catch { return { success: false, error: 'Access denied' } }
   const parsed = createProductionOrderSchema.safeParse(data)
@@ -737,6 +767,7 @@ export async function createProductionOrder(data: unknown) {
 
 export async function startProduction(id: number) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, tx => transitionOrder(tx, id, 'IN_PROGRESS'))
     revalidatePath('/manufacturing'); revalidatePath('/staff-portal')
@@ -746,6 +777,7 @@ export async function startProduction(id: number) {
 
 export async function holdProduction(id: number) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, tx => transitionOrder(tx, id, 'ON_HOLD'))
     revalidatePath('/manufacturing'); revalidatePath('/staff-portal')
@@ -754,7 +786,8 @@ export async function holdProduction(id: number) {
 }
 
 export async function cancelProductionOrder(id: number, reason: string) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   if (typeof reason !== 'string' || !reason.trim() || reason.length > 2000) return { success: false, error: 'A cancellation reason is required (maximum 2000 characters)' }
   const order = await prisma.productionOrder.findUnique({
     where: { id },
@@ -811,6 +844,7 @@ export async function cancelProductionOrder(id: number, reason: string) {
 
 export async function deleteProductionOrder(id: number) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, async tx => {
       const order = await lockedOrder(tx, id)
@@ -827,6 +861,7 @@ export async function deleteProductionOrder(id: number) {
 
 export async function archiveFailedProduction(input: unknown) {
   try {
+    await requireSection("manufacturing");
     const session = await requireRole('ADMIN', 'MANAGER')
     const parsed = archiveFailedProductionSchema.safeParse(input)
     if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
@@ -838,6 +873,7 @@ export async function archiveFailedProduction(input: unknown) {
 
 export async function restoreArchivedProduction(id: number) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, tx => restoreArchivedProductionOrder(tx, id))
     revalidatePath('/manufacturing'); revalidatePath('/staff-portal')
@@ -847,6 +883,7 @@ export async function restoreArchivedProduction(id: number) {
 
 export async function updateProductionStep(stepId: number, status: string, actualMins?: number, assignedWorker?: string) {
   try {
+    await requireSection("manufacturing");
     await requireRole('ADMIN', 'MANAGER')
     await inventoryTransaction(prisma, async tx => {
       const result = await changeStep(tx, stepId, status, actualMins, assignedWorker)
@@ -858,7 +895,8 @@ export async function updateProductionStep(stepId: number, status: string, actua
 }
 
 export async function completeProduction(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = completeProductionSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
 
@@ -1062,7 +1100,8 @@ export async function completeProduction(data: unknown) {
 
 
 export async function recordQualityCheck(data: unknown) {
-  try { await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
+  try { await requireSection("manufacturing");
+    await requireRole('ADMIN', 'MANAGER') } catch { return { success: false, error: 'Access denied' } }
   const parsed = qualityCheckSchema.safeParse(data)
   if (!parsed.success) return { success: false, error: parsed.error.issues[0].message }
   try {
@@ -1117,6 +1156,7 @@ export async function recordQualityCheck(data: unknown) {
 // ─── ANALYTICS ───────────────────────────────────────
 
 export async function getManufacturingStats() {
+  await requireSection("manufacturing");
   await requireAuth()
   const [allOrders, workCenters, scrapEntries, customInventory] = await Promise.all([
     prisma.productionOrder.findMany({
@@ -1236,7 +1276,8 @@ export async function getManufacturingStats() {
 // ─── Staff Portal: Production Orders ────────────────────
 
 export async function getStaffProductionOrders(staffId: number) {
-  try { await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
+  try { await requireSection("staff-portal");
+    await requireAssignedStaffScope(staffId) } catch { return { success: false, error: 'Forbidden', data: [] } }
   const orders = await prisma.productionOrder.findMany({
     where: { assignedStaffId: staffId, archivedAt: null },  // Archived jobs remain available in admin history only.
     orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
@@ -1282,6 +1323,7 @@ export async function getStaffProductionOrders(staffId: number) {
 
 export async function staffUpdateProductionStep(staffId: number, stepId: number, status: string, notes?: string) {
   try {
+    await requireSection("staff-portal");
     await requireAssignedStaffScope(staffId)
     if (!['PENDING', 'IN_PROGRESS', 'DONE'].includes(status) || (notes !== undefined && notes.length > 5000)) throw new Error('Invalid step update')
     await inventoryTransaction(prisma, async tx => {
@@ -1295,6 +1337,7 @@ export async function staffUpdateProductionStep(staffId: number, stepId: number,
 
 export async function staffAddStepNote(staffId: number, stepId: number, notes: string) {
   try {
+    await requireSection("staff-portal");
     await requireAssignedStaffScope(staffId)
     if (!Number.isSafeInteger(stepId) || stepId <= 0 || typeof notes !== 'string' || !notes.trim() || notes.length > 5000) throw new Error('Invalid step note')
     await inventoryTransaction(prisma, async tx => {
@@ -1311,6 +1354,7 @@ export async function staffAddStepNote(staffId: number, stepId: number, notes: s
 
 export async function staffUpdateProductionProgress(staffId: number, orderId: number, actualQty: number, notes?: string) {
   try {
+    await requireSection("staff-portal");
     await requireAssignedStaffScope(staffId)
     if (!Number.isSafeInteger(actualQty) || actualQty < 0 || (notes !== undefined && notes.length > 5000)) throw new Error('Quantity must be a non-negative whole unit')
     await inventoryTransaction(prisma, async tx => {
@@ -1325,6 +1369,7 @@ export async function staffUpdateProductionProgress(staffId: number, orderId: nu
 
 export async function staffStartProduction(staffId: number, orderId: number) {
   try {
+    await requireSection("staff-portal");
     await requireAssignedStaffScope(staffId)
     await inventoryTransaction(prisma, tx => transitionOrder(tx, orderId, 'IN_PROGRESS', staffId))
     revalidatePath('/staff-portal'); revalidatePath('/manufacturing')

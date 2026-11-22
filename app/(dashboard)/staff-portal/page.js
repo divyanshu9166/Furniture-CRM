@@ -93,11 +93,11 @@ export default function StaffPortalPage() {
   const [attendanceLoading, setAttendanceLoading] = useState(false);
 
   useEffect(() => {
-    Promise.all([getStaff(), getProducts()]).then(([staffRes, productsRes]) => {
+    Promise.all([getStaff().catch(() => ({ success: false })), getProducts()]).then(([staffRes, productsRes]) => {
       if (staffRes.success) setStaff(staffRes.data);
       if (productsRes.success) setProducts(productsRes.data);
       setStaffLoading(false);
-    });
+    }).catch(() => setStaffLoading(false));
   }, []);
 
   const applyStaffLogin = (found) => {

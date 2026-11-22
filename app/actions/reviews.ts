@@ -1,9 +1,12 @@
 'use server'
 
+import { requireSection } from "@/lib/section-access";
+
 import { prisma } from '@/lib/db'
 import { revalidatePath } from 'next/cache'
 
 export async function getReviews() {
+  await requireSection("reviews");
   const reviews = await prisma.review.findMany({
     include: { contact: true },
     orderBy: { date: 'desc' },
@@ -25,6 +28,7 @@ export async function getReviews() {
 }
 
 export async function getReviewStats() {
+  await requireSection("reviews");
   const [total, avgRating, breakdown] = await Promise.all([
     prisma.review.count(),
     prisma.review.aggregate({ _avg: { rating: true } }),
@@ -47,6 +51,7 @@ export async function getReviewStats() {
 }
 
 export async function markReplied(id: number) {
+  await requireSection("reviews");
   const review = await prisma.review.update({
     where: { id },
     data: { replied: true },

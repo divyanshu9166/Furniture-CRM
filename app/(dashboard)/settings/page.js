@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import SenderSettings from '@/components/email/SenderSettings';
+import SectionAccessSettings from '@/components/SectionAccessSettings';
 import SendingSafetyPanel from '@/components/email/SendingSafetyPanel';
 import { changeSmtpPort, changeSmtpEncryption, smtpTransportProblem } from '@/lib/email-senders';
 import { Store, Users, Link2, Bell, Bot, Save, Plus, MapPin, Crosshair, ChevronDown, ChevronUp, Copy, Check, Eye, EyeOff, Upload, Loader2, Mail, Send, CheckCircle2, XCircle, Package, RefreshCw, User, FileText, ShieldCheck, Factory } from 'lucide-react';
@@ -1719,6 +1720,7 @@ export default function SettingsPage() {
 
           {activeTab === 'permissions' && (
             <div className="glass-card p-4 sm:p-6">
+              <SectionAccessSettings />
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-lg font-semibold text-foreground">Manufacturing Access</h2>
                 {permSaving && <span className="text-xs text-muted flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving…</span>}
